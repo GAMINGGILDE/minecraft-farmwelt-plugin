@@ -3,8 +3,8 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/minecraft-gilde/farmwelt-plugin/build.yml?branch=main&label=build)](https://github.com/minecraft-gilde/farmwelt-plugin/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/minecraft-gilde/farmwelt-plugin?label=release)](https://github.com/minecraft-gilde/farmwelt-plugin/releases)
 [![License](https://img.shields.io/github/license/minecraft-gilde/farmwelt-plugin)](LICENSE)
-![Java](https://img.shields.io/badge/Java-21-orange)
-![Paper](https://img.shields.io/badge/Paper-1.21.x-blue)
+![Java](https://img.shields.io/badge/Java-25-orange)
+![Paper](https://img.shields.io/badge/Paper-26.1.2-blue)
 ![Folia](https://img.shields.io/badge/Folia-supported-brightgreen)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.minecraft-gilde.de)
 
@@ -30,8 +30,8 @@ Das Plugin soll Spieler in Farmwelten lenken und Moderatoren entlasten. Es ist k
 ## Voraussetzungen
 
 - Paper/Folia-kompatibler Server.
-- Java 21.
-- Minecraft/Paper API 1.21.x, das Projekt baut aktuell gegen `paper-api:1.21.11-R0.1-SNAPSHOT`.
+- Java 25.
+- Minecraft/Paper API 26.1.2, das Projekt baut aktuell gegen `paper-api:26.1.2.build.66-stable`.
 - BetterRTP ist optional, aber für die Standard-Teleportbefehle empfohlen.
 - GriefPrevention ist optional, aber für Claim-Ausnahmen empfohlen.
 - EssentialsX ist keine Abhängigkeit.
@@ -151,7 +151,7 @@ resource-monitor:
 - Es gibt keine Höhenprüfung: Ein Material in `resources` wird auf jeder Y-Höhe erkannt.
 - Nur Materialien in diesen Listen zählen als relevante Ressourcen.
 - Eine Welt muss in `monitored-worlds` stehen und darf nicht in `ignored-worlds` stehen.
-- Die Standardconfig nutzt bewusst breite Materiallisten für Minecraft/Paper 1.21.11, unter anderem Holz/Stämme, Erze, Amethyst, Sand/Gravel/Clay/Mud, Terracotta, Eis, Nether- und End-Ressourcen. Entferne Materialien, die in deiner Hauptwelt ausdrücklich erlaubt sein sollen.
+- Die Standardconfig nutzt bewusst breite Materiallisten für Minecraft/Paper 26.1.2, unter anderem Holz/Stämme, Erze, Amethyst, Sand/Gravel/Clay/Mud, Terracotta, Eis, Nether- und End-Ressourcen. Entferne Materialien, die in deiner Hauptwelt ausdrücklich erlaubt sein sollen.
 
 ## Claims / GriefPrevention
 
@@ -378,11 +378,11 @@ resource-monitor:
 
 ## Entwicklungshinweise
 
-- Java/Gradle-Projekt mit Java 21 Toolchain.
+- Java/Gradle-Projekt mit Java 25 Toolchain.
 - Hauptpackage: `de.minecraftgilde.farmwelt`.
 - Hauptklasse: `FarmweltPlugin`.
 - Build: `./gradlew build` bzw. `.\gradlew.bat build`.
-- CI: `.github/workflows/build.yml` führt den Gradle-Build mit Temurin Java 21 aus.
+- CI: `.github/workflows/build.yml` führt den Gradle-Build mit Temurin Java 25 aus.
 - Release: `.github/workflows/release.yml` baut bei veröffentlichten GitHub Releases eine JAR und lädt sie als Release-Asset hoch.
 - Wichtige Bereiche:
   - `command/`: `/farmwelt` und Subcommands.

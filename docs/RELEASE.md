@@ -1,6 +1,6 @@
 # Release erstellen
 
-Dieses Projekt baut die Plugin-JAR automatisch, sobald ein GitHub Release veröffentlicht wird. Die Action `.github/workflows/release.yml` checkt den Release-Tag aus, baut mit Java 21 und lädt die fertige JAR als Asset in denselben GitHub Release hoch.
+Dieses Projekt baut die Plugin-JAR automatisch, sobald ein GitHub Release veröffentlicht wird. Die Action `.github/workflows/release.yml` checkt den Release-Tag aus, baut mit Java 25 und lädt die fertige JAR als Asset in denselben GitHub Release hoch.
 
 ## Versionierung
 
