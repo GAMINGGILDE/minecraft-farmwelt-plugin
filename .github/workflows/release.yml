@@ -37,7 +37,7 @@ jobs:
           echo "asset_name=Farmwelt-$VERSION.jar" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.release.outputs.tag }}
 
