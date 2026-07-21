@@ -157,7 +157,7 @@ Empfohlen:
 - `audit.notify-staff: true`
 - `audit.log-cooldown-seconds` nicht zu niedrig setzen; `120` Sekunden ist ein sinnvoller Startwert für Live-Audit
 - `actions.jail.enabled: false`
-- Die breiten 1.21.11-Standardlisten bewusst prüfen und Materialien entfernen, die in der Hauptwelt erlaubt bleiben sollen.
+- Die breiten 26.1.2-Standardlisten bewusst prüfen und Materialien entfernen, die in der Hauptwelt erlaubt bleiben sollen.
 
 ### Phase 2: Warn
 
