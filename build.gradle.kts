@@ -5,7 +5,7 @@ plugins {
 group = "de.minecraftgilde"
 
 val releaseVersion = providers.gradleProperty("releaseVersion")
-    .orElse("1.0.3-SNAPSHOT")
+    .orElse("2.0.0-SNAPSHOT")
 
 version = releaseVersion.get()
 
@@ -21,6 +21,10 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.2")
+    testRuntimeOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
 }
 
 java {
@@ -37,6 +41,10 @@ tasks.processResources {
     filesMatching("paper-plugin.yml") {
         expand("version" to pluginVersion)
     }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.jar {

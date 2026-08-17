@@ -5,6 +5,9 @@ import de.minecraftgilde.farmwelt.gui.TeleportAction;
 import de.minecraftgilde.farmwelt.model.ResourceWorldRule;
 import de.minecraftgilde.farmwelt.model.ResourceWorldType;
 import de.minecraftgilde.farmwelt.model.ViolationAction;
+import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
+import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -28,7 +31,9 @@ public final class ConfigManager {
     private static final int DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS = 120;
 
     private final JavaPlugin plugin;
+    private final ResetIntervalParser resetIntervalParser = new ResetIntervalParser();
     private List<FarmweltMenuItem> farmweltMenuItems = List.of();
+    private List<FarmworldResetConfig> farmworldResetConfigs = List.of();
     private boolean resourceMonitorEnabled;
     private String resourceMonitorMode = "audit";
     private Set<String> monitoredWorlds = Set.of();
@@ -75,6 +80,44 @@ public final class ConfigManager {
 
     public List<FarmweltMenuItem> getFarmweltMenuItems() {
         return farmweltMenuItems;
+    }
+
+    public void loadFarmworldResetConfigs() {
+        ConfigurationSection section = plugin.getConfig().getConfigurationSection("farmworlds");
+        if (section == null) {
+            farmworldResetConfigs = List.of();
+            return;
+        }
+
+        List<FarmworldResetConfig> loadedConfigs = new ArrayList<>();
+        for (String farmworldKey : section.getKeys(false)) {
+            ConfigurationSection farmworldSection = section.getConfigurationSection(farmworldKey);
+            if (farmworldSection == null) {
+                continue;
+            }
+
+            ConfigurationSection resetSection = farmworldSection.getConfigurationSection("reset");
+            if (resetSection == null) {
+                continue;
+            }
+
+            boolean enabled = farmworldSection.getBoolean("enabled", true)
+                    && resetSection.getBoolean("enabled", false);
+            FarmworldResetConfig resetConfig = loadFarmworldResetConfig(
+                    farmworldKey,
+                    resetSection,
+                    enabled
+            );
+            if (resetConfig != null) {
+                loadedConfigs.add(resetConfig);
+            }
+        }
+
+        farmworldResetConfigs = List.copyOf(loadedConfigs);
+    }
+
+    public List<FarmworldResetConfig> getFarmworldResetConfigs() {
+        return farmworldResetConfigs;
     }
 
     public void loadResourceMonitorConfig() {
@@ -268,6 +311,36 @@ public final class ConfigManager {
                 slot,
                 section.getStringList("lore"),
                 teleportAction
+        );
+    }
+
+    private FarmworldResetConfig loadFarmworldResetConfig(
+            String farmworldKey,
+            ConfigurationSection resetSection,
+            boolean enabled
+    ) {
+        String worldName = resetSection.getString("world");
+        if (worldName == null || worldName.isBlank()) {
+            plugin.getLogger().warning("Reset-Konfiguration für Farmwelt '" + farmworldKey
+                    + "' enthält keinen Bukkit-Weltnamen. Reset für diese Farmwelt wurde deaktiviert.");
+            return null;
+        }
+
+        Object intervalValue = resetSection.get("interval");
+        String intervalText = intervalValue instanceof String value ? value : null;
+        Optional<Duration> interval = resetIntervalParser.parse(intervalText);
+        if (interval.isEmpty()) {
+            plugin.getLogger().warning("Ungültiges Reset-Intervall '" + String.valueOf(intervalValue)
+                    + "' für Farmwelt '" + farmworldKey
+                    + "'. Reset für diese Farmwelt wurde deaktiviert.");
+            return null;
+        }
+
+        return new FarmworldResetConfig(
+                farmworldKey,
+                worldName.trim(),
+                enabled,
+                interval.orElseThrow()
         );
     }
 

@@ -5,12 +5,16 @@ import de.minecraftgilde.farmwelt.config.ConfigManager;
 import de.minecraftgilde.farmwelt.gui.FarmweltMenu;
 import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
 import de.minecraftgilde.farmwelt.listener.ResourceBreakListener;
+import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
+import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
+import de.minecraftgilde.farmwelt.reset.YamlResetStateRepository;
 import de.minecraftgilde.farmwelt.service.ClaimProtectionService;
 import de.minecraftgilde.farmwelt.service.FarmweltTeleportService;
 import de.minecraftgilde.farmwelt.service.JailActionService;
 import de.minecraftgilde.farmwelt.service.MessageService;
 import de.minecraftgilde.farmwelt.service.ResourceDetectionService;
 import de.minecraftgilde.farmwelt.service.ViolationService;
+import java.time.Clock;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FarmweltPlugin extends JavaPlugin {
@@ -23,6 +27,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     private MessageService messageService;
     private ViolationService violationService;
     private JailActionService jailActionService;
+    private FarmworldResetService resetService;
 
     @Override
     public void onEnable() {
@@ -30,7 +35,16 @@ public final class FarmweltPlugin extends JavaPlugin {
 
         configManager = new ConfigManager(this);
         configManager.loadFarmweltMenuItems();
+        configManager.loadFarmworldResetConfigs();
         configManager.loadResourceMonitorConfig();
+
+        resetService = new FarmworldResetService(
+                new YamlResetStateRepository(getDataFolder().toPath().resolve("reset-state.yml"), getLogger()),
+                Clock.systemUTC(),
+                getLogger()
+        );
+        resetService.reload(configManager.getFarmworldResetConfigs());
+        logResetStatus();
 
         farmweltMenu = new FarmweltMenu(configManager);
         teleportService = new FarmweltTeleportService(this);
@@ -66,7 +80,10 @@ public final class FarmweltPlugin extends JavaPlugin {
     public void reloadFarmweltConfiguration() {
         reloadConfig();
         configManager.loadFarmweltMenuItems();
+        configManager.loadFarmworldResetConfigs();
         configManager.loadResourceMonitorConfig();
+        resetService.reload(configManager.getFarmworldResetConfigs());
+        logResetStatus();
         claimProtectionService.reload();
         violationService.reload(configManager);
     }
@@ -80,6 +97,17 @@ public final class FarmweltPlugin extends JavaPlugin {
                 violationService,
                 configManager
         );
+    }
+
+    private void logResetStatus() {
+        getLogger().info("Reset-System: " + resetService.getConfiguredWorlds().size()
+                + " Farmwelten konfiguriert.");
+        for (FarmworldResetConfig resetConfig : resetService.getConfiguredWorlds()) {
+            resetService.getState(resetConfig.farmworldKey()).ifPresent(state -> getLogger().info(
+                    "Reset-System: Farmwelt '" + resetConfig.farmworldKey()
+                            + "' nächster Reset: " + state.nextReset()
+            ));
+        }
     }
 
     private void registerCommand(FarmweltCommand farmweltCommand) {

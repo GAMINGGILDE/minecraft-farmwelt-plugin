@@ -7,6 +7,15 @@ farmworlds:
     lore:
       - "Normale Farmwelt"
       - "Für Holz, Sand, Erde und weitere Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # In Phase 1 wird noch kein Reset automatisch ausgeführt.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "overworld" verwechseln.
+      world: "farmwelt"
+      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "30d"
     teleport:
       type: command
       sender: player
@@ -19,6 +28,15 @@ farmworlds:
     slot: 13
     lore:
       - "Farmwelt für Nether-Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # In Phase 1 wird noch kein Reset automatisch ausgeführt.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "nether" verwechseln.
+      world: "netherfarm"
+      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "30d"
     teleport:
       type: command
       sender: player
@@ -31,6 +49,15 @@ farmworlds:
     slot: 15
     lore:
       - "Farmwelt für End-Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # In Phase 1 wird noch kein Reset automatisch ausgeführt.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "end" verwechseln.
+      world: "endfarm"
+      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "60d"
     teleport:
       type: command
       sender: player
