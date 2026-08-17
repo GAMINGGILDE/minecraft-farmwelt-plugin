@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
-/** Restricts version-sensitive DragonBattle saved-data writes to reviewed Minecraft versions. */
+/** Restricts version-sensitive DragonBattle saved-data and runtime access to reviewed versions. */
 final class EndDragonFightCompatibility {
 
     static final String SUPPORTED_MINECRAFT_VERSION = "26.1.2";
@@ -34,7 +34,7 @@ final class EndDragonFightCompatibility {
             return;
         }
         throw new IllegalStateException(
-                "DragonBattle-Saved-Data-Manipulation ist f\u00fcr Minecraft-Version '"
+                "DragonBattle-Kompatibilitätszugriff ist f\u00fcr Minecraft-Version '"
                         + currentVersion + "' nicht freigegeben. Unterst\u00fctzte Version: "
                         + SUPPORTED_MINECRAFT_VERSION
         );

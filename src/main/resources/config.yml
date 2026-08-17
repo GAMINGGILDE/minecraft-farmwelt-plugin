@@ -76,7 +76,7 @@ farmworlds:
         world-border:
           size: 20000
         end:
-          # false entfernt vorhandene Enderdrachen; --dragon überschreibt dies nur einmalig.
+          # false unterdrückt Drachen; --dragon startet einmalig einen frischen Erstkampf.
           dragon: false
     teleport:
       type: command

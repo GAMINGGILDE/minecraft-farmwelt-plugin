@@ -1,5 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT;
+import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode.SUPPRESSED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -98,7 +100,7 @@ class WorldsFarmworldLifecycleServiceTest {
         AtomicReference<WorldsFarmworldLifecycleService> serviceReference = new AtomicReference<>();
         WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
             publishRegenerationEvents(serviceReference.get(), world);
-            assertPreparedFightData(fightData);
+            assertPreparedFightData(fightData, SUPPRESSED);
             return CompletableFuture.completedFuture(regenerated);
         });
         WorldsFarmworldLifecycleService service = service(worldsAccess);
@@ -106,11 +108,11 @@ class WorldsFarmworldLifecycleServiceTest {
 
         World result = service.regenerate(
                 original,
-                new FarmworldRegenerationOptions(true)
+                new FarmworldRegenerationOptions(SUPPRESSED)
         ).join();
 
         assertSame(regenerated, result);
-        assertPreparedFightData(fightData);
+        assertPreparedFightData(fightData, SUPPRESSED);
         try (Stream<Path> files = Files.list(fightData.getParent())) {
             assertTrue(files.noneMatch(path ->
                     path.getFileName().toString().contains(".farmwelt-reset-")
@@ -127,7 +129,7 @@ class WorldsFarmworldLifecycleServiceTest {
         AtomicReference<WorldsFarmworldLifecycleService> serviceReference = new AtomicReference<>();
         WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
             publishRegenerationEvents(serviceReference.get(), world);
-            assertPreparedFightData(fightData);
+            assertPreparedFightData(fightData, SUPPRESSED);
             return CompletableFuture.failedFuture(failure);
         });
         WorldsFarmworldLifecycleService service = service(worldsAccess);
@@ -137,12 +139,37 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(true)
+                        new FarmworldRegenerationOptions(SUPPRESSED)
                 ).join()
         );
 
         assertSame(failure, exception.getCause());
         assertEquals("old fight", Files.readString(fightData));
+    }
+
+    @Test
+    void preparesFreshInitialFightDataWhenDragonShouldSpawn(@TempDir Path tempDir)
+            throws Exception {
+        Path fightData = createFightData(tempDir, "previously killed dragon");
+        World original = world("endfarm", tempDir);
+        World regenerated = world("endfarm", tempDir.resolve("regenerated"));
+        AtomicReference<WorldsFarmworldLifecycleService> serviceReference =
+                new AtomicReference<>();
+        WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
+            publishRegenerationEvents(serviceReference.get(), world);
+            assertPreparedFightData(fightData, INITIAL_FIGHT);
+            return CompletableFuture.completedFuture(regenerated);
+        });
+        WorldsFarmworldLifecycleService service = service(worldsAccess);
+        serviceReference.set(service);
+
+        World result = service.regenerate(
+                original,
+                new FarmworldRegenerationOptions(INITIAL_FIGHT)
+        ).join();
+
+        assertSame(regenerated, result);
+        assertPreparedFightData(fightData, INITIAL_FIGHT);
     }
 
     @Test
@@ -181,7 +208,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         world("endfarm", tempDir),
-                        new FarmworldRegenerationOptions(true)
+                        new FarmworldRegenerationOptions(SUPPRESSED)
                 ).join()
         );
 
@@ -205,7 +232,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(true)
+                        new FarmworldRegenerationOptions(SUPPRESSED)
                 ).join()
         );
 
@@ -237,7 +264,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(true)
+                        new FarmworldRegenerationOptions(SUPPRESSED)
                 ).join()
         );
 
@@ -302,7 +329,11 @@ class WorldsFarmworldLifecycleServiceTest {
         service.prepareEndDragonFightData(new WorldUnloadEvent(world));
     }
 
-    private static void assertPreparedFightData(Path fightData) throws java.io.IOException {
+    private static void assertPreparedFightData(
+            Path fightData,
+            FarmworldRegenerationOptions.EndDragonFightDataMode mode
+    ) throws java.io.IOException {
+        boolean initialFight = mode == INITIAL_FIGHT;
         try (DataInputStream data = new DataInputStream(
                 new GZIPInputStream(Files.newInputStream(fightData))
         )) {
@@ -315,9 +346,9 @@ class WorldsFarmworldLifecycleServiceTest {
 
             assertEquals(10, data.readUnsignedByte());
             assertEquals("data", data.readUTF());
-            assertBooleanTag(data, "needs_state_scanning", false);
-            assertBooleanTag(data, "dragon_killed", true);
-            assertBooleanTag(data, "previously_killed", true);
+            assertBooleanTag(data, "needs_state_scanning", initialFight);
+            assertBooleanTag(data, "dragon_killed", !initialFight);
+            assertBooleanTag(data, "previously_killed", !initialFight);
             assertEquals(0, data.readUnsignedByte());
             assertEquals(0, data.readUnsignedByte());
         }

@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import io.papermc.paper.event.block.DragonEggFormEvent;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -41,6 +42,9 @@ public final class BukkitFarmworldPostResetInitializer
     private final Logger logger;
     private final GameruleValueConverter valueConverter;
     private final GameRuleAccess gameRuleAccess;
+    private final EndDragonFightRuntimeAccess dragonFightRuntimeAccess;
+    private final AtomicReference<Set<String>> configuredEndWorlds =
+            new AtomicReference<>(Set.of());
     private final AtomicReference<Set<String>> configuredDragonSuppressionWorlds =
             new AtomicReference<>(Set.of());
     private final ConcurrentHashMap<String, Integer> activeResetDragonSuppressionWorlds =
@@ -49,6 +53,7 @@ public final class BukkitFarmworldPostResetInitializer
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> temporaryDragonAllowWorlds =
             new ConcurrentHashMap<>();
+    private final Set<String> pendingOneTimeDragonSpawnWorlds = ConcurrentHashMap.newKeySet();
     private final Set<String> loggedSuppressedDragonSpawns = ConcurrentHashMap.newKeySet();
 
     public BukkitFarmworldPostResetInitializer(
@@ -56,7 +61,14 @@ public final class BukkitFarmworldPostResetInitializer
             FarmweltScheduler scheduler,
             Logger logger
     ) {
-        this(plugin, scheduler, logger, new GameruleValueConverter(), registryResolver());
+        this(
+                plugin,
+                scheduler,
+                logger,
+                new GameruleValueConverter(),
+                registryResolver(),
+                EndDragonFightRuntimeAccess.runningServer()
+        );
     }
 
     BukkitFarmworldPostResetInitializer(
@@ -64,13 +76,18 @@ public final class BukkitFarmworldPostResetInitializer
             FarmweltScheduler scheduler,
             Logger logger,
             GameruleValueConverter valueConverter,
-            GameRuleAccess gameRuleAccess
+            GameRuleAccess gameRuleAccess,
+            EndDragonFightRuntimeAccess dragonFightRuntimeAccess
     ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.valueConverter = Objects.requireNonNull(valueConverter, "valueConverter");
         this.gameRuleAccess = Objects.requireNonNull(gameRuleAccess, "gameRuleAccess");
+        this.dragonFightRuntimeAccess = Objects.requireNonNull(
+                dragonFightRuntimeAccess,
+                "dragonFightRuntimeAccess"
+        );
     }
 
     /** Atomically replaces the persistent spawn-guard policy with the supplied configuration. */
@@ -78,23 +95,32 @@ public final class BukkitFarmworldPostResetInitializer
             Collection<FarmworldResetConfig> configurations
     ) {
         Objects.requireNonNull(configurations, "configurations");
+        Set<String> synchronizedEndWorlds = new HashSet<>();
         Set<String> synchronizedWorlds = new HashSet<>();
         for (FarmworldResetConfig config : configurations) {
             Objects.requireNonNull(config, "configurations darf keine null-Eintr\u00e4ge enthalten");
+            if (config.enabled() && config.farmworldType() == FarmworldType.END) {
+                synchronizedEndWorlds.add(config.worldName());
+            }
             if (suppressesEnderDragon(config)) {
                 synchronizedWorlds.add(config.worldName());
             }
         }
 
+        Set<String> newEndWorlds = Set.copyOf(synchronizedEndWorlds);
+        Set<String> previousEndWorlds = configuredEndWorlds.get();
         Set<String> newWorlds = Set.copyOf(synchronizedWorlds);
         Set<String> previousWorlds = configuredDragonSuppressionWorlds.get();
         Set<String> changedWorlds = changedWorlds(previousWorlds, newWorlds);
+        configuredEndWorlds.set(newEndWorlds);
         configuredDragonSuppressionWorlds.set(newWorlds);
         try {
             logConfiguredGuardChanges(previousWorlds, newWorlds);
+            changedWorlds.forEach(pendingOneTimeDragonSpawnWorlds::remove);
             changedWorlds.forEach(loggedSuppressedDragonSpawns::remove);
             logger.info("Dragon-Spawn-Guards mit aktueller Konfiguration synchronisiert.");
         } catch (RuntimeException exception) {
+            configuredEndWorlds.set(previousEndWorlds);
             configuredDragonSuppressionWorlds.set(previousWorlds);
             throw exception;
         }
@@ -109,6 +135,7 @@ public final class BukkitFarmworldPostResetInitializer
         }
 
         String worldName = config.worldName();
+        pendingOneTimeDragonSpawnWorlds.remove(worldName);
         if (options.allowEnderDragon()) {
             incrementPolicy(temporaryDragonAllowWorlds, worldName);
             loggedSuppressedDragonSpawns.remove(worldName);
@@ -126,10 +153,12 @@ public final class BukkitFarmworldPostResetInitializer
 
     /** Clears all persistent and temporary guard state during plugin shutdown. */
     public synchronized void shutdownDragonSpawnGuards() {
+        configuredEndWorlds.set(Set.of());
         configuredDragonSuppressionWorlds.set(Set.of());
         activeResetDragonSuppressionWorlds.clear();
         activeResetDragonAllowWorlds.clear();
         temporaryDragonAllowWorlds.clear();
+        pendingOneTimeDragonSpawnWorlds.clear();
         loggedSuppressedDragonSpawns.clear();
     }
 
@@ -137,7 +166,8 @@ public final class BukkitFarmworldPostResetInitializer
     public boolean shouldSuppressEnderDragonSpawn(String worldName) {
         Objects.requireNonNull(worldName, "worldName");
         if (temporaryDragonAllowWorlds.containsKey(worldName)
-                || activeResetDragonAllowWorlds.containsKey(worldName)) {
+                || activeResetDragonAllowWorlds.containsKey(worldName)
+                || pendingOneTimeDragonSpawnWorlds.contains(worldName)) {
             return false;
         }
         return configuredDragonSuppressionWorlds.get().contains(worldName)
@@ -159,6 +189,42 @@ public final class BukkitFarmworldPostResetInitializer
             logger.info("Verz\u00f6gerten Enderdrachen-Spawn in '" + worldName
                     + "' gem\u00e4\u00df Dragon-Policy verhindert.");
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void completeOneTimeEnderDragonSpawn(CreatureSpawnEvent event) {
+        if (event.isCancelled() || !(event.getEntity() instanceof EnderDragon dragon)) {
+            return;
+        }
+        String worldName = dragon.getWorld().getName();
+        if (pendingOneTimeDragonSpawnWorlds.remove(worldName)) {
+            logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr '" + worldName
+                    + "' beim erfolgreichen Spawn eingel\u00f6st.");
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void ensureExitPortalAfterDragonKill(DragonEggFormEvent event) {
+        World world = event.getBlock().getWorld();
+        if (!configuredEndWorlds.get().contains(world.getName())) {
+            return;
+        }
+
+        DragonBattle battle = event.getDragonBattle();
+        scheduler.runRegion(world, 0, 0, () -> {
+            dragonFightRuntimeAccess.suppress(battle);
+            logger.info("Aktives End-Ausgangsportal nach dem Drachenkampf sichergestellt.");
+            return null;
+        }).whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                logger.log(
+                        Level.SEVERE,
+                        "End-Ausgangsportal konnte nach dem Drachenkampf in '"
+                                + world.getName() + "' nicht sichergestellt werden.",
+                        unwrap(failure)
+                );
+            }
+        });
     }
 
     @Override
@@ -268,28 +334,21 @@ public final class BukkitFarmworldPostResetInitializer
             return CompletableFuture.completedFuture(null);
         }
         if (options.allowEnderDragon()) {
-            logger.info("Enderdrache f\u00fcr diesen Reset ausdr\u00fccklich erlaubt.");
-            return CompletableFuture.completedFuture(null);
+            return prepareAllowedEndDragon(config, world, true);
         }
         if (config.postReset().end().isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
         if (config.postReset().end().orElseThrow().dragon()) {
-            logger.info("Enderdrache gem\u00e4\u00df Post-Reset-Konfiguration erlaubt.");
-            return CompletableFuture.completedFuture(null);
+            return prepareAllowedEndDragon(config, world, false);
         }
 
         logger.info("Dragon-Policy f\u00fcr '" + world.getName() + "' wird angewendet.");
         // DragonBattle and the central exit portal are owned by the End origin region on Folia.
         return scheduler.runRegion(world, 0, 0, () -> {
             DragonBattle battle = requireDragonBattle(world);
-            if (battle.generateEndPortal(true)) {
-                logger.info("Aktives End-Ausgangsportal f\u00fcr die Dragon-Policy erzeugt.");
-            } else {
-                logger.info("End-Ausgangsportal f\u00fcr die Dragon-Policy bereits vorhanden.");
-            }
-            battle.setPreviouslyKilled(true);
-            logger.info("DragonBattle als bereits besiegt markiert.");
+            dragonFightRuntimeAccess.suppress(battle);
+            logger.info("DragonBattle vollständig beendet und aktives End-Ausgangsportal erzeugt.");
             return null;
         }).thenCompose(ignored -> scheduler.runGlobal(() -> inspectDragonPolicy(world)))
                 .thenCompose(snapshot -> {
@@ -304,6 +363,43 @@ public final class BukkitFarmworldPostResetInitializer
                             ))
                             .thenCompose(verification -> finishDragonPolicy(world, verification));
                 });
+    }
+
+    private CompletableFuture<Void> prepareAllowedEndDragon(
+            FarmworldResetConfig config,
+            World world,
+        boolean oneTimeOverride
+    ) {
+        return scheduler.runRegion(world, 0, 0, () -> {
+            DragonBattle battle = requireDragonBattle(world);
+            dragonFightRuntimeAccess.prepareInitialFight(battle);
+            if (battle.hasBeenPreviouslyKilled()) {
+                throw new IllegalStateException(
+                        "DragonBattle konnte nicht auf einen frischen Erstkampf gesetzt werden."
+                );
+            }
+            logger.info("DragonBattle als frischer Erstkampf initialisiert.");
+
+            if (oneTimeOverride) {
+                if (suppressesEnderDragon(config)) {
+                    EnderDragon activeDragon = battle.getEnderDragon();
+                    if (activeDragon == null || !activeDragon.isValid() || activeDragon.isDead()) {
+                        pendingOneTimeDragonSpawnWorlds.add(world.getName());
+                        logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr den verz\u00f6gerten "
+                                + "Vanilla-Spawn in '" + world.getName() + "' vorgemerkt.");
+                    } else {
+                        pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                    }
+                } else {
+                    pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                }
+                logger.info("Enderdrache f\u00fcr diesen Reset ausdr\u00fccklich aktiviert.");
+            } else {
+                pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                logger.info("Enderdrache gem\u00e4\u00df Post-Reset-Konfiguration aktiviert.");
+            }
+            return null;
+        });
     }
 
     private CompletableFuture<Void> finishDragonPolicy(

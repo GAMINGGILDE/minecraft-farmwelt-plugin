@@ -17,6 +17,8 @@ class EndDragonFightDataStoreTest {
 
     private static final Path FIGHT_DATA =
             Path.of("data", "minecraft", "ender_dragon_fight.dat");
+    private static final FarmworldRegenerationOptions.EndDragonFightDataMode SUPPRESSED =
+            FarmworldRegenerationOptions.EndDragonFightDataMode.SUPPRESSED;
 
     @Test
     void stageBacksUpExistingDataAndCommitRemovesOnlyBackup(@TempDir Path worldFolder)
@@ -24,7 +26,7 @@ class EndDragonFightDataStoreTest {
         Path fightData = writeFightData(worldFolder, "original");
         EndDragonFightDataStore store = new EndDragonFightDataStore(4790);
 
-        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder);
+        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder, SUPPRESSED);
 
         assertTrue(staged.hadFightData());
         Path backup = staged.backup().orElseThrow();
@@ -42,7 +44,7 @@ class EndDragonFightDataStoreTest {
     void rollbackRestoresBackedUpFightData(@TempDir Path worldFolder) throws Exception {
         Path fightData = writeFightData(worldFolder, "original");
         EndDragonFightDataStore store = new EndDragonFightDataStore(4790);
-        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder);
+        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder, SUPPRESSED);
 
         store.rollback(staged);
 
@@ -54,7 +56,7 @@ class EndDragonFightDataStoreTest {
     void rollbackRejectsManipulatedPreparedFile(@TempDir Path worldFolder) throws Exception {
         Path fightData = writeFightData(worldFolder, "original");
         EndDragonFightDataStore store = new EndDragonFightDataStore(4790);
-        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder);
+        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder, SUPPRESSED);
         Files.writeString(fightData, "manipulated");
 
         IOException exception = assertThrows(IOException.class, () -> store.rollback(staged));
@@ -68,7 +70,7 @@ class EndDragonFightDataStoreTest {
     void rollbackFailsClosedWhenBackupIsMissing(@TempDir Path worldFolder) throws Exception {
         Path fightData = writeFightData(worldFolder, "original");
         EndDragonFightDataStore store = new EndDragonFightDataStore(4790);
-        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder);
+        EndDragonFightDataStore.StagedData staged = store.stage(worldFolder, SUPPRESSED);
         Files.delete(staged.backup().orElseThrow());
 
         IOException exception = assertThrows(IOException.class, () -> store.rollback(staged));
@@ -83,7 +85,7 @@ class EndDragonFightDataStoreTest {
 
         assertThrows(
                 IOException.class,
-                () -> new EndDragonFightDataStore(4790).stage(missingWorld)
+                () -> new EndDragonFightDataStore(4790).stage(missingWorld, SUPPRESSED)
         );
         assertFalse(Files.exists(missingWorld));
     }
@@ -99,7 +101,7 @@ class EndDragonFightDataStoreTest {
 
         assertThrows(
                 IOException.class,
-                () -> new EndDragonFightDataStore(4790).stage(worldFolder)
+                () -> new EndDragonFightDataStore(4790).stage(worldFolder, SUPPRESSED)
         );
         assertEquals("external", Files.readString(external));
         assertTrue(Files.isSymbolicLink(fightData));
@@ -114,7 +116,7 @@ class EndDragonFightDataStoreTest {
 
         assertThrows(
                 IOException.class,
-                () -> new EndDragonFightDataStore(4790).stage(worldFolder)
+                () -> new EndDragonFightDataStore(4790).stage(worldFolder, SUPPRESSED)
         );
         assertFalse(Files.exists(externalData.resolve("minecraft")));
     }

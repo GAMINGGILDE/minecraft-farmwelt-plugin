@@ -1,7 +1,9 @@
 package de.minecraftgilde.farmwelt.reset;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT;
+import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE;
+import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode.SUPPRESSED;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Duration;
 import java.util.Map;
@@ -11,32 +13,32 @@ import org.junit.jupiter.api.Test;
 class FarmworldRegenerationOptionsTest {
 
     @Test
-    void resetsFightDataOnlyForSuppressedEndDragonPolicy() {
+    void selectsFreshFightDataForTheEffectiveEndDragonPolicy() {
         FarmworldResetConfig dragonSuppressed = config(
                 FarmworldType.END,
                 Optional.of(new EndPostResetConfig(false))
         );
 
-        assertTrue(FarmworldRegenerationOptions.forReset(
+        assertEquals(SUPPRESSED, FarmworldRegenerationOptions.forReset(
                 dragonSuppressed,
                 ResetOptions.defaults()
-        ).resetEndDragonFightData());
-        assertFalse(FarmworldRegenerationOptions.forReset(
+        ).endDragonFightDataMode());
+        assertEquals(INITIAL_FIGHT, FarmworldRegenerationOptions.forReset(
                 dragonSuppressed,
                 ResetOptions.allowingEnderDragon()
-        ).resetEndDragonFightData());
-        assertFalse(FarmworldRegenerationOptions.forReset(
+        ).endDragonFightDataMode());
+        assertEquals(INITIAL_FIGHT, FarmworldRegenerationOptions.forReset(
                 config(FarmworldType.END, Optional.of(new EndPostResetConfig(true))),
                 ResetOptions.defaults()
-        ).resetEndDragonFightData());
-        assertFalse(FarmworldRegenerationOptions.forReset(
+        ).endDragonFightDataMode());
+        assertEquals(PRESERVE, FarmworldRegenerationOptions.forReset(
                 config(FarmworldType.OVERWORLD, Optional.empty()),
                 ResetOptions.defaults()
-        ).resetEndDragonFightData());
-        assertFalse(FarmworldRegenerationOptions.forReset(
+        ).endDragonFightDataMode());
+        assertEquals(PRESERVE, FarmworldRegenerationOptions.forReset(
                 config(FarmworldType.NETHER, Optional.empty()),
                 ResetOptions.defaults()
-        ).resetEndDragonFightData());
+        ).endDragonFightDataMode());
     }
 
     private static FarmworldResetConfig config(

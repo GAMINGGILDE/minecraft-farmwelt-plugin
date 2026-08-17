@@ -90,14 +90,14 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 | `/farmwelt info` | Zeigt Version, geladene Farmwelten, Monitor-Modus, Hook-Status und Jail-Modus. | `farmwelt.admin` | Admins |
 | `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` | Admins |
 | `/farmwelt reset force <welt>` | Startet sofort die vollständige sichere Reset-Pipeline. | `farmwelt.admin.reset` | Admins |
-| `/farmwelt reset force end --dragon` | Erlaubt nur für diesen End-Reset den von Minecraft erzeugten Enderdrachen. | `farmwelt.admin.reset` | Admins |
+| `/farmwelt reset force end --dragon` | Initialisiert nur für diesen End-Reset einen frischen Vanilla-Drachenkampf. | `farmwelt.admin.reset` | Admins |
 | `/farmwelt debug claim` | Prüft den Claim-Provider und ob die aktuelle Spielerposition in einem Claim liegt. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug monitor` | Schaltet einen Debug-Modus um; danach kann ein Block per Rechtsklick geprüft werden. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug violations [spieler]` | Zeigt den aktuellen Violation-Status des eigenen oder eines online Spielers. | `farmwelt.admin` | Admins/Moderation |
 
 Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
 
-`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung, Post-Reset-Initialisierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline. `--dragon` ist nur für die End-Farmwelt zulässig, beeinflusst ausschließlich deren einmalige Post-Reset-Policy und ändert die Config nicht.
+`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung, Post-Reset-Initialisierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline. `--dragon` ist nur für die End-Farmwelt zulässig. Es setzt den DragonBattle-Zustand für diesen Reset auf einen frischen Erstkampf und hält die einmalige Spawn-Freigabe bei `dragon: false` bis zum tatsächlichen Vanilla-Spawn offen; die Config wird dabei nicht geändert. Ohne `--dragon` beendet `dragon: false` den geladenen Kampf vollständig, blendet die Bossbar aus und erzeugt ein aktives End-Ausgangsportal. Nach dem Tod eines freigegebenen Drachen wird das aktive Ausgangsportal in der End-Farmwelt nochmals verifiziert und bei Bedarf aufgebaut.
 
 Nach einer Regeneration können ausschließlich konfigurierte Gamerules, eine WorldBorder-Größe und für das End die Dragon-Policy angewendet werden:
 

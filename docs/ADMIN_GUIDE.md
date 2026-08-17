@@ -30,11 +30,11 @@ Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren
 | `/farmwelt status <welt>` | Details inklusive Weltname, Typ, Intervall, letztem/nächstem Reset und Restzeit. | `farmwelt.admin.status` |
 | `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` |
 | `/farmwelt reset force <welt>` | Startet sofort die vollständige Reset-Pipeline. | `farmwelt.admin.reset` |
-| `/farmwelt reset force end --dragon` | Erlaubt den Enderdrachen einmalig für genau diesen Reset. | `farmwelt.admin.reset` |
+| `/farmwelt reset force end --dragon` | Initialisiert einmalig einen frischen Vanilla-Drachenkampf. | `farmwelt.admin.reset` |
 
 Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `end` verwendet. Der tatsächliche Bukkit-Weltname wird nur aus `farmworlds.<id>.reset.world` gelesen. Alle administrativen Permissions sind standardmäßig nur für Operatoren aktiv.
 
-Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen. `--dragon` ist nur für `end` zulässig, verhindert bei diesem einen Lauf ausschließlich die Dragon-Entfernung und wird nicht in die Config geschrieben.
+Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen. `--dragon` ist nur für `end` zulässig. Es ersetzt alte DragonBattle-Daten durch den Zustand eines frischen Erstkampfs. Bei konfiguriertem `dragon: false` bleibt die einmalige Ausnahme auch nach Abschluss der Reset-Pipeline aktiv, bis Minecraft den Drachen tatsächlich erzeugt hat; die Config selbst wird nicht verändert. Ein normaler Reset mit `dragon: false` beendet dagegen auch einen zuvor geladenen Erstkampf, entfernt dessen Bossbar und aktiviert das End-Ausgangsportal. Nach dem Tod eines freigegebenen Drachen stellt das Plugin das aktive Ausgangsportal erneut auf der End-Ursprungregion sicher.
 
 Ein Reload verwendet denselben `FarmworldResetService` und dieselbe `FarmworldResetEngine` weiter. Dadurch bleiben laufende Locks und deren immutable Config-Snapshots erhalten; gespeicherte `nextReset`-Werte werden nicht neu berechnet.
 

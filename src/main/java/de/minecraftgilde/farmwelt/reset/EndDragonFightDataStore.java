@@ -21,10 +21,10 @@ import java.util.zip.GZIPOutputStream;
  * Safely writes Minecraft-internal DragonFight saved data while Worlds replaces an End world.
  *
  * <p>This file preparation is deliberately retained alongside the runtime {@code DragonBattle}
- * API and the {@code CreatureSpawnEvent} guard. For Folia/Minecraft 26.1.2 it ensures that a
- * regenerated End starts without the initial DragonBattle state and its unwanted boss bar before
- * Bukkit can expose the newly loaded world. The runtime API subsequently verifies the loaded
- * battle state, while the event guard prevents a delayed dragon spawn.</p>
+ * API and the {@code CreatureSpawnEvent} guard. For Folia/Minecraft 26.1.2 it installs either a
+ * suppressed battle or a fresh initial fight before Bukkit can expose the newly loaded world.
+ * The runtime compatibility layer subsequently completes and verifies the loaded battle state,
+ * while the event guard enforces the effective spawn policy.</p>
  *
  * <p>The NBT layout and the tags written by this class are Minecraft-version-sensitive internal
  * details. Minecraft version, DataVersion, and DragonFight saved-data changes must be reviewed
@@ -49,8 +49,15 @@ final class EndDragonFightDataStore {
         this.dataVersion = dataVersion;
     }
 
-    StagedData stage(Path worldFolder) throws IOException {
+    StagedData stage(
+            Path worldFolder,
+            FarmworldRegenerationOptions.EndDragonFightDataMode mode
+    ) throws IOException {
         Objects.requireNonNull(worldFolder, "worldFolder");
+        Objects.requireNonNull(mode, "mode");
+        if (mode == FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE) {
+            throw new IllegalArgumentException("PRESERVE darf keine Fight-Daten ersetzen.");
+        }
         Path normalizedWorldFolder = worldFolder.toAbsolutePath().normalize();
         Path fightData = normalizedWorldFolder.resolve(FIGHT_DATA_RELATIVE_PATH).normalize();
         if (!fightData.startsWith(normalizedWorldFolder)) {
@@ -66,7 +73,7 @@ final class EndDragonFightDataStore {
         );
 
         try {
-            writePreparedFightData(temporary);
+            writePreparedFightData(temporary, mode);
             move(temporary, fightData);
             return new StagedData(fightData, backup, sha256(fightData));
         } catch (IOException | RuntimeException exception) {
@@ -163,7 +170,12 @@ final class EndDragonFightDataStore {
         return Optional.of(backup);
     }
 
-    private void writePreparedFightData(Path target) throws IOException {
+    private void writePreparedFightData(
+            Path target,
+            FarmworldRegenerationOptions.EndDragonFightDataMode mode
+    ) throws IOException {
+        boolean initialFight = mode
+                == FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT;
         try (OutputStream output = Files.newOutputStream(
                 target,
                 StandardOpenOption.CREATE_NEW,
@@ -179,9 +191,9 @@ final class EndDragonFightDataStore {
 
             data.writeByte(TAG_COMPOUND);
             data.writeUTF("data");
-            writeBoolean(data, "needs_state_scanning", false);
-            writeBoolean(data, "dragon_killed", true);
-            writeBoolean(data, "previously_killed", true);
+            writeBoolean(data, "needs_state_scanning", initialFight);
+            writeBoolean(data, "dragon_killed", !initialFight);
+            writeBoolean(data, "previously_killed", !initialFight);
             data.writeByte(TAG_END);
 
             data.writeByte(TAG_END);

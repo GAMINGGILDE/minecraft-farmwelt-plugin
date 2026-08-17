@@ -269,7 +269,7 @@ class FarmworldResetEngineTest {
     }
 
     @Test
-    void oneTimeDragonOverrideAlsoKeepsFightDataDuringRegeneration() {
+    void nonEndResetPreservesDragonFightDataRegardlessOfOverrideOption() {
         ResetOptions options = ResetOptions.allowingEnderDragon();
 
         ResetResult result = engine.reset("overworld", options).join();
@@ -277,7 +277,10 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.SUCCESS, result.status());
         assertSame(options, postResetInitializer.receivedOptions);
         assertEquals(1, lifecycleService.invocations);
-        assertFalse(lifecycleService.receivedOptions.resetEndDragonFightData());
+        assertEquals(
+                FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE,
+                lifecycleService.receivedOptions.endDragonFightDataMode()
+        );
     }
 
     @Test
@@ -314,11 +317,14 @@ class FarmworldResetEngineTest {
         ResetResult result = engine.reset("end").join();
 
         assertEquals(ResetStatus.SUCCESS, result.status());
-        assertTrue(lifecycleService.receivedOptions.resetEndDragonFightData());
+        assertEquals(
+                FarmworldRegenerationOptions.EndDragonFightDataMode.SUPPRESSED,
+                lifecycleService.receivedOptions.endDragonFightDataMode()
+        );
     }
 
     @Test
-    void dragonOverrideSkipsFightDataResetForEndWorld() {
+    void dragonOverrideRequestsFreshInitialFightDataForEndWorld() {
         World originalEnd = world("endfarm", World.Environment.THE_END, "old-endfarm", OLD_SEED);
         World regeneratedEnd = world(
                 "endfarm", World.Environment.THE_END, "new-endfarm", NEW_SEED
@@ -351,7 +357,10 @@ class FarmworldResetEngineTest {
         ResetResult result = engine.reset("end", ResetOptions.allowingEnderDragon()).join();
 
         assertEquals(ResetStatus.SUCCESS, result.status());
-        assertFalse(lifecycleService.receivedOptions.resetEndDragonFightData());
+        assertEquals(
+                FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT,
+                lifecycleService.receivedOptions.endDragonFightDataMode()
+        );
     }
 
     @Test

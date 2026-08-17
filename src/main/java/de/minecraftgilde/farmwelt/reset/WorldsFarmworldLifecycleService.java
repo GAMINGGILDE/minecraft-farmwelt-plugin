@@ -77,14 +77,14 @@ public final class WorldsFarmworldLifecycleService
         Objects.requireNonNull(options, "options");
 
         PendingDataReset pendingReset = null;
-        if (options.resetEndDragonFightData()) {
+        if (options.resetsEndDragonFightData()) {
             try {
                 dragonFightCompatibility.requireSupported();
             } catch (RuntimeException exception) {
                 logger.log(Level.SEVERE, exception.getMessage(), exception);
                 return CompletableFuture.failedFuture(exception);
             }
-            pendingReset = new PendingDataReset();
+            pendingReset = new PendingDataReset(options.endDragonFightDataMode());
             synchronized (pendingDataResets) {
                 if (pendingDataResets.putIfAbsent(world, pendingReset) != null) {
                     return CompletableFuture.failedFuture(new IllegalStateException(
@@ -143,7 +143,8 @@ public final class WorldsFarmworldLifecycleService
             logger.info("DragonBattle-Saved-Data f\u00fcr '" + event.getWorld().getName()
                     + "' werden f\u00fcr Reset vorbereitet.");
             pendingReset.stagedData = dragonFightDataStore.stage(
-                    event.getWorld().getWorldFolder().toPath()
+                    event.getWorld().getWorldFolder().toPath(),
+                    pendingReset.mode
             );
             if (pendingReset.stagedData.hadFightData()) {
                 logger.info("Bestehende DragonBattle-Daten gesichert.");
@@ -151,7 +152,8 @@ public final class WorldsFarmworldLifecycleService
                 logger.info("Für '" + event.getWorld().getName()
                         + "' waren keine alten DragonBattle-Daten vorhanden.");
             }
-            logger.info("DragonBattle-Saved-Data erfolgreich zur\u00fcckgesetzt.");
+            logger.info("DragonBattle-Saved-Data erfolgreich auf '"
+                    + pendingReset.mode + "' gesetzt.");
         } catch (IOException | RuntimeException exception) {
             pendingReset.preparationFailure = exception;
             event.setCancelled(true);
@@ -258,6 +260,14 @@ public final class WorldsFarmworldLifecycleService
     }
 
     private static final class PendingDataReset {
+
+        private final FarmworldRegenerationOptions.EndDragonFightDataMode mode;
+
+        private PendingDataReset(
+                FarmworldRegenerationOptions.EndDragonFightDataMode mode
+        ) {
+            this.mode = Objects.requireNonNull(mode, "mode");
+        }
 
         private volatile boolean regenerationEventReceived;
         private volatile boolean unloadEventReceived;
