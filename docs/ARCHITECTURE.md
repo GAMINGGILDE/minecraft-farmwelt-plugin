@@ -8,7 +8,7 @@ Farmwelt ist ein Paper/Folia-Plugin mit drei Hauptbereichen:
 
 1. `/farmwelt`-GUI für Farmwelt-Teleports.
 2. Ressourcenmonitor für normale Welten.
-3. Administrations- und Debug-Befehle für Betrieb und Diagnose.
+3. Administrations-, Reset- und Debug-Befehle für Betrieb und Diagnose.
 
 Das Plugin implementiert keine eigene Random-Teleport-Logik. Teleports werden über konfigurierbare Befehle ausgeführt, typischerweise BetterRTP. Claims werden optional über GriefPrevention erkannt, damit Ressourcenabbau innerhalb von Grundstücken ignoriert werden kann.
 
@@ -42,12 +42,20 @@ src/main/java/de/minecraftgilde/farmwelt/
 |   +-- ViolationResult.java
 |   +-- ViolationSnapshot.java
 +-- service/
-    +-- ClaimProtectionService.java
-    +-- FarmweltTeleportService.java
-    +-- JailActionService.java
-    +-- MessageService.java
-    +-- ResourceDetectionService.java
-    +-- ViolationService.java
+|   +-- ClaimProtectionService.java
+|   +-- FarmweltTeleportService.java
+|   +-- JailActionService.java
+|   +-- MessageService.java
+|   +-- ResourceDetectionService.java
+|   +-- ViolationService.java
++-- reset/
+    +-- FarmworldLifecycleService.java
+    +-- WorldsFarmworldLifecycleService.java
+    +-- FarmworldResetEngine.java
+    +-- FarmworldResetService.java
+    +-- BukkitFarmworldWorldOperations.java
+    +-- FoliaFarmweltScheduler.java
+    +-- YamlResetStateRepository.java
 ```
 
 ## Plugin-Lifecycle
@@ -57,23 +65,53 @@ Die Hauptklasse ist `FarmweltPlugin`.
 Beim Start:
 
 1. `saveDefaultConfig()` erzeugt die Standardconfig, falls noch keine existiert.
-2. `ConfigManager` lädt Farmwelt-GUI-Einträge.
-3. `ConfigManager` lädt Ressourcenmonitor-Konfiguration, Weltregeln und Action-Schwellen.
-4. GUI, Services und Listener werden erstellt.
-5. Der Befehl `/farmwelt` wird registriert.
-6. `FarmweltCommand` wird zusätzlich als Listener registriert, weil der Monitor-Debug auf Rechtsklicks reagiert.
-7. `FarmweltGuiListener` verarbeitet GUI-Klicks.
-8. `ResourceBreakListener` verarbeitet Blockabbau- und Explosions-Events.
+2. Die harte Dependency Worlds wird einmalig über `WorldsAccess.access()` im Adapter verbunden. Bei einem Fehler deaktiviert sich Farmwelt ohne Bukkit-Fallback.
+3. `ConfigManager` lädt Farmwelt-GUI-Einträge, Reset-Konfiguration und Ressourcenmonitor-Regeln.
+4. `FarmworldResetService` lädt beziehungsweise initialisiert `reset-state.yml`.
+5. `FarmworldResetEngine` erhält den bestehenden Reset-Service und den einmal erzeugten Worlds-Adapter per Constructor Injection.
+6. GUI, weitere Services und Listener werden erstellt.
+7. Der Befehl `/farmwelt` wird registriert.
+8. `FarmweltCommand` wird zusätzlich als Listener registriert, weil der Monitor-Debug auf Rechtsklicks reagiert.
+9. `FarmweltGuiListener` verarbeitet GUI-Klicks.
+10. `ResourceBreakListener` verarbeitet Blockabbau- und Explosions-Events.
 
 Beim Reload über `/farmwelt reload`:
 
 1. Bukkit/Paper lädt die Config neu.
-2. Farmwelt-GUI-Einträge werden neu gelesen.
-3. Ressourcenmonitor-Konfiguration wird neu gelesen.
-4. Claim-Hook wird neu initialisiert.
-5. Violation-Schwellen und Zeitfenster werden neu geladen.
+2. Farmwelt-GUI-Einträge, Reset-Konfiguration und Ressourcenmonitor-Konfiguration werden neu gelesen.
+3. Derselbe `FarmworldResetService`, dieselbe `FarmworldResetEngine` und derselbe Worlds-Adapter bleiben bestehen.
+4. Laufende Reset-Locks, Config-Snapshots und Worlds-Futures bleiben dadurch unverändert aktiv.
+5. Claim-Hook wird neu initialisiert.
+6. Violation-Schwellen und Zeitfenster werden neu geladen.
 
 Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen Zeitfenster bewertet. Persistenz gibt es aktuell nicht.
+
+## Reset-Architektur und Worlds
+
+Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Logging sowie `lastReset` und `nextReset`. Worlds besitzt den technischen, versionsspezifischen Welt-Lifecycle.
+
+```text
+FarmworldResetEngine
+    -> FarmworldLifecycleService
+        -> WorldsFarmworldLifecycleService
+            -> WorldsAccess.regenerate(world)
+```
+
+Die produktive Pipeline lautet:
+
+```text
+Config-Snapshot und Lock
+    -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz prüfen
+    -> Spieler evakuieren und leere Welt bestätigen
+    -> WorldsAccess.regenerate(world)
+    -> neue Weltinstanz über Bukkit prüfen
+    -> Reset-State speichern
+    -> Lock freigeben
+```
+
+Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse. Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration und erfolgreicher Validierung geschrieben. Schlägt anschließend nur `reset-state.yml` fehl, lautet das Ergebnis `STATE_SAVE_FAILED`; die Welt ist dann trotzdem bereits regeneriert.
+
+`WorldsAccess.regenerate(...)` wird nicht in `FoliaFarmweltScheduler.runGlobal(...)` verpackt, da Worlds sein Global-/Folia-Scheduling selbst kapselt. Eigene kurze Bukkit-Prüfungen und asynchrone State-I/O verwenden weiterhin den Farmwelt-Scheduler. Fehler der Worlds-Future werden als `REGENERATE_FAILED` mit unveränderter Ursache abgebildet. Die interne `WorldOperationException.Reason`-API von Worlds wird bewusst nicht in Commands oder Business-Logik übernommen.
 
 ## ConfigManager
 
@@ -421,6 +459,10 @@ Das Plugin ist in `paper-plugin.yml` mit `folia-supported: true` markiert.
 Aktuelle Folia-relevante Punkte:
 
 - Teleportbefehle aus der GUI werden über den Entity-Scheduler des Spielers geplant.
+- Spieler-Evakuierungen verwenden den Entity-Scheduler und `teleportAsync`.
+- Kurze eigene Bukkit-Weltprüfungen laufen über den Global-Region-Scheduler.
+- Dynamisches Entladen, Regenerieren und erneutes Laden übernimmt Worlds mit seiner versionsspezifischen Folia-Implementierung.
+- Der Aufruf `WorldsAccess.regenerate(...)` erhält keine zusätzliche Scheduler-Hülle durch Farmwelt.
 - Jail-Konsolenbefehle werden über den Global-Region-Scheduler geplant.
 - Spielernachrichten nach Jail-Befehl werden wieder über den Entity-Scheduler geplant.
 - Violation-Daten liegen in thread-sicheren Strukturen.
@@ -428,13 +470,17 @@ Aktuelle Folia-relevante Punkte:
 
 Bei neuen Features sollten Welt-, Block- oder Spielerzugriffe weiterhin im passenden Kontext passieren. Besonders kritisch sind zeitversetzte Aktionen, Teleports, Inventarzugriffe und direkte Weltmanipulationen.
 
-## Optionale Abhängigkeiten
+## Abhängigkeiten
 
 `paper-plugin.yml`:
 
 ```yaml
 dependencies:
   server:
+    Worlds:
+      load: BEFORE
+      required: true
+      join-classpath: true
     BetterRTP:
       load: BEFORE
       required: false
@@ -444,6 +490,13 @@ dependencies:
       required: false
       join-classpath: true
 ```
+
+Worlds:
+
+- Ist eine harte Runtime-Abhängigkeit für V2.
+- Wird als `compileOnly("net.thenextlvl:worlds:4.4.0")` aus `https://repo.thenextlvl.net/releases` kompiliert und nicht in die Farmwelt-JAR geshadet.
+- Stellt ausschließlich über den Adapter den dynamischen Lifecycle bereit.
+- Ohne aktive API-Instanz bricht Farmwelt den Plugin-Start ab; es gibt keinen stillen Bukkit-Fallback.
 
 BetterRTP:
 
@@ -459,7 +512,7 @@ GriefPrevention:
 
 ## Datenhaltung
 
-Farmwelt nutzt aktuell keine Datenbank und keine Dateien außer der Config.
+Farmwelt nutzt keine Datenbank. Neben der Config persistiert `reset-state.yml` den letzten und nächsten Reset-Zeitpunkt pro logischer Farmwelt.
 
 In-Memory-Daten:
 
@@ -468,6 +521,7 @@ In-Memory-Daten:
 - Violation-Datensätze pro Spieler.
 - Audit-Cooldown-Zeitpunkte pro Spieler, Material und Kategorie. Wiederholte Audit-Treffer setzen den Zeitpunkt auch dann neu, wenn keine Meldung ausgegeben wird.
 - Aktive Monitor-Debug-Spieler.
+- Aktive Reset-Locks und immutable Config-Snapshots laufender Resets.
 
 Diese Daten gehen bei Serverneustart verloren. Das ist für die aktuelle Funktion beabsichtigt.
 
@@ -484,7 +538,7 @@ Bei neuen Features zuerst prüfen:
 
 Leitlinien:
 
-- Keine neuen harten Runtime-Abhängigkeiten ohne guten Grund.
+- Harte Runtime-Abhängigkeiten nur an klaren Architekturgrenzen einsetzen; Worlds ist für den unter Folia benötigten Welt-Lifecycle ausdrücklich diese Grenze.
 - Config-Werte beim Laden validieren und vorbereiten.
 - Event-Listener früh verlassen, wenn ein Fall nicht relevant ist.
 - Ressourcenmonitor-Regeln nicht pro Event aus YAML lesen.

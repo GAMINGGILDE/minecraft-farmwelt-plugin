@@ -4,21 +4,23 @@ Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren
 
 ## Empfohlene Einrichtung
 
-1. Plugin-JAR in den `plugins`-Ordner legen.
-2. Server starten, damit die Standardconfig erzeugt wird.
-3. `plugins/Farmwelt/config.yml` öffnen.
-4. Unter `farmworlds` die sichtbaren GUI-Einträge prüfen.
-5. BetterRTP-Befehle prüfen, zum Beispiel `betterrtp:rtp world Farmwelt`.
-6. BetterRTP-Weltnamen, Permissions und Cooldowns prüfen.
-7. Falls Claims ausgenommen werden sollen: GriefPrevention installieren und aktivieren.
-8. `resource-monitor.claim-protection` prüfen.
-9. Server neu starten oder `/farmwelt reload` ausführen.
-10. `/farmwelt info` ausführen und Hook-/Modus-Status prüfen.
-11. `/farmwelt debug claim` in und außerhalb eines Claims testen.
-12. `/farmwelt debug monitor` aktivieren und relevante Blöcke per Rechtsklick prüfen.
-13. Zuerst mit `mode: audit` starten.
-14. Danach bei passenden Regeln auf `mode: warn` wechseln.
-15. Erst nach erfolgreichen Tests `mode: enforce` aktivieren.
+1. Worlds 4.4.0 installieren und den Server einmal damit starten.
+2. Farmwelt-Plugin-JAR in den `plugins`-Ordner legen.
+3. Server starten, damit die Standardconfig erzeugt wird.
+4. Im Startlog die erfolgreiche Worlds-Integration prüfen.
+5. `plugins/Farmwelt/config.yml` öffnen.
+6. Unter `farmworlds` die sichtbaren GUI-Einträge und Reset-Weltnamen prüfen.
+7. BetterRTP-Befehle prüfen, zum Beispiel `betterrtp:rtp world Farmwelt`.
+8. BetterRTP-Weltnamen, Permissions und Cooldowns prüfen.
+9. Falls Claims ausgenommen werden sollen: GriefPrevention installieren und aktivieren.
+10. `resource-monitor.claim-protection` prüfen.
+11. Server neu starten oder `/farmwelt reload` ausführen.
+12. `/farmwelt info` ausführen und Hook-/Modus-Status prüfen.
+13. `/farmwelt debug claim` in und außerhalb eines Claims testen.
+14. `/farmwelt debug monitor` aktivieren und relevante Blöcke per Rechtsklick prüfen.
+15. Zuerst mit `mode: audit` starten.
+16. Danach bei passenden Regeln auf `mode: warn` wechseln.
+17. Erst nach erfolgreichen Tests `mode: enforce` aktivieren.
 
 ## Administrative Reset-Befehle
 
@@ -31,7 +33,7 @@ Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren
 
 Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `end` verwendet. Der tatsächliche Bukkit-Weltname wird nur aus `farmworlds.<id>.reset.world` gelesen. Alle administrativen Permissions sind standardmäßig nur für Operatoren aktiv.
 
-Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, Spielerevakuierung, Pfadschutz, Unload oder andere Sicherheitsprüfungen.
+Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen.
 
 Ein Reload verwendet denselben `FarmworldResetService` und dieselbe `FarmworldResetEngine` weiter. Dadurch bleiben laufende Locks und deren immutable Config-Snapshots erhalten; gespeicherte `nextReset`-Werte werden nicht neu berechnet.
 
@@ -49,13 +51,13 @@ farmworlds:
 
     reset:
       enabled: true
-      world: "test_farmwelt"
+      world: "worlds_farmwelt"
       interval: "30d"
 
     teleport:
       type: command
       sender: player
-      command: "betterrtp:rtp world test_farmwelt"
+      command: "betterrtp:rtp world worlds_farmwelt"
 ```
 
 Nach dem Reload zuerst ausführen:
@@ -65,23 +67,23 @@ Nach dem Reload zuerst ausführen:
 /farmwelt reset force overworld
 ```
 
-Danach kontrollieren:
+Vor dem Reset in `worlds_farmwelt` eine kleine, eindeutig erkennbare Teststruktur platzieren. Danach kontrollieren:
 
 1. Der Command meldet den Start sofort.
-2. Spieler werden aus `test_farmwelt` evakuiert.
+2. Spieler werden aus `worlds_farmwelt` evakuiert.
 3. Teleports zurück in die Welt werden während des Resets blockiert.
-4. Die Welt wird entladen.
-5. Der Weltordner wird gelöscht.
-6. Die Welt wird neu erstellt.
+4. Es tritt keine `UnsupportedOperationException` aus `Server#unloadWorld` mehr auf.
+5. Worlds regeneriert die Welt live und lädt sie erneut.
+6. Der Weltname bleibt `worlds_farmwelt`.
 7. Die neue Welt besitzt wieder den Typ `NORMAL`.
-8. Eine vorher platzierte Teststruktur ist verschwunden.
-9. BetterRTP kann wieder nach `test_farmwelt` teleportieren.
-10. `reset-state.yml` enthält den neuen UTC-Zeitpunkt.
+8. Die vorher platzierte Teststruktur ist verschwunden.
+9. `/farmwelt` beziehungsweise BetterRTP kann wieder nach `worlds_farmwelt` teleportieren.
+10. `reset-state.yml` enthält erst nach erfolgreicher Regeneration den neuen UTC-Zeitpunkt.
 11. `/farmwelt status overworld` zeigt einen neuen `lastReset`.
-12. Der Status zeigt den daraus berechneten neuen `nextReset`.
+12. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
 13. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
 
-Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
+Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
 
 ## Empfohlene Startwerte
 

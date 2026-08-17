@@ -16,11 +16,11 @@ final class ResetCommandMessages {
             case DISABLED -> List.of("§cDer Reset ist für diese Farmwelt deaktiviert.");
             case ALREADY_RUNNING -> List.of("§eFür diese Farmwelt läuft bereits ein Reset.");
             case INVALID_CONFIGURATION -> List.of(
-                    "§cDie Reset-Konfiguration oder der Weltpfad ist ungültig.",
+                    "§cDie Reset-Konfiguration oder die geladene Bukkit-Welt ist ungültig.",
                     "§cBitte Serverlog prüfen!"
             );
             case WORLD_NOT_FOUND -> List.of(
-                    "§cDie konfigurierte Farmwelt oder ihr Weltordner wurde nicht gefunden."
+                    "§cDie konfigurierte Farmwelt wurde nicht gefunden."
             );
             case WORLD_NOT_LOADED -> List.of(
                     "§cDie Farmwelt ist derzeit nicht geladen und kann nicht sicher zurückgesetzt werden."
@@ -28,25 +28,15 @@ final class ResetCommandMessages {
             case PROTECTED_WORLD -> List.of(
                     "§cDie konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden."
             );
-            case UNSAFE_WORLD_DIRECTORY -> List.of(
-                    "§cDer von Bukkit gemeldete Weltordner liegt außerhalb des erlaubten Bereichs.",
-                    "§cEs wurden keine Weltdaten gelöscht."
-            );
             case EVACUATION_FAILED -> List.of(
                     "§cDer Reset wurde abgebrochen, da nicht alle Spieler sicher evakuiert werden konnten."
             );
-            case UNLOAD_FAILED -> List.of(
-                    "§cDie Farmwelt konnte nicht entladen werden. Es wurden keine Weltdaten gelöscht."
-            );
-            case DELETE_FAILED -> List.of(
-                    "§cDer Weltordner konnte nicht vollständig gelöscht werden."
-            );
-            case CREATE_FAILED -> List.of(
-                    "§cDie alte Welt wurde entfernt, aber die neue Welt konnte nicht erstellt werden.",
+            case REGENERATE_FAILED -> List.of(
+                    "§cDie Farmwelt konnte durch Worlds nicht neu generiert werden.",
                     "§cBitte Serverlog prüfen!"
             );
             case STATE_SAVE_FAILED -> List.of(
-                    "§cDie Welt wurde erfolgreich neu erstellt, aber der Reset-State konnte nicht gespeichert werden.",
+                    "§cDie Welt wurde erfolgreich regeneriert, aber der Reset-State konnte nicht gespeichert werden.",
                     "§cBitte reset-state.yml und Serverlog prüfen!"
             );
             case INTERNAL_ERROR -> List.of(

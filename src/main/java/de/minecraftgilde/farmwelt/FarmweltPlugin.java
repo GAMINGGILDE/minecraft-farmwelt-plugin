@@ -12,7 +12,7 @@ import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetEngine;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FoliaFarmweltScheduler;
-import de.minecraftgilde.farmwelt.reset.SecureWorldDirectoryService;
+import de.minecraftgilde.farmwelt.reset.WorldsFarmworldLifecycleService;
 import de.minecraftgilde.farmwelt.reset.YamlResetStateRepository;
 import de.minecraftgilde.farmwelt.service.ClaimProtectionService;
 import de.minecraftgilde.farmwelt.service.FarmweltTeleportService;
@@ -23,6 +23,7 @@ import de.minecraftgilde.farmwelt.service.ViolationService;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -40,10 +41,15 @@ public final class FarmweltPlugin extends JavaPlugin {
     private JailActionService jailActionService;
     private FarmworldResetService resetService;
     private FarmworldResetEngine resetEngine;
+    private WorldsFarmworldLifecycleService worldsLifecycleService;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
+        if (!initializeWorldsIntegration()) {
+            return;
+        }
 
         configManager = new ConfigManager(this);
         configManager.loadFarmweltMenuItems();
@@ -69,11 +75,7 @@ public final class FarmweltPlugin extends JavaPlugin {
         resetEngine = new FarmworldResetEngine(
                 resetService,
                 worldOperations,
-                new SecureWorldDirectoryService(
-                        getServer().getWorldContainer().toPath(),
-                        configManager::getMonitoredWorlds,
-                        worldOperations.getProtectedMainWorldDirectories()
-                ),
+                worldsLifecycleService,
                 new FoliaFarmweltScheduler(this),
                 getLogger()
         );
@@ -127,6 +129,24 @@ public final class FarmweltPlugin extends JavaPlugin {
 
     public FarmworldResetEngine getResetEngine() {
         return resetEngine;
+    }
+
+    private boolean initializeWorldsIntegration() {
+        try {
+            worldsLifecycleService = WorldsFarmworldLifecycleService.connect();
+            getLogger().info("Worlds " + worldsLifecycleService.pluginVersion() + " erkannt.");
+            getLogger().info("Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt.");
+            return true;
+        } catch (RuntimeException | LinkageError exception) {
+            getLogger().log(
+                    Level.SEVERE,
+                    "Worlds-Integration konnte nicht initialisiert werden. Farmwelt wird deaktiviert; "
+                            + "ein Fallback auf Bukkit-World-Lifecycle ist nicht verfügbar.",
+                    exception
+            );
+            getServer().getPluginManager().disablePlugin(this);
+            return false;
+        }
     }
 
     private FarmweltCommand createFarmweltCommand() {

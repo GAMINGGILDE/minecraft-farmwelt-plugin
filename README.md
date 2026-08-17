@@ -32,28 +32,31 @@ Das Plugin soll Spieler in Farmwelten lenken und Moderatoren entlasten. Es ist k
 
 - Paper/Folia-kompatibler Server.
 - Java 25.
-- Minecraft/Paper API 26.1.2, das Projekt baut aktuell gegen `paper-api:26.1.2.build.66-stable`.
+- Minecraft/Paper API 26.1.2, das Projekt baut aktuell gegen `paper-api:26.1.2.build.74-stable`.
+- Worlds 4.4.0 ist eine erforderliche Server-Abhängigkeit und übernimmt die dynamische Weltregeneration.
 - BetterRTP ist optional, aber für die Standard-Teleportbefehle empfohlen.
 - GriefPrevention ist optional, aber für Claim-Ausnahmen empfohlen.
 - EssentialsX ist keine Abhängigkeit.
 
-In `paper-plugin.yml` sind BetterRTP und GriefPrevention als optionale Server-Abhängigkeiten eingetragen:
+In `paper-plugin.yml` ist Worlds als harte und BetterRTP/GriefPrevention als optionale Server-Abhängigkeit eingetragen:
 
+- `Worlds`: `required: true`, `join-classpath: true`.
 - `BetterRTP`: `required: false`, `join-classpath: false`.
 - `GriefPrevention`: `required: false`, `join-classpath: true`.
 
-Das Plugin startet auch ohne BetterRTP. Dann schlagen aber die standardmäßig konfigurierten BetterRTP-Befehle fehl, bis andere Teleportbefehle konfiguriert werden.
+Ohne Worlds wird Farmwelt nicht geladen. Es gibt keinen Fallback auf Bukkit-Unload, eigene Dateilöschung oder `WorldCreator`. Das Plugin startet weiterhin ohne BetterRTP; dann schlagen aber die standardmäßig konfigurierten BetterRTP-Befehle fehl, bis andere Teleportbefehle konfiguriert werden.
 
 ## Installation
 
-1. Plugin bauen oder eine fertige JAR verwenden.
-2. Die JAR aus `build/libs/` in den `plugins`-Ordner des Servers legen.
-3. Server starten.
-4. `plugins/Farmwelt/config.yml` prüfen.
-5. BetterRTP-Ziele und Welt-Namen prüfen.
-6. GriefPrevention-Hook prüfen, falls Claim-Ausnahmen genutzt werden.
-7. `/farmwelt info` ausführen.
-8. `/farmwelt` als Spieler testen.
+1. Worlds 4.4.0 und seine Servervoraussetzungen installieren.
+2. Farmwelt bauen oder eine fertige JAR verwenden.
+3. Die JAR aus `build/libs/` in den `plugins`-Ordner des Servers legen.
+4. Server starten.
+5. `plugins/Farmwelt/config.yml` prüfen.
+6. BetterRTP-Ziele und Welt-Namen prüfen.
+7. GriefPrevention-Hook prüfen, falls Claim-Ausnahmen genutzt werden.
+8. `/farmwelt info` ausführen.
+9. `/farmwelt` als Spieler testen.
 
 ## Build
 
@@ -93,7 +96,9 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 
 Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
 
-`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, Evakuierung, Pfadprüfung, Unload, Löschen, Neuerstellung und State-Persistenz bleiben Teil der normalen sicheren Pipeline.
+`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline.
+
+Die Verantwortungsgrenze ist bewusst schmal: Farmwelt orchestriert Konfiguration, Lock, Teleport-Sperre, Spieler-Evakuierung, Fehler und Reset-State. Worlds besitzt den versionsspezifischen dynamischen Welt-Lifecycle einschließlich Entladen, Regenerieren und erneutem Laden unter Folia.
 
 ## Permissions
 

@@ -2,7 +2,7 @@ package de.minecraftgilde.farmwelt.reset;
 
 import java.util.concurrent.CompletableFuture;
 
-/** Schedules Bukkit world work and blocking I/O in their respective Folia contexts. */
+/** Schedules the plugin's own Bukkit checks and blocking I/O in Folia-safe contexts. */
 public interface FarmweltScheduler {
 
     <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation);

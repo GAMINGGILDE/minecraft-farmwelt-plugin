@@ -1,30 +1,27 @@
 package de.minecraftgilde.farmwelt.reset;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Server;
 import org.bukkit.World;
-import org.bukkit.WorldCreator;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class BukkitFarmworldWorldOperations implements FarmworldWorldOperations {
 
-    private static final String PREFERRED_SAFE_WORLD = "world";
-    private static final Set<org.bukkit.NamespacedKey> VANILLA_MAIN_WORLD_KEYS = Set.of(
-            org.bukkit.NamespacedKey.minecraft("overworld"),
-            org.bukkit.NamespacedKey.minecraft("the_nether"),
-            org.bukkit.NamespacedKey.minecraft("the_end")
+    private static final Set<NamespacedKey> VANILLA_MAIN_DIMENSION_KEYS = Set.of(
+            NamespacedKey.minecraft("overworld"),
+            NamespacedKey.minecraft("the_nether"),
+            NamespacedKey.minecraft("the_end")
     );
+
     private final JavaPlugin plugin;
     private final Supplier<Set<String>> resetWorldNames;
 
@@ -48,20 +45,19 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
         }
 
         return WorldInspection.loaded(
-                world.getWorldFolder().toPath().toAbsolutePath().normalize(),
-                toFarmworldType(world.getEnvironment())
+                world,
+                toFarmworldType(world.getEnvironment()),
+                isProtectedMainWorld(plugin.getServer(), world)
         );
     }
 
     @Override
-    public CompletableFuture<Boolean> evacuatePlayers(FarmworldResetConfig resetConfig) {
-        Server server = plugin.getServer();
-        World resetWorld = server.getWorld(resetConfig.worldName());
-        if (resetWorld == null || resetWorld.getPlayers().isEmpty()) {
+    public CompletableFuture<Boolean> evacuatePlayers(World resetWorld) {
+        if (resetWorld.getPlayers().isEmpty()) {
             return CompletableFuture.completedFuture(true);
         }
 
-        World safeWorld = findSafeWorld(server, resetConfig.worldName());
+        World safeWorld = findSafeWorld(plugin.getServer(), resetWorld);
         if (safeWorld == null) {
             return CompletableFuture.completedFuture(false);
         }
@@ -69,7 +65,7 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
         Location safeSpawn = safeWorld.getSpawnLocation();
         List<CompletableFuture<Boolean>> teleports = new ArrayList<>();
         for (Player player : List.copyOf(resetWorld.getPlayers())) {
-            teleports.add(evacuatePlayer(player, resetConfig.worldName(), safeSpawn));
+            teleports.add(evacuatePlayer(player, resetWorld, safeSpawn));
         }
 
         return CompletableFuture.allOf(teleports.toArray(CompletableFuture[]::new))
@@ -77,82 +73,20 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
     }
 
     @Override
-    public boolean hasPlayers(FarmworldResetConfig resetConfig) {
-        World world = plugin.getServer().getWorld(resetConfig.worldName());
-        return world != null && !world.getPlayers().isEmpty();
-    }
-
-    @Override
-    public boolean unload(FarmworldResetConfig resetConfig) {
-        World world = plugin.getServer().getWorld(resetConfig.worldName());
-        if (world == null) {
-            return true;
-        }
-        if (!world.getPlayers().isEmpty()) {
-            return false;
-        }
-
-        // Saving is intentionally disabled: every file is deleted immediately after unloading.
-        return plugin.getServer().unloadWorld(world, false)
-                && plugin.getServer().getWorld(resetConfig.worldName()) == null;
-    }
-
-    @Override
-    public boolean isLoaded(FarmworldResetConfig resetConfig) {
-        return plugin.getServer().getWorld(resetConfig.worldName()) != null;
-    }
-
-    @Override
-    public Optional<Path> createAndValidate(FarmworldResetConfig resetConfig) {
-        Server server = plugin.getServer();
-        if (server.getWorld(resetConfig.worldName()) != null) {
-            return Optional.empty();
-        }
-
-        World.Environment expectedEnvironment = toEnvironment(resetConfig.farmworldType());
-        World createdWorld = server.createWorld(
-                new WorldCreator(resetConfig.worldName()).environment(expectedEnvironment)
-        );
-        if (createdWorld == null) {
-            return Optional.empty();
-        }
-
-        World loadedWorld = server.getWorld(resetConfig.worldName());
-        if (loadedWorld == null
-                || loadedWorld != createdWorld
-                || loadedWorld.getEnvironment() != expectedEnvironment) {
-            return Optional.empty();
-        }
-
-        return Optional.of(loadedWorld.getWorldFolder().toPath().toAbsolutePath().normalize());
-    }
-
-    /** Captures the API-reported folders of the server's protected primary dimensions. */
-    public Set<Path> getProtectedMainWorldDirectories() {
-        Server server = plugin.getServer();
-        List<World> loadedWorlds = server.getWorlds();
-        Set<Path> protectedDirectories = new LinkedHashSet<>();
-        for (int index = 0; index < loadedWorlds.size(); index++) {
-            World world = loadedWorlds.get(index);
-            if (index == 0 || VANILLA_MAIN_WORLD_KEYS.contains(world.getKey())) {
-                protectedDirectories.add(
-                        world.getWorldFolder().toPath().toAbsolutePath().normalize()
-                );
-            }
-        }
-        return Set.copyOf(protectedDirectories);
+    public boolean hasPlayers(World world) {
+        return !world.getPlayers().isEmpty();
     }
 
     private CompletableFuture<Boolean> evacuatePlayer(
             Player player,
-            String resetWorldName,
+            World resetWorld,
             Location safeSpawn
     ) {
         CompletableFuture<Boolean> result = new CompletableFuture<>();
         boolean scheduled = player.getScheduler().execute(
                 plugin,
                 () -> {
-                    if (!player.getWorld().getName().equals(resetWorldName)) {
+                    if (player.getWorld() != resetWorld) {
                         result.complete(true);
                         return;
                     }
@@ -179,25 +113,38 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
         return !future.isCompletedExceptionally() && Boolean.TRUE.equals(future.getNow(false));
     }
 
-    private World findSafeWorld(Server server, String resetWorldName) {
-        World preferredWorld = server.getWorld(PREFERRED_SAFE_WORLD);
-        if (isSafeDestination(preferredWorld, resetWorldName)) {
-            return preferredWorld;
+    private World findSafeWorld(Server server, World resetWorld) {
+        for (World world : server.getWorlds()) {
+            if (world.getKey().equals(NamespacedKey.minecraft("overworld"))
+                    && isSafeDestination(world, resetWorld)) {
+                return world;
+            }
         }
 
         for (World world : server.getWorlds()) {
-            if (isSafeDestination(world, resetWorldName)) {
+            if (isProtectedMainWorld(server, world) && isSafeDestination(world, resetWorld)) {
+                return world;
+            }
+        }
+
+        for (World world : server.getWorlds()) {
+            if (isSafeDestination(world, resetWorld)) {
                 return world;
             }
         }
         return null;
     }
 
-    private boolean isSafeDestination(World world, String resetWorldName) {
-        return world != null
-                && world.getEnvironment() == World.Environment.NORMAL
-                && !world.getName().equals(resetWorldName)
+    private boolean isSafeDestination(World world, World resetWorld) {
+        return world.getEnvironment() == World.Environment.NORMAL
+                && world != resetWorld
                 && !resetWorldNames.get().contains(world.getName());
+    }
+
+    private boolean isProtectedMainWorld(Server server, World world) {
+        List<World> loadedWorlds = server.getWorlds();
+        return (!loadedWorlds.isEmpty() && loadedWorlds.getFirst() == world)
+                || VANILLA_MAIN_DIMENSION_KEYS.contains(world.getKey());
     }
 
     private FarmworldType toFarmworldType(World.Environment environment) {
@@ -208,14 +155,6 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
             case CUSTOM -> throw new IllegalStateException(
                     "Benutzerdefinierte Dimensionen werden nicht als Farmwelt unterstützt."
             );
-        };
-    }
-
-    private World.Environment toEnvironment(FarmworldType farmworldType) {
-        return switch (farmworldType) {
-            case OVERWORLD -> World.Environment.NORMAL;
-            case NETHER -> World.Environment.NETHER;
-            case END -> World.Environment.THE_END;
         };
     }
 }

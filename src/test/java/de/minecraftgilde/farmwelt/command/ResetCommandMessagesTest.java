@@ -32,11 +32,8 @@ class ResetCommandMessagesTest {
                 Arguments.of(ResetStatus.WORLD_NOT_FOUND, "nicht gefunden"),
                 Arguments.of(ResetStatus.WORLD_NOT_LOADED, "derzeit nicht geladen"),
                 Arguments.of(ResetStatus.PROTECTED_WORLD, "als Hauptwelt geschützt"),
-                Arguments.of(ResetStatus.UNSAFE_WORLD_DIRECTORY, "außerhalb des erlaubten Bereichs"),
                 Arguments.of(ResetStatus.EVACUATION_FAILED, "evakuiert"),
-                Arguments.of(ResetStatus.UNLOAD_FAILED, "nicht entladen"),
-                Arguments.of(ResetStatus.DELETE_FAILED, "nicht vollständig gelöscht"),
-                Arguments.of(ResetStatus.CREATE_FAILED, "alte Welt wurde entfernt"),
+                Arguments.of(ResetStatus.REGENERATE_FAILED, "durch Worlds nicht neu generiert"),
                 Arguments.of(ResetStatus.STATE_SAVE_FAILED, "Reset-State konnte nicht gespeichert"),
                 Arguments.of(ResetStatus.INTERNAL_ERROR, "internen Fehler")
         );

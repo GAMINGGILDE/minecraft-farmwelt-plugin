@@ -7,6 +7,10 @@ folia-supported: true
 description: Farmwelt-System für den Minecraft-Gilde-Server.
 dependencies:
   server:
+    Worlds:
+      load: BEFORE
+      required: true
+      join-classpath: true
     BetterRTP:
       load: BEFORE
       required: false
