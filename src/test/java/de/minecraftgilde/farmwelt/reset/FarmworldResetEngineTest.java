@@ -18,7 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Handler;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.bukkit.World;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,11 +29,17 @@ import org.junit.jupiter.api.Test;
 class FarmworldResetEngineTest {
 
     private static final Instant NOW = Instant.parse("2026-08-17T07:00:00Z");
+    private static final long OLD_SEED = 123L;
+    private static final long NEW_SEED = 456L;
 
     private final List<String> calls = new ArrayList<>();
     private final TestResetStateRepository repository = new TestResetStateRepository(calls);
-    private final World originalWorld = world("farmwelt", World.Environment.NORMAL, "old-farmwelt");
-    private final World regeneratedWorld = world("farmwelt", World.Environment.NORMAL, "new-farmwelt");
+    private final World originalWorld = world(
+            "farmwelt", World.Environment.NORMAL, "old-farmwelt", OLD_SEED
+    );
+    private final World regeneratedWorld = world(
+            "farmwelt", World.Environment.NORMAL, "new-farmwelt", NEW_SEED
+    );
     private final FakeWorldOperations worldOperations = new FakeWorldOperations(
             calls,
             WorldInspection.loaded(originalWorld, FarmworldType.OVERWORLD, false),
@@ -78,6 +86,48 @@ class FarmworldResetEngineTest {
         assertEquals(NOW, state.lastReset().orElseThrow());
         assertEquals(NOW.plus(Duration.ofDays(30)), state.nextReset());
         assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void successfulResetLogsOldAndNewSeed() {
+        List<LogRecord> logRecords = new ArrayList<>();
+        FarmworldResetEngine loggingEngine = engineWith(recordingLogger(logRecords));
+
+        ResetResult result = loggingEngine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertTrue(logRecords.stream().anyMatch(record ->
+                record.getMessage().equals("Alter Seed: " + OLD_SEED)
+        ));
+        assertTrue(logRecords.stream().anyMatch(record ->
+                record.getMessage().equals("Neuer Seed: " + NEW_SEED)
+        ));
+    }
+
+    @Test
+    void identicalRandomSeedWarnsButResetStillSucceeds() {
+        World sameSeedWorld = world(
+                "farmwelt", World.Environment.NORMAL, "same-seed-farmwelt", OLD_SEED
+        );
+        lifecycleService.result = CompletableFuture.completedFuture(sameSeedWorld);
+        worldOperations.regeneratedInspection = WorldInspection.loaded(
+                sameSeedWorld,
+                FarmworldType.OVERWORLD,
+                false
+        );
+        List<LogRecord> logRecords = new ArrayList<>();
+        FarmworldResetEngine loggingEngine = engineWith(recordingLogger(logRecords));
+
+        ResetResult result = loggingEngine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(1, lifecycleService.invocations);
+        assertTrue(logRecords.stream().anyMatch(record ->
+                record.getLevel() == Level.WARNING
+                        && record.getMessage().equals(
+                                "Der zufällig erzeugte Seed entspricht dem vorherigen Seed."
+                        )
+        ));
     }
 
     @Test
@@ -295,7 +345,26 @@ class FarmworldResetEngineTest {
         return new FarmworldResetConfig("overworld", "farmwelt", true, Duration.ofDays(30));
     }
 
+    private FarmworldResetEngine engineWith(Logger logger) {
+        return new FarmworldResetEngine(
+                resetService,
+                worldOperations,
+                lifecycleService,
+                new DirectScheduler(),
+                logger
+        );
+    }
+
     private static World world(String name, World.Environment environment, String directory) {
+        return world(name, environment, directory, 0L);
+    }
+
+    private static World world(
+            String name,
+            World.Environment environment,
+            String directory,
+            long seed
+    ) {
         File worldFolder = Path.of("server", "world", "dimensions", "worlds", directory)
                 .toAbsolutePath()
                 .toFile();
@@ -306,6 +375,7 @@ class FarmworldResetEngineTest {
                     case "getName" -> name;
                     case "getEnvironment" -> environment;
                     case "getWorldFolder" -> worldFolder;
+                    case "getSeed" -> seed;
                     case "toString" -> "FakeWorld[" + name + "]";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == arguments[0];
@@ -345,6 +415,29 @@ class FarmworldResetEngineTest {
     private static Logger quietLogger() {
         Logger logger = Logger.getLogger("FarmworldResetEngineTest-" + System.nanoTime());
         logger.setLevel(Level.OFF);
+        return logger;
+    }
+
+    private static Logger recordingLogger(List<LogRecord> logRecords) {
+        Logger logger = Logger.getLogger("FarmworldResetEngineTest-" + System.nanoTime());
+        logger.setUseParentHandlers(false);
+        logger.setLevel(Level.ALL);
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logRecords.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        handler.setLevel(Level.ALL);
+        logger.addHandler(handler);
         return logger;
     }
 

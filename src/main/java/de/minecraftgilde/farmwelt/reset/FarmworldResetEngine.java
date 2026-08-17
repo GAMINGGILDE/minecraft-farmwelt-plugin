@@ -164,7 +164,9 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             }
 
             logger.info("Geladene Bukkit-Welt '" + world.getName() + "' gefunden.");
-            return CompletableFuture.completedFuture(new PipelineContext(resetConfig, world));
+            long oldSeed = world.getSeed();
+            logger.info("Alter Seed: " + oldSeed);
+            return CompletableFuture.completedFuture(new PipelineContext(resetConfig, world, oldSeed));
         });
     }
 
@@ -208,7 +210,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<RegeneratedContext> regenerateWorld(PipelineContext context) {
         logger.info("Regeneration von '" + context.resetConfig().worldName()
-                + "' über Worlds gestartet.");
+                + "' über Worlds mit zufälligem Seed gestartet.");
 
         final CompletableFuture<World> regeneration;
         try {
@@ -246,7 +248,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     + "' erfolgreich regeneriert.");
             return CompletableFuture.completedFuture(new RegeneratedContext(
                     context.resetConfig(),
-                    context.originalWorld(),
+                    context.oldSeed(),
                     regeneratedWorld
             ));
         });
@@ -304,6 +306,11 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             }
 
             logger.info("Neue Bukkit-Welt '" + bukkitWorld.getName() + "' validiert.");
+            long newSeed = context.regeneratedWorld().getSeed();
+            logger.info("Neuer Seed: " + newSeed);
+            if (context.oldSeed() == newSeed) {
+                logger.warning("Der zufällig erzeugte Seed entspricht dem vorherigen Seed.");
+            }
             logger.info("Neuer Weltordner: " + regeneratedInspection.worldFolder());
             return CompletableFuture.completedFuture(context);
         });
@@ -397,13 +404,14 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private record PipelineContext(
             FarmworldResetConfig resetConfig,
-            World originalWorld
+            World originalWorld,
+            long oldSeed
     ) {
     }
 
     private record RegeneratedContext(
             FarmworldResetConfig resetConfig,
-            World originalWorld,
+            long oldSeed,
             World regeneratedWorld
     ) {
     }

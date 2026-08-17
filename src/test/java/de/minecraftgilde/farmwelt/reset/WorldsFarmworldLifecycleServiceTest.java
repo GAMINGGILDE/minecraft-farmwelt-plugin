@@ -1,12 +1,19 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import net.kyori.adventure.key.Key;
+import net.thenextlvl.worlds.Level;
 import net.thenextlvl.worlds.WorldsAccess;
 import org.bukkit.World;
 import org.junit.jupiter.api.Test;
@@ -14,12 +21,14 @@ import org.junit.jupiter.api.Test;
 class WorldsFarmworldLifecycleServiceTest {
 
     @Test
-    void delegatesRegenerationToInjectedWorldsAccess() {
+    void delegatesRegenerationWithOnlyRandomSeedCustomization() {
         World original = world("original");
         World regenerated = world("regenerated");
         AtomicReference<World> received = new AtomicReference<>();
-        WorldsAccess worldsAccess = worldsAccess((World world) -> {
+        AtomicReference<Consumer<Level.Builder>> receivedCustomization = new AtomicReference<>();
+        WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
             received.set(world);
+            receivedCustomization.set(customization);
             return CompletableFuture.completedFuture(regenerated);
         });
         WorldsFarmworldLifecycleService service = new WorldsFarmworldLifecycleService(worldsAccess);
@@ -28,13 +37,30 @@ class WorldsFarmworldLifecycleServiceTest {
 
         assertSame(original, received.get());
         assertSame(regenerated, result);
+
+        Consumer<Level.Builder> customization = receivedCustomization.get();
+        assertNotNull(customization);
+        Level.Builder builder = Level.builder(Key.key("worlds", "original"))
+                .seed(123L)
+                .hardcore(true)
+                .structures(false)
+                .bonusChest(true)
+                .resetSpawnPosition(true)
+                .ignoreLevelData(false)
+                .legacyName("original");
+        List<Object> unchangedSettings = settingsExceptSeed(builder);
+
+        customization.accept(builder);
+
+        assertTrue(builder.seed().isEmpty());
+        assertEquals(unchangedSettings, settingsExceptSeed(builder));
     }
 
     @Test
     void preservesWorldsFailureAsOriginalCause() {
         IllegalStateException failure = new IllegalStateException("Worlds failure");
         WorldsAccess worldsAccess = worldsAccess(
-                world -> CompletableFuture.failedFuture(failure)
+                (world, customization) -> CompletableFuture.failedFuture(failure)
         );
         WorldsFarmworldLifecycleService service = new WorldsFarmworldLifecycleService(worldsAccess);
 
@@ -51,8 +77,11 @@ class WorldsFarmworldLifecycleServiceTest {
                 WorldsAccess.class.getClassLoader(),
                 new Class<?>[]{WorldsAccess.class},
                 (proxy, method, arguments) -> {
-                    if (method.getName().equals("regenerate") && method.getParameterCount() == 1) {
-                        return regeneration.regenerate((World) arguments[0]);
+                    if (method.getName().equals("regenerate") && method.getParameterCount() == 2) {
+                        @SuppressWarnings("unchecked")
+                        Consumer<Level.Builder> customization =
+                                (Consumer<Level.Builder>) arguments[1];
+                        return regeneration.regenerate((World) arguments[0], customization);
                     }
                     return switch (method.getName()) {
                         case "toString" -> "FakeWorldsAccess";
@@ -106,9 +135,29 @@ class WorldsFarmworldLifecycleServiceTest {
         return 0D;
     }
 
+    private static List<Object> settingsExceptSeed(Level.Builder builder) {
+        return List.of(
+                builder.key(),
+                builder.dimension(),
+                builder.hardcore(),
+                builder.structures(),
+                builder.bonusChest(),
+                builder.resetSpawnPosition(),
+                builder.forcedSpawnPosition(),
+                builder.forcedSpawnRotation(),
+                builder.generatorType(),
+                builder.generator(),
+                builder.ignoreLevelData(),
+                builder.legacyName()
+        );
+    }
+
     @FunctionalInterface
     private interface Regeneration {
 
-        CompletableFuture<World> regenerate(World world);
+        CompletableFuture<World> regenerate(
+                World world,
+                Consumer<Level.Builder> customization
+        );
     }
 }

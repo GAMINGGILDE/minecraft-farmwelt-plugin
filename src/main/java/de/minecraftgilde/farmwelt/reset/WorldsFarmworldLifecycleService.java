@@ -32,7 +32,8 @@ public final class WorldsFarmworldLifecycleService implements FarmworldLifecycle
     @Override
     public CompletableFuture<World> regenerate(World world) {
         CompletableFuture<World> regeneration = worldsAccess.regenerate(
-                Objects.requireNonNull(world, "world")
+                Objects.requireNonNull(world, "world"),
+                builder -> builder.seed(null)
         );
         return Objects.requireNonNull(
                 regeneration,
