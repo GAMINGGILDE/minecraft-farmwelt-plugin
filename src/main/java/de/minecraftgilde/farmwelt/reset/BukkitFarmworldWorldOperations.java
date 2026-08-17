@@ -1,8 +1,11 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -17,6 +20,11 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class BukkitFarmworldWorldOperations implements FarmworldWorldOperations {
 
     private static final String PREFERRED_SAFE_WORLD = "world";
+    private static final Set<org.bukkit.NamespacedKey> VANILLA_MAIN_WORLD_KEYS = Set.of(
+            org.bukkit.NamespacedKey.minecraft("overworld"),
+            org.bukkit.NamespacedKey.minecraft("the_nether"),
+            org.bukkit.NamespacedKey.minecraft("the_end")
+    );
     private final JavaPlugin plugin;
     private final Supplier<Set<String>> resetWorldNames;
 
@@ -95,10 +103,10 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
     }
 
     @Override
-    public boolean createAndValidate(FarmworldResetConfig resetConfig) {
+    public Optional<Path> createAndValidate(FarmworldResetConfig resetConfig) {
         Server server = plugin.getServer();
         if (server.getWorld(resetConfig.worldName()) != null) {
-            return false;
+            return Optional.empty();
         }
 
         World.Environment expectedEnvironment = toEnvironment(resetConfig.farmworldType());
@@ -106,13 +114,33 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
                 new WorldCreator(resetConfig.worldName()).environment(expectedEnvironment)
         );
         if (createdWorld == null) {
-            return false;
+            return Optional.empty();
         }
 
         World loadedWorld = server.getWorld(resetConfig.worldName());
-        return loadedWorld != null
-                && loadedWorld == createdWorld
-                && loadedWorld.getEnvironment() == expectedEnvironment;
+        if (loadedWorld == null
+                || loadedWorld != createdWorld
+                || loadedWorld.getEnvironment() != expectedEnvironment) {
+            return Optional.empty();
+        }
+
+        return Optional.of(loadedWorld.getWorldFolder().toPath().toAbsolutePath().normalize());
+    }
+
+    /** Captures the API-reported folders of the server's protected primary dimensions. */
+    public Set<Path> getProtectedMainWorldDirectories() {
+        Server server = plugin.getServer();
+        List<World> loadedWorlds = server.getWorlds();
+        Set<Path> protectedDirectories = new LinkedHashSet<>();
+        for (int index = 0; index < loadedWorlds.size(); index++) {
+            World world = loadedWorlds.get(index);
+            if (index == 0 || VANILLA_MAIN_WORLD_KEYS.contains(world.getKey())) {
+                protectedDirectories.add(
+                        world.getWorldFolder().toPath().toAbsolutePath().normalize()
+                );
+            }
+        }
+        return Set.copyOf(protectedDirectories);
     }
 
     private CompletableFuture<Boolean> evacuatePlayer(

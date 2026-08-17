@@ -3,13 +3,14 @@ package de.minecraftgilde.farmwelt.reset;
 import java.io.IOException;
 import java.nio.file.Path;
 
-/** Filesystem boundary. The engine invokes existence checks and deletion on the async scheduler. */
+/** Filesystem boundary. The engine invokes validation and deletion on the async scheduler. */
 public interface WorldDirectoryOperations {
 
-    Path resolveWorldDirectory(String worldName);
-
-    /** Returns whether the path is a real, non-symlink Minecraft world directory. */
-    boolean exists(Path worldDirectory);
+    /**
+     * Validates the directory reported by Bukkit for the loaded world. Implementations must not
+     * derive a storage path from {@code worldName}.
+     */
+    Path validateWorldDirectory(String worldName, Path actualWorldDirectory);
 
     void deleteRecursively(Path worldDirectory) throws IOException;
 }

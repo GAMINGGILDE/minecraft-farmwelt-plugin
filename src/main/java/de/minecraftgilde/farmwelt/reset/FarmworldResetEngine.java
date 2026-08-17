@@ -83,28 +83,12 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ));
         }
 
-        final Path worldDirectory;
-        try {
-            worldDirectory = directoryOperations.resolveWorldDirectory(resetConfig.worldName());
-        } catch (RuntimeException exception) {
-            runningResets.remove(farmworldKey);
-            logger.log(Level.WARNING, "Unsichere Reset-Konfiguration für Farmwelt '"
-                    + farmworldKey + "': " + exception.getMessage());
-            return CompletableFuture.completedFuture(new ResetResult(
-                    farmworldKey,
-                    resetConfig.worldName(),
-                    ResetStatus.INVALID_CONFIGURATION,
-                    "Die konfigurierte Reset-Welt oder ihr Pfad ist nicht sicher.",
-                    exception
-            ));
-        }
-
         logger.info("Reset für Farmwelt '" + farmworldKey + "' ("
                 + resetConfig.worldName() + ") gestartet.");
 
         CompletableFuture<ResetResult> resetFuture;
         try {
-            resetFuture = execute(resetConfig, worldDirectory)
+            resetFuture = execute(resetConfig)
                     .handle((result, failure) -> finish(resetConfig, result, failure));
         } catch (RuntimeException exception) {
             resetFuture = CompletableFuture.completedFuture(finish(resetConfig, null, exception));
@@ -126,11 +110,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         return !isResetRunning(farmworldKey);
     }
 
-    private CompletableFuture<ResetResult> execute(
-            FarmworldResetConfig resetConfig,
-            Path worldDirectory
-    ) {
-        return validateWorld(resetConfig, worldDirectory)
+    private CompletableFuture<ResetResult> execute(FarmworldResetConfig resetConfig) {
+        return validateWorld(resetConfig)
                 .thenCompose(this::evacuatePlayers)
                 .thenCompose(this::unloadWorld)
                 .thenCompose(this::deleteWorldDirectory)
@@ -145,63 +126,93 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                 ));
     }
 
-    private CompletableFuture<PipelineContext> validateWorld(
-            FarmworldResetConfig resetConfig,
-            Path worldDirectory
-    ) {
+    private CompletableFuture<PipelineContext> validateWorld(FarmworldResetConfig resetConfig) {
         return mapOperationFailure(
-                scheduler.runAsync(() -> directoryOperations.exists(worldDirectory)),
-                ResetStatus.INVALID_CONFIGURATION,
-                "Der Weltordner konnte nicht sicher geprüft werden."
-        ).thenCompose(directoryExists -> mapOperationFailure(
                 scheduler.runGlobal(() -> worldOperations.inspect(resetConfig)),
                 ResetStatus.WORLD_NOT_FOUND,
                 "Die konfigurierte Welt konnte nicht geprüft werden."
         ).thenCompose(inspection -> {
-            if (!inspection.loaded() && !directoryExists) {
+            if (!inspection.loaded()) {
                 return failed(
-                        ResetStatus.WORLD_NOT_FOUND,
-                        "Weder eine geladene Welt noch ein sicherer Weltordner wurde gefunden.",
+                        ResetStatus.WORLD_NOT_LOADED,
+                        "Die Farmwelt ist derzeit nicht geladen und kann nicht sicher zurückgesetzt werden.",
                         null
                 );
             }
-            if (inspection.loaded() && !directoryExists) {
+            if (inspection.loadedWorldType().orElseThrow() != resetConfig.farmworldType()) {
                 return failed(
                         ResetStatus.INVALID_CONFIGURATION,
-                        "Der Ordner der geladenen Welt konnte nicht sicher identifiziert werden.",
+                        "Die Dimension der geladenen Welt passt nicht zur logischen Farmwelt-ID.",
                         null
                 );
             }
-            if (inspection.loaded()) {
-                Path loadedDirectory = inspection.loadedWorldDirectory().orElseThrow()
-                        .toAbsolutePath()
-                        .normalize();
-                if (!loadedDirectory.equals(worldDirectory.toAbsolutePath().normalize())) {
-                    return failed(
-                            ResetStatus.INVALID_CONFIGURATION,
-                            "Der geladene Weltordner entspricht nicht dem konfigurierten Reset-Pfad.",
-                            null
-                    );
-                }
-                if (inspection.loadedWorldType().orElseThrow() != resetConfig.farmworldType()) {
-                    return failed(
-                            ResetStatus.INVALID_CONFIGURATION,
-                            "Die Dimension der geladenen Welt passt nicht zur logischen Farmwelt-ID.",
-                            null
-                    );
-                }
+
+            Path actualWorldDirectory = inspection.loadedWorldDirectory().orElseThrow()
+                    .toAbsolutePath()
+                    .normalize();
+            logger.info("Geladene Bukkit-Welt '" + resetConfig.worldName() + "' gefunden.");
+            logger.info("Tatsächlicher Weltordner: " + actualWorldDirectory);
+
+            return validateActualWorldDirectory(resetConfig, actualWorldDirectory)
+                    .thenApply(validatedWorldDirectory -> {
+                        logger.info("Weltordner sicher validiert.");
+                        return new PipelineContext(resetConfig, validatedWorldDirectory);
+                    });
+        });
+    }
+
+    private CompletableFuture<Path> validateActualWorldDirectory(
+            FarmworldResetConfig resetConfig,
+            Path actualWorldDirectory
+    ) {
+        return scheduler.runAsync(() -> directoryOperations.validateWorldDirectory(
+                resetConfig.worldName(),
+                actualWorldDirectory
+        )).handle((validatedWorldDirectory, failure) -> {
+            if (failure == null) {
+                return validatedWorldDirectory;
             }
-            return CompletableFuture.completedFuture(
-                    new PipelineContext(resetConfig, worldDirectory, inspection.loaded())
+
+            Throwable cause = unwrap(failure);
+            if (cause instanceof WorldDirectoryValidationException validationFailure) {
+                throw new CompletionException(toResetFailure(validationFailure));
+            }
+            throw new CompletionException(new ResetPipelineException(
+                    ResetStatus.UNSAFE_WORLD_DIRECTORY,
+                    "Der von Bukkit gemeldete Weltordner konnte nicht sicher validiert werden.",
+                    cause
+            ));
+        });
+    }
+
+    private ResetPipelineException toResetFailure(
+            WorldDirectoryValidationException validationFailure
+    ) {
+        return switch (validationFailure.reason()) {
+            case INVALID_WORLD_NAME -> new ResetPipelineException(
+                    ResetStatus.INVALID_CONFIGURATION,
+                    "Der konfigurierte Bukkit-Weltname ist ungültig.",
+                    validationFailure
             );
-        }));
+            case WORLD_NOT_FOUND -> new ResetPipelineException(
+                    ResetStatus.WORLD_NOT_FOUND,
+                    "Der von Bukkit gemeldete Weltordner wurde nicht gefunden.",
+                    validationFailure
+            );
+            case PROTECTED_WORLD -> new ResetPipelineException(
+                    ResetStatus.PROTECTED_WORLD,
+                    "Die konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden.",
+                    validationFailure
+            );
+            case UNSAFE_PATH -> new ResetPipelineException(
+                    ResetStatus.UNSAFE_WORLD_DIRECTORY,
+                    "Der von Bukkit gemeldete Weltordner liegt außerhalb des erlaubten Bereichs.",
+                    validationFailure
+            );
+        };
     }
 
     private CompletableFuture<PipelineContext> evacuatePlayers(PipelineContext context) {
-        if (!context.wasLoaded()) {
-            return CompletableFuture.completedFuture(context);
-        }
-
         CompletableFuture<Boolean> evacuation = mapOperationFailure(
                 scheduler.runGlobal(() -> worldOperations.evacuatePlayers(context.resetConfig()))
                         .thenCompose(Function.identity()),
@@ -236,16 +247,11 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<PipelineContext> unloadWorld(PipelineContext context) {
-        CompletableFuture<Boolean> unload;
-        if (context.wasLoaded()) {
-            unload = mapOperationFailure(
-                    scheduler.runGlobal(() -> worldOperations.unload(context.resetConfig())),
-                    ResetStatus.UNLOAD_FAILED,
-                    "Die Welt konnte nicht entladen werden."
-            );
-        } else {
-            unload = CompletableFuture.completedFuture(true);
-        }
+        CompletableFuture<Boolean> unload = mapOperationFailure(
+                scheduler.runGlobal(() -> worldOperations.unload(context.resetConfig())),
+                ResetStatus.UNLOAD_FAILED,
+                "Die Welt konnte nicht entladen werden."
+        );
 
         return unload.thenCompose(success -> {
             if (!success) {
@@ -263,9 +269,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                             null
                     );
                 }
-                if (context.wasLoaded()) {
-                    logger.info("Welt '" + context.resetConfig().worldName() + "' entladen.");
-                }
+                logger.info("Welt '" + context.resetConfig().worldName() + "' entladen.");
                 return CompletableFuture.completedFuture(context);
             });
         });
@@ -290,16 +294,30 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                 scheduler.runGlobal(() -> worldOperations.createAndValidate(context.resetConfig())),
                 ResetStatus.CREATE_FAILED,
                 "Die gelöschte Welt konnte nicht neu erstellt werden."
-        ).thenCompose(success -> {
-            if (!success) {
+        ).thenCompose(createdWorldDirectory -> {
+            if (createdWorldDirectory.isEmpty()) {
                 return failed(
                         ResetStatus.CREATE_FAILED,
                         "Die gelöschte Welt konnte nicht neu erstellt und validiert werden.",
                         null
                 );
             }
-            logger.info("Welt '" + context.resetConfig().worldName() + "' neu erstellt.");
-            return CompletableFuture.completedFuture(context);
+
+            Path actualCreatedWorldDirectory = createdWorldDirectory.orElseThrow()
+                    .toAbsolutePath()
+                    .normalize();
+            return mapOperationFailure(
+                    scheduler.runAsync(() -> directoryOperations.validateWorldDirectory(
+                            context.resetConfig().worldName(),
+                            actualCreatedWorldDirectory
+                    )),
+                    ResetStatus.CREATE_FAILED,
+                    "Der neu erstellte Weltordner konnte nicht sicher validiert werden."
+            ).thenApply(validatedCreatedWorldDirectory -> {
+                logger.info("Farmwelt '" + context.resetConfig().worldName() + "' neu erstellt.");
+                logger.info("Neuer Weltordner: " + validatedCreatedWorldDirectory);
+                return context;
+            });
         });
     }
 
@@ -391,8 +409,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private record PipelineContext(
             FarmworldResetConfig resetConfig,
-            Path worldDirectory,
-            boolean wasLoaded
+            Path worldDirectory
     ) {
     }
 

@@ -22,6 +22,16 @@ final class ResetCommandMessages {
             case WORLD_NOT_FOUND -> List.of(
                     "§cDie konfigurierte Farmwelt oder ihr Weltordner wurde nicht gefunden."
             );
+            case WORLD_NOT_LOADED -> List.of(
+                    "§cDie Farmwelt ist derzeit nicht geladen und kann nicht sicher zurückgesetzt werden."
+            );
+            case PROTECTED_WORLD -> List.of(
+                    "§cDie konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden."
+            );
+            case UNSAFE_WORLD_DIRECTORY -> List.of(
+                    "§cDer von Bukkit gemeldete Weltordner liegt außerhalb des erlaubten Bereichs.",
+                    "§cEs wurden keine Weltdaten gelöscht."
+            );
             case EVACUATION_FAILED -> List.of(
                     "§cDer Reset wurde abgebrochen, da nicht alle Spieler sicher evakuiert werden konnten."
             );

@@ -1,5 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /** Bukkit-facing operations. Synchronous methods are invoked on the global region by the engine. */
@@ -15,5 +17,6 @@ public interface FarmworldWorldOperations {
 
     boolean isLoaded(FarmworldResetConfig resetConfig);
 
-    boolean createAndValidate(FarmworldResetConfig resetConfig);
+    /** Returns the actual folder of the newly created and validated Bukkit world. */
+    Optional<Path> createAndValidate(FarmworldResetConfig resetConfig);
 }

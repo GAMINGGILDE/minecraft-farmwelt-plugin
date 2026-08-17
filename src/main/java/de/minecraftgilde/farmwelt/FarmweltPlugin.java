@@ -60,17 +60,19 @@ public final class FarmweltPlugin extends JavaPlugin {
         }
         logResetStatus();
 
+        BukkitFarmworldWorldOperations worldOperations = new BukkitFarmworldWorldOperations(
+                this,
+                () -> resetService.getConfiguredWorlds().stream()
+                        .map(FarmworldResetConfig::worldName)
+                        .collect(Collectors.toUnmodifiableSet())
+        );
         resetEngine = new FarmworldResetEngine(
                 resetService,
-                new BukkitFarmworldWorldOperations(
-                        this,
-                        () -> resetService.getConfiguredWorlds().stream()
-                                .map(FarmworldResetConfig::worldName)
-                                .collect(Collectors.toUnmodifiableSet())
-                ),
+                worldOperations,
                 new SecureWorldDirectoryService(
                         getServer().getWorldContainer().toPath(),
-                        configManager::getMonitoredWorlds
+                        configManager::getMonitoredWorlds,
+                        worldOperations.getProtectedMainWorldDirectories()
                 ),
                 new FoliaFarmweltScheduler(this),
                 getLogger()

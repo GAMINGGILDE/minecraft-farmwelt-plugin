@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -55,12 +56,14 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.SUCCESS, result.status());
         assertEquals(List.of(
                 "inspect",
+                "validate",
                 "evacuate",
                 "hasPlayers",
                 "unload",
                 "isLoaded",
                 "delete",
                 "create",
+                "validateCreated",
                 "state"
         ), calls);
         FarmworldResetState state = resetService.getState("overworld").orElseThrow();
@@ -158,29 +161,68 @@ class FarmworldResetEngineTest {
     }
 
     @Test
-    void unloadedWorldWithSafeDirectoryCanBeResetWithoutEvacuationOrUnload() {
+    void unloadedWorldIsRejectedBeforeFilesystemChanges() {
         worldOperations.inspection = WorldInspection.unloaded();
         worldOperations.loaded = false;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.WORLD_NOT_LOADED, result.status());
+        assertEquals(List.of("inspect"), calls);
+        assertFalse(calls.contains("evacuate"));
+        assertFalse(calls.contains("unload"));
+        assertFalse(calls.contains("delete"));
+        assertFalse(calls.contains("create"));
+        assertFalse(calls.contains("state"));
+    }
+
+    @Test
+    void unsafeBukkitWorldDirectoryStopsBeforeEvacuation() {
+        directoryOperations.validationFailure = new WorldDirectoryValidationException(
+                WorldDirectoryValidationException.Reason.UNSAFE_PATH,
+                "unsafe"
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.UNSAFE_WORLD_DIRECTORY, result.status());
+        assertEquals(List.of("inspect", "validate"), calls);
+        assertFalse(calls.contains("evacuate"));
+        assertFalse(calls.contains("delete"));
+        assertFalse(calls.contains("create"));
+    }
+
+    @Test
+    void protectedMainWorldStopsWithExplicitStatus() {
+        directoryOperations.validationFailure = new WorldDirectoryValidationException(
+                WorldDirectoryValidationException.Reason.PROTECTED_WORLD,
+                "protected"
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.PROTECTED_WORLD, result.status());
+        assertEquals(List.of("inspect", "validate"), calls);
+        assertFalse(calls.contains("evacuate"));
+        assertFalse(calls.contains("delete"));
+    }
+
+    @Test
+    void usesExactBukkitInspectionPathForValidationAndDeletion() {
+        Path actualWorldDirectory = Path.of(
+                "server", "world", "dimensions", "worlds", "farmwelt"
+        ).toAbsolutePath().normalize();
+        worldOperations.inspection = WorldInspection.loaded(
+                actualWorldDirectory,
+                FarmworldType.OVERWORLD
+        );
+        worldOperations.createdWorldDirectory = actualWorldDirectory;
 
         ResetResult result = engine.reset("overworld").join();
 
         assertEquals(ResetStatus.SUCCESS, result.status());
-        assertFalse(calls.contains("evacuate"));
-        assertFalse(calls.contains("unload"));
-        assertTrue(calls.contains("delete"));
-    }
-
-    @Test
-    void missingLoadedWorldAndDirectoryReturnsWorldNotFound() {
-        worldOperations.inspection = WorldInspection.unloaded();
-        worldOperations.loaded = false;
-        directoryOperations.worldExists = false;
-
-        ResetResult result = engine.reset("overworld").join();
-
-        assertEquals(ResetStatus.WORLD_NOT_FOUND, result.status());
-        assertFalse(calls.contains("delete"));
-        assertFalse(calls.contains("create"));
+        assertEquals(actualWorldDirectory, directoryOperations.firstValidatedDirectory);
+        assertEquals(actualWorldDirectory, directoryOperations.deletedDirectory);
     }
 
     @Test
@@ -191,7 +233,7 @@ class FarmworldResetEngineTest {
 
         resetService.reload(List.of(new FarmworldResetConfig(
                 "overworld",
-                "farmwelt",
+                "replacement_farmwelt",
                 true,
                 Duration.ofDays(60)
         )));
@@ -201,6 +243,15 @@ class FarmworldResetEngineTest {
         pendingEvacuation.complete(true);
 
         assertEquals(ResetStatus.SUCCESS, runningReset.join().status());
+        assertEquals(
+                worldOperations.inspection.loadedWorldDirectory().orElseThrow(),
+                directoryOperations.deletedDirectory
+        );
+        assertEquals("farmwelt", directoryOperations.firstValidatedWorldName);
+        assertEquals(
+                "replacement_farmwelt",
+                resetService.getConfig("overworld").orElseThrow().worldName()
+        );
         assertEquals(Duration.ofDays(60), resetService.getConfig("overworld").orElseThrow().interval());
         assertEquals(
                 NOW.plus(Duration.ofDays(30)),
@@ -243,7 +294,9 @@ class FarmworldResetEngineTest {
 
         private final List<String> calls;
         private WorldInspection inspection = WorldInspection.loaded(
-                Path.of("worlds", "farmwelt").toAbsolutePath().normalize(),
+                Path.of("server", "world", "dimensions", "worlds", "farmwelt")
+                        .toAbsolutePath()
+                        .normalize(),
                 FarmworldType.OVERWORLD
         );
         private CompletableFuture<Boolean> evacuationResult = CompletableFuture.completedFuture(true);
@@ -251,6 +304,7 @@ class FarmworldResetEngineTest {
         private boolean unloadResult = true;
         private boolean loaded = true;
         private boolean createResult = true;
+        private Path createdWorldDirectory = inspection.loadedWorldDirectory().orElseThrow();
 
         private FakeWorldOperations(List<String> calls) {
             this.calls = calls;
@@ -290,36 +344,43 @@ class FarmworldResetEngineTest {
         }
 
         @Override
-        public boolean createAndValidate(FarmworldResetConfig resetConfig) {
+        public Optional<Path> createAndValidate(FarmworldResetConfig resetConfig) {
             calls.add("create");
-            return createResult;
+            return createResult ? Optional.of(createdWorldDirectory) : Optional.empty();
         }
     }
 
     private static final class FakeWorldDirectoryOperations implements WorldDirectoryOperations {
 
         private final List<String> calls;
-        private final Path worldDirectory = Path.of("worlds", "farmwelt").toAbsolutePath().normalize();
         private IOException deleteFailure;
-        private boolean worldExists = true;
+        private RuntimeException validationFailure;
+        private String firstValidatedWorldName;
+        private Path firstValidatedDirectory;
+        private Path deletedDirectory;
+        private int validationCount;
 
         private FakeWorldDirectoryOperations(List<String> calls) {
             this.calls = calls;
         }
 
         @Override
-        public Path resolveWorldDirectory(String worldName) {
-            return worldDirectory;
-        }
-
-        @Override
-        public boolean exists(Path candidate) {
-            return worldExists;
+        public Path validateWorldDirectory(String worldName, Path candidate) {
+            calls.add(validationCount++ == 0 ? "validate" : "validateCreated");
+            if (validationFailure != null) {
+                throw validationFailure;
+            }
+            if (firstValidatedDirectory == null) {
+                firstValidatedWorldName = worldName;
+                firstValidatedDirectory = candidate;
+            }
+            return candidate.toAbsolutePath().normalize();
         }
 
         @Override
         public void deleteRecursively(Path candidate) throws IOException {
             calls.add("delete");
+            deletedDirectory = candidate;
             if (deleteFailure != null) {
                 throw deleteFailure;
             }
