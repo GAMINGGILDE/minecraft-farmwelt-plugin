@@ -6,6 +6,7 @@ import de.minecraftgilde.farmwelt.model.ResourceWorldRule;
 import de.minecraftgilde.farmwelt.model.ResourceWorldType;
 import de.minecraftgilde.farmwelt.model.ViolationAction;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
+import de.minecraftgilde.farmwelt.reset.FarmworldType;
 import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -179,6 +180,10 @@ public final class ConfigManager {
         return monitoredWorlds.contains(worldName);
     }
 
+    public Set<String> getMonitoredWorlds() {
+        return monitoredWorlds;
+    }
+
     public boolean isIgnoredWorld(String worldName) {
         return ignoredWorlds.contains(worldName);
     }
@@ -336,11 +341,19 @@ public final class ConfigManager {
             return null;
         }
 
+        Optional<FarmworldType> farmworldType = FarmworldType.fromFarmworldKey(farmworldKey);
+        if (farmworldType.isEmpty()) {
+            plugin.getLogger().warning("Reset-Konfiguration für unbekannte Farmwelt-ID '"
+                    + farmworldKey + "' wurde deaktiviert.");
+            return null;
+        }
+
         return new FarmworldResetConfig(
                 farmworldKey,
                 worldName.trim(),
                 enabled,
-                interval.orElseThrow()
+                interval.orElseThrow(),
+                farmworldType.orElseThrow()
         );
     }
 

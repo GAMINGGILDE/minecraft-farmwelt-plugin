@@ -2,6 +2,7 @@ package de.minecraftgilde.farmwelt.reset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -107,6 +108,64 @@ class FarmworldResetServiceTest {
         assertEquals(0, repository.saveCount);
     }
 
+    @Test
+    void completesResetWithSnapshotIntervalAndPersistsState() throws IOException {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig resetConfig = config(Duration.ofDays(30));
+        service.reload(List.of(resetConfig));
+
+        Instant completion = Instant.parse("2026-08-17T07:00:00Z");
+        FarmworldResetState completedState = service.completeReset(resetConfig, completion);
+
+        assertEquals(Optional.of(completion), completedState.lastReset());
+        assertEquals(Instant.parse("2026-09-16T07:00:00Z"), completedState.nextReset());
+        assertEquals(completedState, service.getState("overworld").orElseThrow());
+        assertEquals(completedState, repository.states.get("overworld"));
+    }
+
+    @Test
+    void failedCompletionSaveDoesNotPublishCandidateState() {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig resetConfig = config(Duration.ofDays(30));
+        service.reload(List.of(resetConfig));
+        FarmworldResetState stateBeforeCompletion = service.getState("overworld").orElseThrow();
+        repository.failSaves = true;
+
+        assertThrows(
+                IOException.class,
+                () -> service.completeReset(resetConfig, Instant.parse("2026-08-17T07:00:00Z"))
+        );
+
+        assertEquals(stateBeforeCompletion, service.getState("overworld").orElseThrow());
+        assertEquals(stateBeforeCompletion, repository.states.get("overworld"));
+    }
+
+    @Test
+    void unknownFarmworldCannotCreateCompletionState() {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        service.reload(List.of(config(Duration.ofDays(30))));
+
+        assertThrows(IllegalArgumentException.class, () -> service.completeReset("foo"));
+        assertTrue(service.getState("foo").isEmpty());
+        assertFalse(repository.states.containsKey("foo"));
+    }
+
+    @Test
+    void disabledFarmworldCannotCompleteReset() {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig disabledConfig = new FarmworldResetConfig(
+                "overworld", "farmwelt", false, Duration.ofDays(30)
+        );
+        service.reload(List.of(disabledConfig));
+
+        assertThrows(IllegalStateException.class, () -> service.completeReset("overworld"));
+        assertTrue(service.getState("overworld").isEmpty());
+    }
+
     private FarmworldResetService createService(InMemoryResetStateRepository repository) {
         Logger logger = Logger.getLogger("FarmworldResetServiceTest-" + System.nanoTime());
         logger.setLevel(Level.OFF);
@@ -125,6 +184,7 @@ class FarmworldResetServiceTest {
 
         private Map<String, FarmworldResetState> states;
         private int saveCount;
+        private boolean failSaves;
 
         private InMemoryResetStateRepository() {
             this(Map.of());
@@ -141,6 +201,9 @@ class FarmworldResetServiceTest {
 
         @Override
         public void save(Map<String, FarmworldResetState> states) throws IOException {
+            if (failSaves) {
+                throw new IOException("simulierter Persistenzfehler");
+            }
             this.states = new LinkedHashMap<>(states);
             saveCount++;
         }

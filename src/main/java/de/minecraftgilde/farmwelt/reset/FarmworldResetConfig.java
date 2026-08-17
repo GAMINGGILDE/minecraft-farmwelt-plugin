@@ -10,8 +10,26 @@ public record FarmworldResetConfig(
         String farmworldKey,
         String worldName,
         boolean enabled,
-        Duration interval
+        Duration interval,
+        FarmworldType farmworldType
 ) {
+
+    public FarmworldResetConfig(
+            String farmworldKey,
+            String worldName,
+            boolean enabled,
+            Duration interval
+    ) {
+        this(
+                farmworldKey,
+                worldName,
+                enabled,
+                interval,
+                FarmworldType.fromFarmworldKey(farmworldKey).orElseThrow(
+                        () -> new IllegalArgumentException("Unbekannter Farmwelt-Typ: " + farmworldKey)
+                )
+        );
+    }
 
     public FarmworldResetConfig {
         if (farmworldKey == null || farmworldKey.isBlank()) {
@@ -22,6 +40,14 @@ public record FarmworldResetConfig(
         }
 
         Objects.requireNonNull(interval, "interval");
+        Objects.requireNonNull(farmworldType, "farmworldType");
+        FarmworldType.fromFarmworldKey(farmworldKey).ifPresent(expectedType -> {
+            if (expectedType != farmworldType) {
+                throw new IllegalArgumentException(
+                        "farmworldType passt nicht zur logischen Farmwelt-ID '" + farmworldKey + "'."
+                );
+            }
+        });
         if (interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("interval muss positiv sein.");
         }

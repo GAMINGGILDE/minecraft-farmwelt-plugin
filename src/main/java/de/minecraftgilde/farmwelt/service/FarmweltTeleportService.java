@@ -2,7 +2,9 @@ package de.minecraftgilde.farmwelt.service;
 
 import de.minecraftgilde.farmwelt.gui.FarmweltMenuItem;
 import de.minecraftgilde.farmwelt.gui.TeleportAction;
+import de.minecraftgilde.farmwelt.reset.FarmworldAvailabilityService;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.logging.Level;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
@@ -13,14 +15,25 @@ public final class FarmweltTeleportService {
     private static final String TYPE_COMMAND = "command";
     private static final String SENDER_PLAYER = "player";
     private static final String SENDER_CONSOLE = "console";
+    private static final String RESET_BLOCK_MESSAGE = "Diese Farmwelt wird derzeit zurückgesetzt.";
 
     private final JavaPlugin plugin;
+    private final FarmworldAvailabilityService availabilityService;
 
-    public FarmweltTeleportService(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public FarmweltTeleportService(
+            JavaPlugin plugin,
+            FarmworldAvailabilityService availabilityService
+    ) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.availabilityService = Objects.requireNonNull(availabilityService, "availabilityService");
     }
 
     public void teleport(Player player, FarmweltMenuItem menuItem) {
+        if (!availabilityService.isFarmworldAvailable(menuItem.id())) {
+            player.sendMessage(RESET_BLOCK_MESSAGE);
+            return;
+        }
+
         TeleportAction teleportAction = menuItem.teleportAction();
         if (!TYPE_COMMAND.equalsIgnoreCase(teleportAction.type())) {
             plugin.getLogger().warning("Farmwelt-Eintrag '" + menuItem.id()
@@ -37,6 +50,12 @@ public final class FarmweltTeleportService {
 
     private void executeCommand(Player player, FarmweltMenuItem menuItem) {
         player.closeInventory();
+
+        // Recheck in the entity context so a reset starting after the GUI click still blocks entry.
+        if (!availabilityService.isFarmworldAvailable(menuItem.id())) {
+            player.sendMessage(RESET_BLOCK_MESSAGE);
+            return;
+        }
 
         TeleportAction teleportAction = menuItem.teleportAction();
         String command = normalizeCommand(replacePlaceholders(teleportAction.command(), player, menuItem));

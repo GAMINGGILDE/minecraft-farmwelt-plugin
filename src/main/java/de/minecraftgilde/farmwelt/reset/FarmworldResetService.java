@@ -76,6 +76,61 @@ public final class FarmworldResetService {
         return List.copyOf(configurations.values());
     }
 
+    /**
+     * Persists a successful reset using the currently loaded configuration and the injected clock.
+     * The public in-memory state is replaced only after the repository save completed successfully.
+     */
+    public synchronized FarmworldResetState completeReset(String farmworldKey) throws IOException {
+        FarmworldResetConfig configuration = configurations.get(farmworldKey);
+        if (configuration == null) {
+            throw new IllegalArgumentException("Farmwelt '" + farmworldKey + "' ist nicht konfiguriert.");
+        }
+        return completeReset(configuration);
+    }
+
+    public synchronized FarmworldResetState completeReset(
+            FarmworldResetConfig configurationSnapshot
+    ) throws IOException {
+        return completeReset(configurationSnapshot, clock.instant());
+    }
+
+    /**
+     * Completes a reset with the immutable configuration snapshot captured by the reset engine.
+     * This makes a concurrent reload unable to change the interval of an already running reset.
+     */
+    public synchronized FarmworldResetState completeReset(
+            FarmworldResetConfig configurationSnapshot,
+            Instant completedAt
+    ) throws IOException {
+        Objects.requireNonNull(configurationSnapshot, "configurationSnapshot");
+        Objects.requireNonNull(completedAt, "completedAt");
+        if (!configurationSnapshot.enabled()) {
+            throw new IllegalStateException("Farmwelt '" + configurationSnapshot.farmworldKey()
+                    + "' ist für Resets deaktiviert.");
+        }
+
+        final Instant nextReset;
+        try {
+            nextReset = completedAt.plus(configurationSnapshot.interval());
+        } catch (DateTimeException | ArithmeticException exception) {
+            throw new IOException("Der nächste Reset-Zeitpunkt liegt außerhalb des unterstützten Bereichs.", exception);
+        }
+
+        FarmworldResetState completedState = new FarmworldResetState(
+                configurationSnapshot.farmworldKey(),
+                Optional.of(completedAt),
+                nextReset
+        );
+        Map<String, FarmworldResetState> candidateStates = new LinkedHashMap<>(states);
+        candidateStates.put(configurationSnapshot.farmworldKey(), completedState);
+        Map<String, FarmworldResetState> immutableCandidate = Collections.unmodifiableMap(candidateStates);
+
+        // Save first, publish second. A failed save therefore leaves the observable schedule unchanged.
+        stateRepository.save(immutableCandidate);
+        states = immutableCandidate;
+        return completedState;
+    }
+
     private Map<String, FarmworldResetConfig> indexConfigurations(
             Collection<FarmworldResetConfig> resetConfigurations
     ) {
