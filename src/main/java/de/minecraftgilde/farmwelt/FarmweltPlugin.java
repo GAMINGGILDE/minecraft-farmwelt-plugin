@@ -1,6 +1,8 @@
 package de.minecraftgilde.farmwelt;
 
 import de.minecraftgilde.farmwelt.command.FarmweltCommand;
+import de.minecraftgilde.farmwelt.command.FarmweltAdminCommandHandler;
+import de.minecraftgilde.farmwelt.command.FarmworldStatusFormatter;
 import de.minecraftgilde.farmwelt.config.ConfigManager;
 import de.minecraftgilde.farmwelt.gui.FarmweltMenu;
 import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
@@ -18,8 +20,12 @@ import de.minecraftgilde.farmwelt.service.JailActionService;
 import de.minecraftgilde.farmwelt.service.MessageService;
 import de.minecraftgilde.farmwelt.service.ResourceDetectionService;
 import de.minecraftgilde.farmwelt.service.ViolationService;
+import java.io.IOException;
 import java.time.Clock;
+import java.time.ZoneId;
 import java.util.stream.Collectors;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FarmweltPlugin extends JavaPlugin {
@@ -49,7 +55,9 @@ public final class FarmweltPlugin extends JavaPlugin {
                 Clock.systemUTC(),
                 getLogger()
         );
-        resetService.reload(configManager.getFarmworldResetConfigs());
+        if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
+            throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht geladen werden.");
+        }
         logResetStatus();
 
         resetEngine = new FarmworldResetEngine(
@@ -99,12 +107,17 @@ public final class FarmweltPlugin extends JavaPlugin {
         getLogger().info("Farmwelt wurde gestoppt.");
     }
 
-    public void reloadFarmweltConfiguration() {
+    public void reloadFarmweltConfiguration() throws IOException, InvalidConfigurationException {
+        // Validate first: JavaPlugin#reloadConfig logs malformed YAML without reporting it to the command caller.
+        YamlConfiguration validation = new YamlConfiguration();
+        validation.load(getDataFolder().toPath().resolve("config.yml").toFile());
         reloadConfig();
         configManager.loadFarmweltMenuItems();
         configManager.loadFarmworldResetConfigs();
         configManager.loadResourceMonitorConfig();
-        resetService.reload(configManager.getFarmworldResetConfigs());
+        if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
+            throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
+        }
         logResetStatus();
         claimProtectionService.reload();
         violationService.reload(configManager);
@@ -115,13 +128,21 @@ public final class FarmweltPlugin extends JavaPlugin {
     }
 
     private FarmweltCommand createFarmweltCommand() {
+        FarmweltAdminCommandHandler adminCommandHandler = new FarmweltAdminCommandHandler(
+                resetService,
+                resetEngine,
+                new FarmworldStatusFormatter(Clock.systemUTC(), ZoneId.systemDefault()),
+                this::reloadFarmweltConfiguration,
+                getLogger()
+        );
         return new FarmweltCommand(
                 this,
                 farmweltMenu,
                 claimProtectionService,
                 resourceDetectionService,
                 violationService,
-                configManager
+                configManager,
+                adminCommandHandler
         );
     }
 

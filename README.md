@@ -24,6 +24,7 @@ Das Plugin soll Spieler in Farmwelten lenken und Moderatoren entlasten. Es ist k
 - `enforce`-Modus mit sichtbarem Blockabbruch ab konfigurierter Schwelle.
 - Explosionsschutz im `enforce`-Modus: erkannte Ressourcen werden aus Explosionslisten entfernt.
 - Violation-Zähler mit Zeitfenster und Cooldowns.
+- Reset-Status und sichere manuelle Resets über den bestehenden `/farmwelt`-Befehl.
 - `/farmwelt info`, `/farmwelt reload` und Debug-Befehle.
 - GitHub Action für den Gradle-Build.
 
@@ -81,20 +82,28 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 | Befehl | Zweck | Permission | Empfohlen für |
 | --- | --- | --- | --- |
 | `/farmwelt` | Öffnet die Farmwelt-GUI. | `farmwelt.use` | Spieler |
+| `/farmwelt status` | Zeigt den Reset-Status aller konfigurierten Farmwelten. | `farmwelt.admin.status` | Admins |
+| `/farmwelt status <welt>` | Zeigt Reset-Details für eine logische ID wie `overworld`. | `farmwelt.admin.status` | Admins |
 | `/farmwelt info` | Zeigt Version, geladene Farmwelten, Monitor-Modus, Hook-Status und Jail-Modus. | `farmwelt.admin` | Admins |
-| `/farmwelt reload` | Lädt die Farmwelt-Konfiguration neu. | `farmwelt.admin` | Admins |
+| `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` | Admins |
+| `/farmwelt reset force <welt>` | Startet sofort die vollständige sichere Reset-Pipeline. | `farmwelt.admin.reset` | Admins |
 | `/farmwelt debug claim` | Prüft den Claim-Provider und ob die aktuelle Spielerposition in einem Claim liegt. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug monitor` | Schaltet einen Debug-Modus um; danach kann ein Block per Rechtsklick geprüft werden. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug violations [spieler]` | Zeigt den aktuellen Violation-Status des eigenen oder eines online Spielers. | `farmwelt.admin` | Admins/Moderation |
 
-`/farmwelt info` und `/farmwelt reload` können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden.
+Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
+
+`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, Evakuierung, Pfadprüfung, Unload, Löschen, Neuerstellung und State-Persistenz bleiben Teil der normalen sicheren Pipeline.
 
 ## Permissions
 
 | Permission | Bedeutung | Empfohlene Gruppe | Hinweis |
 | --- | --- | --- | --- |
 | `farmwelt.use` | Darf `/farmwelt` verwenden. | Spieler | Standardmäßig `true`. |
-| `farmwelt.admin` | Darf Info-, Reload- und Debug-Befehle verwenden. | Admins/Technik | Standardmäßig `op`. |
+| `farmwelt.admin` | Darf Info-/Debug-Befehle und über Child-Permissions alle Admin-Funktionen verwenden. | Admins/Technik | Standardmäßig `op`. |
+| `farmwelt.admin.status` | Darf Reset-Status und Details anzeigen. | Admins/Technik | Standardmäßig `op`. |
+| `farmwelt.admin.reload` | Darf die Konfiguration neu laden. | Admins/Technik | Standardmäßig `op`. |
+| `farmwelt.admin.reset` | Darf sofortige manuelle Farmwelt-Resets starten. | Admins/Technik | Standardmäßig `op`. |
 | `farmwelt.bypass` | Wird vom Ressourcenmonitor ignoriert. | Admins, ggf. Builder | Spieler mit Bypass erhalten keine Warnungen und werden nicht blockiert. |
 | `farmwelt.notify` | Erhält Staff-Benachrichtigungen. | Moderation/Admins | Wird für Audit- und Violation-Meldungen verwendet. |
 

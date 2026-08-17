@@ -106,8 +106,10 @@ Vorhandene Befehle:
 
 ```text
 /farmwelt
+/farmwelt status [welt]
 /farmwelt info
 /farmwelt reload
+/farmwelt reset force <welt>
 /farmwelt debug claim
 /farmwelt debug monitor
 /farmwelt debug violations [spieler]
@@ -116,9 +118,12 @@ Vorhandene Befehle:
 Permissions:
 
 - `/farmwelt`: `farmwelt.use`
-- Alle Admin-Subcommands: `farmwelt.admin`
+- Status: `farmwelt.admin.status`
+- Reload: `farmwelt.admin.reload`
+- Manueller Reset: `farmwelt.admin.reset`
+- Info und Debug: `farmwelt.admin`
 
-`/farmwelt info` und `/farmwelt reload` können auch von der Konsole genutzt werden. Debug-Befehle benötigen einen Spieler, weil sie mit Spielerpositionen, Rechtsklicks oder online Spielern arbeiten.
+Status, Info, Reload und manueller Reset können auch von der Konsole genutzt werden. Debug-Befehle benötigen einen Spieler, weil sie mit Spielerpositionen, Rechtsklicks oder online Spielern arbeiten. Async-Abschlussmeldungen laufen für Spieler über den EntityScheduler und für andere Sender über den GlobalRegionScheduler.
 
 ## GUI-Flow
 

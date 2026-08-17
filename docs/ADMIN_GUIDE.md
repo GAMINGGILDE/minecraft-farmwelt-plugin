@@ -20,6 +20,69 @@ Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren
 14. Danach bei passenden Regeln auf `mode: warn` wechseln.
 15. Erst nach erfolgreichen Tests `mode: enforce` aktivieren.
 
+## Administrative Reset-Befehle
+
+| Befehl | Beschreibung | Permission |
+| --- | --- | --- |
+| `/farmwelt status` | Kompakter Status aller konfigurierten Reset-Farmwelten. | `farmwelt.admin.status` |
+| `/farmwelt status <welt>` | Details inklusive Weltname, Typ, Intervall, letztem/nächstem Reset und Restzeit. | `farmwelt.admin.status` |
+| `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` |
+| `/farmwelt reset force <welt>` | Startet sofort die vollständige Reset-Pipeline. | `farmwelt.admin.reset` |
+
+Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `end` verwendet. Der tatsächliche Bukkit-Weltname wird nur aus `farmworlds.<id>.reset.world` gelesen. Alle administrativen Permissions sind standardmäßig nur für Operatoren aktiv.
+
+Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, Spielerevakuierung, Pfadschutz, Unload oder andere Sicherheitsprüfungen.
+
+Ein Reload verwendet denselben `FarmworldResetService` und dieselbe `FarmworldResetEngine` weiter. Dadurch bleiben laufende Locks und deren immutable Config-Snapshots erhalten; gespeicherte `nextReset`-Werte werden nicht neu berechnet.
+
+## Manueller End-to-End-Reset auf Folia
+
+Den ersten echten Test ausdrücklich mit einer wegwerfbaren Testwelt durchführen, niemals direkt mit einer produktiven Farmwelt. Beispiel:
+
+```yaml
+farmworlds:
+  overworld:
+    enabled: true
+    display-name: "Test-Farmwelt"
+    icon: GRASS_BLOCK
+    slot: 11
+
+    reset:
+      enabled: true
+      world: "test_farmwelt"
+      interval: "30d"
+
+    teleport:
+      type: command
+      sender: player
+      command: "betterrtp:rtp world test_farmwelt"
+```
+
+Nach dem Reload zuerst ausführen:
+
+```text
+/farmwelt status overworld
+/farmwelt reset force overworld
+```
+
+Danach kontrollieren:
+
+1. Der Command meldet den Start sofort.
+2. Spieler werden aus `test_farmwelt` evakuiert.
+3. Teleports zurück in die Welt werden während des Resets blockiert.
+4. Die Welt wird entladen.
+5. Der Weltordner wird gelöscht.
+6. Die Welt wird neu erstellt.
+7. Die neue Welt besitzt wieder den Typ `NORMAL`.
+8. Eine vorher platzierte Teststruktur ist verschwunden.
+9. BetterRTP kann wieder nach `test_farmwelt` teleportieren.
+10. `reset-state.yml` enthält den neuen UTC-Zeitpunkt.
+11. `/farmwelt status overworld` zeigt einen neuen `lastReset`.
+12. Der Status zeigt den daraus berechneten neuen `nextReset`.
+13. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
+
+Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
+
 ## Empfohlene Startwerte
 
 Konservative Startwerte:

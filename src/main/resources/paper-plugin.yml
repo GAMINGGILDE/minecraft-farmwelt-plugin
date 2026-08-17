@@ -26,5 +26,18 @@ permissions:
     description: Erhält Moderator-Benachrichtigungen.
     default: op
   farmwelt.admin:
-    description: Für spätere Admin-Funktionen vorgesehen.
+    description: Darf Diagnose- und alle getrennten Admin-Funktionen verwenden.
+    default: op
+    children:
+      farmwelt.admin.status: true
+      farmwelt.admin.reload: true
+      farmwelt.admin.reset: true
+  farmwelt.admin.status:
+    description: Darf den Reset-Status der Farmwelten anzeigen.
+    default: op
+  farmwelt.admin.reload:
+    description: Darf die Farmwelt-Konfiguration neu laden.
+    default: op
+  farmwelt.admin.reset:
+    description: Darf einen sofortigen manuellen Farmwelt-Reset starten.
     default: op

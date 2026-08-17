@@ -12,7 +12,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /** Executes one complete, asynchronous reset pipeline for a configured farmworld. */
-public final class FarmworldResetEngine implements FarmworldAvailabilityService {
+public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private final FarmworldResetService resetService;
     private final FarmworldWorldOperations worldOperations;

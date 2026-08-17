@@ -35,30 +35,31 @@ public final class FarmworldResetService {
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
-    public synchronized void reload(Collection<FarmworldResetConfig> resetConfigurations) {
+    public synchronized boolean reload(Collection<FarmworldResetConfig> resetConfigurations) {
         Objects.requireNonNull(resetConfigurations, "resetConfigurations");
 
         Map<String, FarmworldResetConfig> loadedConfigurations = indexConfigurations(resetConfigurations);
-        configurations = Collections.unmodifiableMap(loadedConfigurations);
-
         Map<String, FarmworldResetState> loadedStates;
         try {
             loadedStates = new LinkedHashMap<>(stateRepository.load());
         } catch (IOException exception) {
-            logger.log(Level.SEVERE, "Reset-States konnten nicht geladen werden. Bestehende In-Memory-States bleiben erhalten.", exception);
-            return;
+            logger.log(Level.SEVERE, "Reset-States konnten nicht geladen werden. Bestehende Reset-Konfiguration und In-Memory-States bleiben erhalten.", exception);
+            return false;
         }
 
         boolean stateChanged = initializeMissingStates(loadedConfigurations, loadedStates);
-        states = Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates));
-
         if (stateChanged) {
             try {
-                stateRepository.save(states);
+                stateRepository.save(Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates)));
             } catch (IOException exception) {
                 logger.log(Level.SEVERE, "Neu initialisierte Reset-States konnten nicht gespeichert werden.", exception);
+                return false;
             }
         }
+
+        configurations = Collections.unmodifiableMap(loadedConfigurations);
+        states = Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates));
+        return true;
     }
 
     public synchronized Optional<FarmworldResetConfig> getConfig(String farmworldKey) {

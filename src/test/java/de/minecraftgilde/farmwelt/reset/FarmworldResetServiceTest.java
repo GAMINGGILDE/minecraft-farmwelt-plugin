@@ -69,6 +69,20 @@ class FarmworldResetServiceTest {
     }
 
     @Test
+    void failedReloadKeepsPreviousConfigurationAndStateTogether() {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        assertTrue(service.reload(List.of(config(Duration.ofDays(30)))));
+        FarmworldResetState previousState = service.getState("overworld").orElseThrow();
+        repository.failLoads = true;
+
+        assertFalse(service.reload(List.of(config(Duration.ofDays(60)))));
+
+        assertEquals(Duration.ofDays(30), service.getConfig("overworld").orElseThrow().interval());
+        assertEquals(previousState, service.getState("overworld").orElseThrow());
+    }
+
+    @Test
     void loadsLastResetAndRetainsUnknownStates() {
         Instant lastReset = Instant.parse("2026-08-01T00:00:00Z");
         FarmworldResetState activeState = new FarmworldResetState(
@@ -184,6 +198,7 @@ class FarmworldResetServiceTest {
 
         private Map<String, FarmworldResetState> states;
         private int saveCount;
+        private boolean failLoads;
         private boolean failSaves;
 
         private InMemoryResetStateRepository() {
@@ -195,7 +210,10 @@ class FarmworldResetServiceTest {
         }
 
         @Override
-        public Map<String, FarmworldResetState> load() {
+        public Map<String, FarmworldResetState> load() throws IOException {
+            if (failLoads) {
+                throw new IOException("simulierter Ladefehler");
+            }
             return new LinkedHashMap<>(states);
         }
 
