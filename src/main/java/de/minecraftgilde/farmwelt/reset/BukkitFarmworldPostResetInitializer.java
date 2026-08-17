@@ -214,23 +214,29 @@ public final class BukkitFarmworldPostResetInitializer
 
         suppressEnderDragonSpawns(world.getName());
         logger.info("Dragon-Policy f\u00fcr '" + world.getName() + "' wird angewendet.");
-        return scheduler.runGlobal(() -> {
+        return scheduler.runRegion(world, 0, 0, () -> {
             DragonBattle battle = requireDragonBattle(world);
+            if (battle.generateEndPortal(true)) {
+                logger.info("Aktives End-Ausgangsportal f\u00fcr die Dragon-Policy erzeugt.");
+            } else {
+                logger.info("End-Ausgangsportal f\u00fcr die Dragon-Policy bereits vorhanden.");
+            }
             battle.setPreviouslyKilled(true);
             logger.info("DragonBattle als bereits besiegt markiert.");
-            return inspectDragonPolicy(world);
-        }).thenCompose(snapshot -> {
-            if (snapshot.activeDragons().isEmpty()) {
-                return finishDragonPolicy(world, snapshot);
-            }
-            logger.info("Enderdrache gefunden, Entfernung eingeplant.");
-            return removeEnderDragons(snapshot.activeDragons())
-                    .thenCompose(ignored -> scheduler.runGlobalDelayed(
-                            DRAGON_REMOVAL_VERIFICATION_DELAY_TICKS,
-                            () -> inspectDragonPolicy(world)
-                    ))
-                    .thenCompose(verification -> finishDragonPolicy(world, verification));
-        });
+            return null;
+        }).thenCompose(ignored -> scheduler.runGlobal(() -> inspectDragonPolicy(world)))
+                .thenCompose(snapshot -> {
+                    if (snapshot.activeDragons().isEmpty()) {
+                        return finishDragonPolicy(world, snapshot);
+                    }
+                    logger.info("Enderdrache gefunden, Entfernung eingeplant.");
+                    return removeEnderDragons(snapshot.activeDragons())
+                            .thenCompose(ignored -> scheduler.runGlobalDelayed(
+                                    DRAGON_REMOVAL_VERIFICATION_DELAY_TICKS,
+                                    () -> inspectDragonPolicy(world)
+                            ))
+                            .thenCompose(verification -> finishDragonPolicy(world, verification));
+                });
     }
 
     private CompletableFuture<Void> finishDragonPolicy(

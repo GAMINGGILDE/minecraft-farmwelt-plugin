@@ -2,6 +2,7 @@ package de.minecraftgilde.farmwelt.reset;
 
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FoliaFarmweltScheduler implements FarmweltScheduler {
@@ -39,6 +40,30 @@ public final class FoliaFarmweltScheduler implements FarmweltScheduler {
                     plugin,
                     ignored -> complete(future, operation),
                     ticks
+            );
+        } catch (RuntimeException exception) {
+            future.completeExceptionally(exception);
+        }
+        return future;
+    }
+
+    @Override
+    public <T> CompletableFuture<T> runRegion(
+            World world,
+            int chunkX,
+            int chunkZ,
+            CheckedSupplier<T> operation
+    ) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(operation, "operation");
+        CompletableFuture<T> future = new CompletableFuture<>();
+        try {
+            plugin.getServer().getRegionScheduler().execute(
+                    plugin,
+                    world,
+                    chunkX,
+                    chunkZ,
+                    () -> complete(future, operation)
             );
         } catch (RuntimeException exception) {
             future.completeExceptionally(exception);

@@ -140,7 +140,8 @@ public final class FarmweltPlugin extends JavaPlugin {
 
     private boolean initializeWorldsIntegration() {
         try {
-            worldsLifecycleService = WorldsFarmworldLifecycleService.connect();
+            worldsLifecycleService = WorldsFarmworldLifecycleService.connect(getLogger());
+            getServer().getPluginManager().registerEvents(worldsLifecycleService, this);
             getLogger().info("Worlds " + worldsLifecycleService.pluginVersion() + " erkannt.");
             getLogger().info("Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt.");
             return true;

@@ -236,7 +236,13 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         final CompletableFuture<World> regeneration;
         try {
             // Worlds owns Folia/global scheduling for its complete lifecycle operation.
-            regeneration = lifecycleService.regenerate(context.originalWorld());
+            regeneration = lifecycleService.regenerate(
+                    context.originalWorld(),
+                    FarmworldRegenerationOptions.forReset(
+                            context.resetConfig(),
+                            context.options()
+                    )
+            );
         } catch (RuntimeException exception) {
             return failed(
                     ResetStatus.REGENERATE_FAILED,

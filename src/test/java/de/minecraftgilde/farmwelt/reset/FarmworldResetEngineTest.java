@@ -70,6 +70,7 @@ class FarmworldResetEngineTest {
         postResetInitializer.result = CompletableFuture.completedFuture(PostResetResult.success());
         postResetInitializer.receivedConfig = null;
         postResetInitializer.receivedOptions = null;
+        lifecycleService.receivedOptions = null;
         calls.clear();
     }
 
@@ -267,7 +268,7 @@ class FarmworldResetEngineTest {
     }
 
     @Test
-    void passesOneTimeOptionsOnlyToPostResetPhase() {
+    void oneTimeDragonOverrideAlsoKeepsFightDataDuringRegeneration() {
         ResetOptions options = ResetOptions.allowingEnderDragon();
 
         ResetResult result = engine.reset("overworld", options).join();
@@ -275,6 +276,81 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.SUCCESS, result.status());
         assertSame(options, postResetInitializer.receivedOptions);
         assertEquals(1, lifecycleService.invocations);
+        assertFalse(lifecycleService.receivedOptions.resetEndDragonFightData());
+    }
+
+    @Test
+    void dragonDisabledEndResetRequestsFightDataResetFromLifecycle() {
+        World originalEnd = world("endfarm", World.Environment.THE_END, "old-endfarm", OLD_SEED);
+        World regeneratedEnd = world(
+                "endfarm", World.Environment.THE_END, "new-endfarm", NEW_SEED
+        );
+        resetService.reload(List.of(new FarmworldResetConfig(
+                "end",
+                "endfarm",
+                true,
+                Duration.ofDays(60),
+                FarmworldType.END,
+                new PostResetConfig(
+                        Map.of(),
+                        java.util.Optional.empty(),
+                        java.util.Optional.of(new EndPostResetConfig(false))
+                )
+        )));
+        worldOperations.inspectCount = 0;
+        worldOperations.initialInspection = WorldInspection.loaded(
+                originalEnd,
+                FarmworldType.END,
+                false
+        );
+        worldOperations.regeneratedInspection = WorldInspection.loaded(
+                regeneratedEnd,
+                FarmworldType.END,
+                false
+        );
+        lifecycleService.result = CompletableFuture.completedFuture(regeneratedEnd);
+
+        ResetResult result = engine.reset("end").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertTrue(lifecycleService.receivedOptions.resetEndDragonFightData());
+    }
+
+    @Test
+    void dragonOverrideSkipsFightDataResetForEndWorld() {
+        World originalEnd = world("endfarm", World.Environment.THE_END, "old-endfarm", OLD_SEED);
+        World regeneratedEnd = world(
+                "endfarm", World.Environment.THE_END, "new-endfarm", NEW_SEED
+        );
+        resetService.reload(List.of(new FarmworldResetConfig(
+                "end",
+                "endfarm",
+                true,
+                Duration.ofDays(60),
+                FarmworldType.END,
+                new PostResetConfig(
+                        Map.of(),
+                        java.util.Optional.empty(),
+                        java.util.Optional.of(new EndPostResetConfig(false))
+                )
+        )));
+        worldOperations.inspectCount = 0;
+        worldOperations.initialInspection = WorldInspection.loaded(
+                originalEnd,
+                FarmworldType.END,
+                false
+        );
+        worldOperations.regeneratedInspection = WorldInspection.loaded(
+                regeneratedEnd,
+                FarmworldType.END,
+                false
+        );
+        lifecycleService.result = CompletableFuture.completedFuture(regeneratedEnd);
+
+        ResetResult result = engine.reset("end", ResetOptions.allowingEnderDragon()).join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertFalse(lifecycleService.receivedOptions.resetEndDragonFightData());
     }
 
     @Test
@@ -513,6 +589,16 @@ class FarmworldResetEngineTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runRegion(
+                World world,
+                int chunkX,
+                int chunkZ,
+                CheckedSupplier<T> operation
+        ) {
+            return execute(operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return execute(operation);
         }
@@ -569,6 +655,7 @@ class FarmworldResetEngineTest {
         private final List<String> calls;
         private CompletableFuture<World> result;
         private World receivedWorld;
+        private FarmworldRegenerationOptions receivedOptions;
         private int invocations;
 
         private FakeLifecycleService(List<String> calls, CompletableFuture<World> result) {
@@ -577,9 +664,13 @@ class FarmworldResetEngineTest {
         }
 
         @Override
-        public CompletableFuture<World> regenerate(World world) {
+        public CompletableFuture<World> regenerate(
+                World world,
+                FarmworldRegenerationOptions options
+        ) {
             calls.add("regenerate");
             receivedWorld = world;
+            receivedOptions = options;
             invocations++;
             return result;
         }

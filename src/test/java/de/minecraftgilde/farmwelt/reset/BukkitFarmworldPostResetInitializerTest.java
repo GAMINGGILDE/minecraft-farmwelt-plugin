@@ -126,6 +126,8 @@ class BukkitFarmworldPostResetInitializerTest {
         );
 
         assertTrue(scenario.previouslyKilled().get());
+        assertTrue(scenario.endPortalGenerated().get());
+        assertEquals(1, scheduler.regionExecutions());
         assertTrue(result.isDone());
         assertTrue(result.join().successful());
         assertTrue(scheduler.delays().isEmpty());
@@ -267,8 +269,10 @@ class BukkitFarmworldPostResetInitializerTest {
 
         assertTrue(result.successful());
         assertFalse(scenario.previouslyKilled().get());
+        assertFalse(scenario.endPortalGenerated().get());
         assertEquals(0, scenario.battleLookups().get());
         assertEquals(0, scenario.entityLookups().get());
+        assertEquals(0, scheduler.regionExecutions());
         assertTrue(scheduler.delays().isEmpty());
         assertFalse(dragon.removed().get());
         assertFalse(delayedSpawn.isCancelled());
@@ -300,8 +304,10 @@ class BukkitFarmworldPostResetInitializerTest {
 
         assertTrue(result.successful());
         assertFalse(scenario.previouslyKilled().get());
+        assertFalse(scenario.endPortalGenerated().get());
         assertEquals(0, scenario.battleLookups().get());
         assertEquals(0, scenario.entityLookups().get());
+        assertEquals(0, scheduler.regionExecutions());
         assertTrue(scheduler.delays().isEmpty());
         assertFalse(dragon.removed().get());
         assertFalse(delayedSpawn.isCancelled());
@@ -494,11 +500,16 @@ class BukkitFarmworldPostResetInitializerTest {
         AtomicInteger battleLookups = new AtomicInteger();
         AtomicInteger entityLookups = new AtomicInteger();
         AtomicBoolean previouslyKilled = new AtomicBoolean();
+        AtomicBoolean endPortalGenerated = new AtomicBoolean();
 
         DragonBattle battle = (DragonBattle) Proxy.newProxyInstance(
                 DragonBattle.class.getClassLoader(),
                 new Class<?>[]{DragonBattle.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
+                    case "generateEndPortal" -> {
+                        endPortalGenerated.set((Boolean) arguments[0]);
+                        yield true;
+                    }
                     case "setPreviouslyKilled" -> {
                         if (battleStatePersists) {
                             previouslyKilled.set((Boolean) arguments[0]);
@@ -535,6 +546,7 @@ class BukkitFarmworldPostResetInitializerTest {
         return new DragonScenario(
                 world,
                 previouslyKilled,
+                endPortalGenerated,
                 battleLookups,
                 entityLookups
         );
@@ -603,6 +615,16 @@ class BukkitFarmworldPostResetInitializerTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runRegion(
+                World world,
+                int chunkX,
+                int chunkZ,
+                CheckedSupplier<T> operation
+        ) {
+            return runGlobal(operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return runGlobal(operation);
         }
@@ -612,6 +634,7 @@ class BukkitFarmworldPostResetInitializerTest {
 
         private final Deque<PendingOperation<?>> pending = new ArrayDeque<>();
         private final List<Long> delays = new java.util.ArrayList<>();
+        private int regionExecutions;
 
         @Override
         public <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation) {
@@ -630,6 +653,17 @@ class BukkitFarmworldPostResetInitializerTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runRegion(
+                World world,
+                int chunkX,
+                int chunkZ,
+                CheckedSupplier<T> operation
+        ) {
+            regionExecutions++;
+            return execute(operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return execute(operation);
         }
@@ -641,6 +675,10 @@ class BukkitFarmworldPostResetInitializerTest {
 
         private List<Long> delays() {
             return List.copyOf(delays);
+        }
+
+        private int regionExecutions() {
+            return regionExecutions;
         }
 
         private <T> CompletableFuture<T> execute(CheckedSupplier<T> operation) {
@@ -676,6 +714,7 @@ class BukkitFarmworldPostResetInitializerTest {
     private record DragonScenario(
             World world,
             AtomicBoolean previouslyKilled,
+            AtomicBoolean endPortalGenerated,
             AtomicInteger battleLookups,
             AtomicInteger entityLookups
     ) {
