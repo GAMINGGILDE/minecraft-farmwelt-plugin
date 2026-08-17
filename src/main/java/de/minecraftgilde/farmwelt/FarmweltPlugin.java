@@ -74,11 +74,15 @@ public final class FarmweltPlugin extends JavaPlugin {
                         .collect(Collectors.toUnmodifiableSet())
         );
         FoliaFarmweltScheduler resetScheduler = new FoliaFarmweltScheduler(this);
+        BukkitFarmworldPostResetInitializer postResetInitializer =
+                new BukkitFarmworldPostResetInitializer(this, resetScheduler, getLogger());
+        postResetInitializer.initializeDragonSpawnGuard(resetService.getConfiguredWorlds());
+        getServer().getPluginManager().registerEvents(postResetInitializer, this);
         resetEngine = new FarmworldResetEngine(
                 resetService,
                 worldOperations,
                 worldsLifecycleService,
-                new BukkitFarmworldPostResetInitializer(this, resetScheduler, getLogger()),
+                postResetInitializer,
                 resetScheduler,
                 getLogger()
         );

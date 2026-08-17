@@ -505,6 +505,14 @@ class FarmworldResetEngineTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runGlobalDelayed(
+                long ticks,
+                CheckedSupplier<T> operation
+        ) {
+            return execute(operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return execute(operation);
         }

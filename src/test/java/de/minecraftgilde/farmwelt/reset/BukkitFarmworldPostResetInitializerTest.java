@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,7 +22,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
+import org.bukkit.boss.DragonBattle;
 import org.bukkit.entity.EnderDragon;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
 
@@ -111,42 +116,171 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
-    void removesEnderDragonForNormalResetButOneTimeOverrideLeavesItAlone() {
-        AtomicBoolean removed = new AtomicBoolean();
-        AtomicInteger entityLookups = new AtomicInteger();
-        EnderDragon dragon = enderDragon(removed);
-        FarmworldResetConfig config = config(
-                FarmworldType.END,
-                new PostResetConfig(
-                        Map.of(),
-                        Optional.empty(),
-                        Optional.of(new EndPostResetConfig(false))
-                )
-        );
-        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
-
-        assertTrue(initializer.apply(
-                config,
-                world("endfarm", null, List.of(dragon), entityLookups),
+    void emptyWorldSucceedsImmediatelyWithoutDelayedChecks() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+                dragonDisabledConfig(),
+                scenario.world(),
                 ResetOptions.defaults()
-        ).join().successful());
-        assertTrue(removed.get());
+        );
 
-        removed.set(false);
-        entityLookups.set(0);
-        assertTrue(initializer.apply(
-                config,
-                world("endfarm", null, List.of(dragon), entityLookups),
+        assertTrue(scenario.previouslyKilled().get());
+        assertTrue(result.isDone());
+        assertTrue(result.join().successful());
+        assertTrue(scheduler.delays().isEmpty());
+        assertEquals(1, scenario.entityLookups().get());
+    }
+
+    @Test
+    void immediatelyPresentDragonIsRemovedAndLaterAbsenceIsVerified() {
+        TestDragon dragon = enderDragon(true);
+        DragonScenario scenario = dragonScenario(List.of(
+                List.of(dragon.entity()),
+                List.of()
+        ));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        );
+
+        assertTrue(dragon.removed().get());
+        assertFalse(result.isDone());
+        assertEquals(List.of(5L), scheduler.delays());
+        scheduler.advance();
+
+        assertTrue(result.join().successful());
+        // The same dragon is returned by DragonBattle and World, but removed only once.
+        assertEquals(1, dragon.removalAttempts().get());
+        assertEquals(2, scenario.entityLookups().get());
+    }
+
+    @Test
+    void dragonThatRemainsActiveFailsAfterRemovalVerification() {
+        TestDragon dragon = enderDragon(false);
+        DragonScenario scenario = dragonScenario(List.of(
+                List.of(dragon.entity()),
+                List.of(dragon.entity())
+        ));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        );
+
+        scheduler.advance();
+
+        assertFalse(result.join().successful());
+        assertEquals(1, dragon.removalAttempts().get());
+        assertEquals(2, scenario.entityLookups().get());
+        assertEquals(List.of(5L), scheduler.delays());
+    }
+
+    @Test
+    void retiredDragonStillRequiresARealLaterVerification() {
+        TestDragon dragon = retiredEnderDragon();
+        DragonScenario scenario = dragonScenario(List.of(
+                List.of(dragon.entity()), List.of()
+        ));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        );
+
+        assertTrue(dragon.removed().get());
+        assertEquals(0, dragon.removalAttempts().get());
+        assertFalse(result.isDone());
+        scheduler.advance();
+        assertTrue(result.join().successful());
+        assertEquals(List.of(5L), scheduler.delays());
+    }
+
+    @Test
+    void dragonBattleStateThatDoesNotRemainAppliedFailsThePolicy() {
+        DragonScenario scenario = dragonScenario(
+                List.of(List.of()),
+                false
+        );
+        ControllableScheduler scheduler = new ControllableScheduler();
+        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        );
+
+        assertTrue(result.isDone());
+        assertFalse(result.join().successful());
+        assertFalse(scenario.previouslyKilled().get());
+        assertTrue(scheduler.delays().isEmpty());
+    }
+
+    @Test
+    void verifiedDragonPolicyBlocksDragonSpawnDelayedUntilAPlayerEnters() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
+        CompletableFuture<PostResetResult> result = initializer.apply(
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        );
+        CreatureSpawnEvent delayedSpawn = dragonSpawnEvent(scenario.world());
+
+        initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
+
+        assertTrue(result.join().successful());
+        assertTrue(delayedSpawn.isCancelled());
+    }
+
+    @Test
+    void configuredDragonPolicyArmsSpawnGuardAtPluginStartup() {
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
+        CreatureSpawnEvent delayedSpawn = dragonSpawnEvent(world);
+
+        initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
+
+        assertTrue(delayedSpawn.isCancelled());
+    }
+
+    @Test
+    void oneTimeDragonOverrideSkipsBattleStateSearchesAndDelays() {
+        TestDragon dragon = enderDragon(true);
+        DragonScenario scenario = dragonScenario(List.of(List.of(dragon.entity())));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
+        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
+
+        PostResetResult result = initializer.apply(
+                dragonDisabledConfig(),
+                scenario.world(),
                 ResetOptions.allowingEnderDragon()
-        ).join().successful());
-        assertFalse(removed.get());
-        assertEquals(0, entityLookups.get());
-        assertFalse(config.postReset().end().orElseThrow().dragon());
+        ).join();
+        CreatureSpawnEvent delayedSpawn = dragonSpawnEvent(scenario.world());
+        initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
+
+        assertTrue(result.successful());
+        assertFalse(scenario.previouslyKilled().get());
+        assertEquals(0, scenario.battleLookups().get());
+        assertEquals(0, scenario.entityLookups().get());
+        assertTrue(scheduler.delays().isEmpty());
+        assertFalse(dragon.removed().get());
+        assertFalse(delayedSpawn.isCancelled());
     }
 
     @Test
     void configuredDragonTrueAllowsExistingDragonWithoutSpawningOrRemovingOne() {
-        AtomicInteger entityLookups = new AtomicInteger();
+        TestDragon dragon = enderDragon(true);
+        DragonScenario scenario = dragonScenario(List.of(List.of(dragon.entity())));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
+        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
         FarmworldResetConfig config = config(
                 FarmworldType.END,
                 new PostResetConfig(
@@ -156,15 +290,33 @@ class BukkitFarmworldPostResetInitializerTest {
                 )
         );
 
-        PostResetResult result = initializer(name -> null).apply(
+        PostResetResult result = initializer.apply(
                 config,
-                world("endfarm", null, List.of(), entityLookups),
+                scenario.world(),
                 ResetOptions.defaults()
         ).join();
+        CreatureSpawnEvent delayedSpawn = dragonSpawnEvent(scenario.world());
+        initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
 
         assertTrue(result.successful());
-        assertEquals(0, entityLookups.get());
+        assertFalse(scenario.previouslyKilled().get());
+        assertEquals(0, scenario.battleLookups().get());
+        assertEquals(0, scenario.entityLookups().get());
+        assertTrue(scheduler.delays().isEmpty());
+        assertFalse(dragon.removed().get());
+        assertFalse(delayedSpawn.isCancelled());
         assertTrue(config.postReset().end().orElseThrow().dragon());
+    }
+
+    private static FarmworldResetConfig dragonDisabledConfig() {
+        return config(
+                FarmworldType.END,
+                new PostResetConfig(
+                        Map.of(),
+                        Optional.empty(),
+                        Optional.of(new EndPostResetConfig(false))
+                )
+        );
     }
 
     private static BukkitFarmworldPostResetInitializer.ResolvedGameRule resolved(
@@ -185,9 +337,16 @@ class BukkitFarmworldPostResetInitializerTest {
     private static BukkitFarmworldPostResetInitializer initializer(
             BukkitFarmworldPostResetInitializer.GameRuleAccess gameRuleAccess
     ) {
+        return initializer(gameRuleAccess, new DirectScheduler());
+    }
+
+    private static BukkitFarmworldPostResetInitializer initializer(
+            BukkitFarmworldPostResetInitializer.GameRuleAccess gameRuleAccess,
+            FarmweltScheduler scheduler
+    ) {
         return new BukkitFarmworldPostResetInitializer(
                 proxy(Plugin.class),
-                new DirectScheduler(),
+                scheduler,
                 quietLogger(),
                 new GameruleValueConverter(),
                 gameRuleAccess
@@ -253,29 +412,131 @@ class BukkitFarmworldPostResetInitializerTest {
         );
     }
 
-    private static EnderDragon enderDragon(AtomicBoolean removed) {
+    private static CreatureSpawnEvent dragonSpawnEvent(World world) {
+        EnderDragon dragon = (EnderDragon) Proxy.newProxyInstance(
+                EnderDragon.class.getClassLoader(),
+                new Class<?>[]{EnderDragon.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getWorld" -> world;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> defaultValue(method.getReturnType());
+                }
+        );
+        return new CreatureSpawnEvent(
+                dragon,
+                CreatureSpawnEvent.SpawnReason.DEFAULT
+        );
+    }
+
+    private static TestDragon enderDragon(boolean removalSucceeds) {
+        return enderDragon(removalSucceeds, true);
+    }
+
+    private static TestDragon retiredEnderDragon() {
+        return enderDragon(false, false);
+    }
+
+    private static TestDragon enderDragon(
+            boolean removalSucceeds,
+            boolean schedulerAccepts
+    ) {
+        AtomicBoolean removed = new AtomicBoolean();
+        AtomicInteger removalAttempts = new AtomicInteger();
+        UUID uniqueId = UUID.randomUUID();
         EntityScheduler entityScheduler = (EntityScheduler) Proxy.newProxyInstance(
                 EntityScheduler.class.getClassLoader(),
                 new Class<?>[]{EntityScheduler.class},
                 (proxy, method, arguments) -> {
                     if ("execute".equals(method.getName())) {
+                        if (!schedulerAccepts) {
+                            removed.set(true);
+                            return false;
+                        }
                         ((Runnable) arguments[1]).run();
                         return true;
                     }
                     return defaultValue(method.getReturnType());
                 }
         );
-        return (EnderDragon) Proxy.newProxyInstance(
+        EnderDragon entity = (EnderDragon) Proxy.newProxyInstance(
                 EnderDragon.class.getClassLoader(),
                 new Class<?>[]{EnderDragon.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getScheduler" -> entityScheduler;
+                    case "getUniqueId" -> uniqueId;
+                    case "isValid" -> !removed.get();
+                    case "isDead" -> removed.get();
                     case "remove" -> {
-                        removed.set(true);
+                        removalAttempts.incrementAndGet();
+                        if (removalSucceeds) {
+                            removed.set(true);
+                        }
                         yield null;
+                    }
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> defaultValue(method.getReturnType());
+                }
+        );
+        return new TestDragon(entity, removed, removalAttempts);
+    }
+
+    private static DragonScenario dragonScenario(List<List<EnderDragon>> checks) {
+        return dragonScenario(checks, true);
+    }
+
+    private static DragonScenario dragonScenario(
+            List<List<EnderDragon>> checks,
+            boolean battleStatePersists
+    ) {
+        AtomicInteger checkIndex = new AtomicInteger();
+        AtomicInteger battleLookups = new AtomicInteger();
+        AtomicInteger entityLookups = new AtomicInteger();
+        AtomicBoolean previouslyKilled = new AtomicBoolean();
+
+        DragonBattle battle = (DragonBattle) Proxy.newProxyInstance(
+                DragonBattle.class.getClassLoader(),
+                new Class<?>[]{DragonBattle.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "setPreviouslyKilled" -> {
+                        if (battleStatePersists) {
+                            previouslyKilled.set((Boolean) arguments[0]);
+                        }
+                        yield null;
+                    }
+                    case "hasBeenPreviouslyKilled" -> previouslyKilled.get();
+                    case "getEnderDragon" -> {
+                        List<EnderDragon> dragons = checks.get(checkIndex.get());
+                        yield dragons.isEmpty() ? null : dragons.getFirst();
                     }
                     default -> defaultValue(method.getReturnType());
                 }
+        );
+        World world = (World) Proxy.newProxyInstance(
+                World.class.getClassLoader(),
+                new Class<?>[]{World.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getName" -> "endfarm";
+                    case "getEnderDragonBattle" -> {
+                        battleLookups.incrementAndGet();
+                        yield battle;
+                    }
+                    case "getEntitiesByClass" -> {
+                        entityLookups.incrementAndGet();
+                        yield checks.get(checkIndex.getAndIncrement());
+                    }
+                    case "toString" -> "FakeWorld[endfarm]";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> defaultValue(method.getReturnType());
+                }
+        );
+        return new DragonScenario(
+                world,
+                previouslyKilled,
+                battleLookups,
+                entityLookups
         );
     }
 
@@ -334,8 +595,89 @@ class BukkitFarmworldPostResetInitializerTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runGlobalDelayed(
+                long ticks,
+                CheckedSupplier<T> operation
+        ) {
+            return runGlobal(operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return runGlobal(operation);
         }
+    }
+
+    private static final class ControllableScheduler implements FarmweltScheduler {
+
+        private final Deque<PendingOperation<?>> pending = new ArrayDeque<>();
+        private final List<Long> delays = new java.util.ArrayList<>();
+
+        @Override
+        public <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation) {
+            return execute(operation);
+        }
+
+        @Override
+        public <T> CompletableFuture<T> runGlobalDelayed(
+                long ticks,
+                CheckedSupplier<T> operation
+        ) {
+            CompletableFuture<T> future = new CompletableFuture<>();
+            delays.add(ticks);
+            pending.addLast(new PendingOperation<>(operation, future));
+            return future;
+        }
+
+        @Override
+        public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
+            return execute(operation);
+        }
+
+        private void advance() {
+            PendingOperation<?> operation = pending.removeFirst();
+            operation.execute();
+        }
+
+        private List<Long> delays() {
+            return List.copyOf(delays);
+        }
+
+        private <T> CompletableFuture<T> execute(CheckedSupplier<T> operation) {
+            try {
+                return CompletableFuture.completedFuture(operation.get());
+            } catch (Exception exception) {
+                return CompletableFuture.failedFuture(exception);
+            }
+        }
+    }
+
+    private record PendingOperation<T>(
+            FarmweltScheduler.CheckedSupplier<T> operation,
+            CompletableFuture<T> future
+    ) {
+
+        private void execute() {
+            try {
+                future.complete(operation.get());
+            } catch (Exception exception) {
+                future.completeExceptionally(exception);
+            }
+        }
+    }
+
+    private record TestDragon(
+            EnderDragon entity,
+            AtomicBoolean removed,
+            AtomicInteger removalAttempts
+    ) {
+    }
+
+    private record DragonScenario(
+            World world,
+            AtomicBoolean previouslyKilled,
+            AtomicInteger battleLookups,
+            AtomicInteger entityLookups
+    ) {
     }
 }

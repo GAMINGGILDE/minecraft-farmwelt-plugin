@@ -7,6 +7,8 @@ public interface FarmweltScheduler {
 
     <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation);
 
+    <T> CompletableFuture<T> runGlobalDelayed(long ticks, CheckedSupplier<T> operation);
+
     <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation);
 
     @FunctionalInterface

@@ -24,6 +24,29 @@ public final class FoliaFarmweltScheduler implements FarmweltScheduler {
     }
 
     @Override
+    public <T> CompletableFuture<T> runGlobalDelayed(
+            long ticks,
+            CheckedSupplier<T> operation
+    ) {
+        Objects.requireNonNull(operation, "operation");
+        if (ticks < 1L) {
+            throw new IllegalArgumentException("ticks must be at least 1");
+        }
+
+        CompletableFuture<T> future = new CompletableFuture<>();
+        try {
+            plugin.getServer().getGlobalRegionScheduler().runDelayed(
+                    plugin,
+                    ignored -> complete(future, operation),
+                    ticks
+            );
+        } catch (RuntimeException exception) {
+            future.completeExceptionally(exception);
+        }
+        return future;
+    }
+
+    @Override
     public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
         Objects.requireNonNull(operation, "operation");
         CompletableFuture<T> future = new CompletableFuture<>();
