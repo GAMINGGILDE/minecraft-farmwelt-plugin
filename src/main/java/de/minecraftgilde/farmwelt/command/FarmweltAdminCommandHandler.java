@@ -3,6 +3,8 @@ package de.minecraftgilde.farmwelt.command;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetExecutor;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
+import de.minecraftgilde.farmwelt.reset.FarmworldType;
+import de.minecraftgilde.farmwelt.reset.ResetOptions;
 import de.minecraftgilde.farmwelt.reset.ResetResult;
 import de.minecraftgilde.farmwelt.reset.ResetStatus;
 import java.util.ArrayList;
@@ -90,6 +92,15 @@ public final class FarmweltAdminCommandHandler {
                 && audience.hasPermission(RESET_PERMISSION)) {
             return filterPrefix(configuredKeys(), args[2]);
         }
+        if (args.length == 4
+                && "reset".equalsIgnoreCase(args[0])
+                && "force".equalsIgnoreCase(args[1])
+                && audience.hasPermission(RESET_PERMISSION)) {
+            Optional<FarmworldResetConfig> config = findConfig(args[2]);
+            if (config.isPresent() && config.orElseThrow().farmworldType() == FarmworldType.END) {
+                return filterPrefix(List.of("--dragon"), args[3]);
+            }
+        }
         return List.of();
     }
 
@@ -146,8 +157,13 @@ public final class FarmweltAdminCommandHandler {
         if (!requirePermission(audience, RESET_PERMISSION)) {
             return;
         }
-        if (args.length != 3 || !"force".equalsIgnoreCase(args[1])) {
-            audience.sendMessage("§eVerwendung: /farmwelt reset force <welt>");
+        if ((args.length != 3 && args.length != 4) || !"force".equalsIgnoreCase(args[1])) {
+            sendResetUsage(audience);
+            return;
+        }
+        boolean allowEnderDragon = args.length == 4;
+        if (allowEnderDragon && !"--dragon".equalsIgnoreCase(args[3])) {
+            sendResetUsage(audience);
             return;
         }
 
@@ -160,7 +176,13 @@ public final class FarmweltAdminCommandHandler {
             return;
         }
 
-        String farmworldKey = config.orElseThrow().farmworldKey();
+        FarmworldResetConfig resetConfig = config.orElseThrow();
+        if (allowEnderDragon && resetConfig.farmworldType() != FarmworldType.END) {
+            audience.sendMessage("§cDie Option --dragon kann nur für eine End-Farmwelt verwendet werden.");
+            return;
+        }
+
+        String farmworldKey = resetConfig.farmworldKey();
         String initiator = "CONSOLE".equals(audience.name())
                 ? "CONSOLE"
                 : "Admin '" + audience.name() + "'";
@@ -170,7 +192,9 @@ public final class FarmweltAdminCommandHandler {
         final CompletableFuture<ResetResult> resetFuture;
         try {
             resetFuture = Objects.requireNonNull(
-                    resetExecutor.reset(farmworldKey),
+                    allowEnderDragon
+                            ? resetExecutor.reset(farmworldKey, ResetOptions.allowingEnderDragon())
+                            : resetExecutor.reset(farmworldKey),
                     "resetExecutor.reset(...)"
             );
         } catch (RuntimeException exception) {
@@ -198,6 +222,13 @@ public final class FarmweltAdminCommandHandler {
             }
             audience.sendMessages(ResetCommandMessages.forResult(result));
         });
+    }
+
+    private void sendResetUsage(AdminCommandAudience audience) {
+        audience.sendMessages(List.of(
+                "§eVerwendung: /farmwelt reset force <welt>",
+                "§eEnd-Event: /farmwelt reset force end --dragon"
+        ));
     }
 
     private FarmworldResetStatusSnapshot snapshot(FarmworldResetConfig config) {

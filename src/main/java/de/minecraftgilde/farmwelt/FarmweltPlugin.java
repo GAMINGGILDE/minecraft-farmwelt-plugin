@@ -8,6 +8,7 @@ import de.minecraftgilde.farmwelt.gui.FarmweltMenu;
 import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
 import de.minecraftgilde.farmwelt.listener.ResourceBreakListener;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
+import de.minecraftgilde.farmwelt.reset.BukkitFarmworldPostResetInitializer;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetEngine;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
@@ -72,11 +73,13 @@ public final class FarmweltPlugin extends JavaPlugin {
                         .map(FarmworldResetConfig::worldName)
                         .collect(Collectors.toUnmodifiableSet())
         );
+        FoliaFarmweltScheduler resetScheduler = new FoliaFarmweltScheduler(this);
         resetEngine = new FarmworldResetEngine(
                 resetService,
                 worldOperations,
                 worldsLifecycleService,
-                new FoliaFarmweltScheduler(this),
+                new BukkitFarmworldPostResetInitializer(this, resetScheduler, getLogger()),
+                resetScheduler,
                 getLogger()
         );
 

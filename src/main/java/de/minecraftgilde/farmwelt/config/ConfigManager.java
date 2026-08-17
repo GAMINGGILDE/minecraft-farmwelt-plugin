@@ -7,6 +7,7 @@ import de.minecraftgilde.farmwelt.model.ResourceWorldType;
 import de.minecraftgilde.farmwelt.model.ViolationAction;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldType;
+import de.minecraftgilde.farmwelt.reset.PostResetConfig;
 import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +34,7 @@ public final class ConfigManager {
 
     private final JavaPlugin plugin;
     private final ResetIntervalParser resetIntervalParser = new ResetIntervalParser();
+    private final FarmworldPostResetConfigParser postResetConfigParser;
     private List<FarmweltMenuItem> farmweltMenuItems = List.of();
     private List<FarmworldResetConfig> farmworldResetConfigs = List.of();
     private boolean resourceMonitorEnabled;
@@ -52,6 +54,7 @@ public final class ConfigManager {
 
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
+        this.postResetConfigParser = new FarmworldPostResetConfigParser(plugin.getLogger());
     }
 
     public void loadFarmweltMenuItems() {
@@ -348,12 +351,27 @@ public final class ConfigManager {
             return null;
         }
 
+        final PostResetConfig postReset;
+        try {
+            postReset = postResetConfigParser.parse(
+                    resetSection.getConfigurationSection("post-reset"),
+                    farmworldKey,
+                    farmworldType.orElseThrow()
+            );
+        } catch (IllegalArgumentException exception) {
+            plugin.getLogger().warning("Ung\u00fcltige Post-Reset-Konfiguration f\u00fcr Farmwelt '"
+                    + farmworldKey + "': " + exception.getMessage()
+                    + " Reset f\u00fcr diese Farmwelt wurde deaktiviert.");
+            return null;
+        }
+
         return new FarmworldResetConfig(
                 farmworldKey,
                 worldName.trim(),
                 enabled,
                 interval.orElseThrow(),
-                farmworldType.orElseThrow()
+                farmworldType.orElseThrow(),
+                postReset
         );
     }
 

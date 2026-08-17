@@ -34,6 +34,7 @@ class ResetCommandMessagesTest {
                 Arguments.of(ResetStatus.PROTECTED_WORLD, "als Hauptwelt geschützt"),
                 Arguments.of(ResetStatus.EVACUATION_FAILED, "evakuiert"),
                 Arguments.of(ResetStatus.REGENERATE_FAILED, "durch Worlds nicht neu generiert"),
+                Arguments.of(ResetStatus.POST_RESET_FAILED, "nicht vollständig initialisiert"),
                 Arguments.of(ResetStatus.STATE_SAVE_FAILED, "Reset-State konnte nicht gespeichert"),
                 Arguments.of(ResetStatus.INTERNAL_ERROR, "internen Fehler")
         );

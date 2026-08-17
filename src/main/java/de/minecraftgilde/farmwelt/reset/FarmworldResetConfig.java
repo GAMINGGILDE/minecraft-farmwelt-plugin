@@ -11,7 +11,8 @@ public record FarmworldResetConfig(
         String worldName,
         boolean enabled,
         Duration interval,
-        FarmworldType farmworldType
+        FarmworldType farmworldType,
+        PostResetConfig postReset
 ) {
 
     public FarmworldResetConfig(
@@ -27,8 +28,19 @@ public record FarmworldResetConfig(
                 interval,
                 FarmworldType.fromFarmworldKey(farmworldKey).orElseThrow(
                         () -> new IllegalArgumentException("Unbekannter Farmwelt-Typ: " + farmworldKey)
-                )
+                ),
+                PostResetConfig.none()
         );
+    }
+
+    public FarmworldResetConfig(
+            String farmworldKey,
+            String worldName,
+            boolean enabled,
+            Duration interval,
+            FarmworldType farmworldType
+    ) {
+        this(farmworldKey, worldName, enabled, interval, farmworldType, PostResetConfig.none());
     }
 
     public FarmworldResetConfig {
@@ -41,6 +53,7 @@ public record FarmworldResetConfig(
 
         Objects.requireNonNull(interval, "interval");
         Objects.requireNonNull(farmworldType, "farmworldType");
+        Objects.requireNonNull(postReset, "postReset");
         FarmworldType.fromFarmworldKey(farmworldKey).ifPresent(expectedType -> {
             if (expectedType != farmworldType) {
                 throw new IllegalArgumentException(

@@ -30,10 +30,11 @@ Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren
 | `/farmwelt status <welt>` | Details inklusive Weltname, Typ, Intervall, letztem/nächstem Reset und Restzeit. | `farmwelt.admin.status` |
 | `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` |
 | `/farmwelt reset force <welt>` | Startet sofort die vollständige Reset-Pipeline. | `farmwelt.admin.reset` |
+| `/farmwelt reset force end --dragon` | Erlaubt den Enderdrachen einmalig für genau diesen Reset. | `farmwelt.admin.reset` |
 
 Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `end` verwendet. Der tatsächliche Bukkit-Weltname wird nur aus `farmworlds.<id>.reset.world` gelesen. Alle administrativen Permissions sind standardmäßig nur für Operatoren aktiv.
 
-Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen.
+Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen. `--dragon` ist nur für `end` zulässig, verhindert bei diesem einen Lauf ausschließlich die Dragon-Entfernung und wird nicht in die Config geschrieben.
 
 Ein Reload verwendet denselben `FarmworldResetService` und dieselbe `FarmworldResetEngine` weiter. Dadurch bleiben laufende Locks und deren immutable Config-Snapshots erhalten; gespeicherte `nextReset`-Werte werden nicht neu berechnet.
 
@@ -53,6 +54,12 @@ farmworlds:
       enabled: true
       world: "worlds_farmwelt"
       interval: "30d"
+      post-reset:
+        gamerules:
+          players_sleeping_percentage: 50
+          show_advancement_messages: false
+        world-border:
+          size: 20000
 
     teleport:
       type: command
@@ -78,12 +85,13 @@ Vor dem Reset in `worlds_farmwelt` eine kleine, eindeutig erkennbare Teststruktu
 7. Die neue Welt besitzt wieder den Typ `NORMAL`.
 8. Die vorher platzierte Teststruktur ist verschwunden.
 9. `/farmwelt` beziehungsweise BetterRTP kann wieder nach `worlds_farmwelt` teleportieren.
-10. `reset-state.yml` enthält erst nach erfolgreicher Regeneration den neuen UTC-Zeitpunkt.
-11. `/farmwelt status overworld` zeigt einen neuen `lastReset`.
-12. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
-13. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
+10. Die konfigurierten Gamerules und die WorldBorder sind über die Bukkit-API gesetzt.
+11. `reset-state.yml` enthält erst nach erfolgreicher Regeneration und Post-Reset-Initialisierung den neuen UTC-Zeitpunkt.
+12. `/farmwelt status overworld` zeigt einen neuen `lastReset`.
+13. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
+14. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
 
-Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
+Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3.5 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
 
 ## Empfohlene Startwerte
 

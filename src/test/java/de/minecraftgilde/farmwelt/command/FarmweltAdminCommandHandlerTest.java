@@ -10,6 +10,7 @@ import de.minecraftgilde.farmwelt.reset.FarmworldResetExecutor;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetState;
 import de.minecraftgilde.farmwelt.reset.ResetResult;
+import de.minecraftgilde.farmwelt.reset.ResetOptions;
 import de.minecraftgilde.farmwelt.reset.ResetStateRepository;
 import de.minecraftgilde.farmwelt.reset.ResetStatus;
 import java.time.Clock;
@@ -52,10 +53,12 @@ class FarmweltAdminCommandHandlerTest {
     void configureWorlds() {
         resetService.reload(List.of(
                 new FarmworldResetConfig("overworld", "test_farmwelt", true, Duration.ofDays(30)),
-                new FarmworldResetConfig("nether", "test_netherfarm", false, Duration.ofDays(30))
+                new FarmworldResetConfig("nether", "test_netherfarm", false, Duration.ofDays(30)),
+                new FarmworldResetConfig("end", "test_endfarm", true, Duration.ofDays(60))
         ));
         resetExecutor.future = new CompletableFuture<>();
         resetExecutor.lastKey = null;
+        resetExecutor.lastOptions = null;
         reloadCount.set(0);
     }
 
@@ -109,7 +112,7 @@ class FarmweltAdminCommandHandlerTest {
                 new String[]{"reset", "force", "missing"}
         ));
         assertTrue(audience.contains("nicht konfiguriert"));
-        assertTrue(audience.contains("overworld, nether"));
+        assertTrue(audience.contains("overworld, nether, end"));
         assertEquals(null, resetExecutor.lastKey);
 
         audience.clear();
@@ -165,7 +168,7 @@ class FarmweltAdminCommandHandlerTest {
 
         assertEquals(List.of("status"), handler.suggest(statusOnly, new String[]{""}));
         assertEquals(
-                List.of("overworld", "nether"),
+                List.of("overworld", "nether", "end"),
                 handler.suggest(statusOnly, new String[]{"status", ""})
         );
         assertTrue(handler.suggest(statusOnly, new String[]{"reset", ""}).isEmpty());
@@ -173,9 +176,46 @@ class FarmweltAdminCommandHandlerTest {
         TestAudience resetOnly = TestAudience.withPermissions(FarmweltAdminCommandHandler.RESET_PERMISSION);
         assertEquals(List.of("force"), handler.suggest(resetOnly, new String[]{"reset", ""}));
         assertEquals(
-                List.of("overworld", "nether"),
+                List.of("overworld", "nether", "end"),
                 handler.suggest(resetOnly, new String[]{"reset", "force", ""})
         );
+        assertEquals(
+                List.of("--dragon"),
+                handler.suggest(resetOnly, new String[]{"reset", "force", "end", ""})
+        );
+        assertTrue(handler.suggest(
+                resetOnly,
+                new String[]{"reset", "force", "overworld", ""}
+        ).isEmpty());
+    }
+
+    @Test
+    void dragonOverrideIsOneTimeAndOnlyAcceptedForEndFarmworld() {
+        TestAudience audience = TestAudience.withPermissions(FarmweltAdminCommandHandler.RESET_PERMISSION);
+
+        handler.handle(audience, new String[]{"reset", "force", "end", "--dragon"});
+
+        assertEquals("end", resetExecutor.lastKey);
+        assertEquals(ResetOptions.allowingEnderDragon(), resetExecutor.lastOptions);
+
+        resetExecutor.lastKey = null;
+        resetExecutor.lastOptions = null;
+        audience.clear();
+        handler.handle(audience, new String[]{"reset", "force", "overworld", "--dragon"});
+
+        assertEquals(null, resetExecutor.lastKey);
+        assertEquals(null, resetExecutor.lastOptions);
+        assertTrue(audience.contains("nur für eine End-Farmwelt"));
+    }
+
+    @Test
+    void rejectsUnknownAdditionalResetArguments() {
+        TestAudience audience = TestAudience.withPermissions(FarmweltAdminCommandHandler.RESET_PERMISSION);
+
+        handler.handle(audience, new String[]{"reset", "force", "end", "--unknown"});
+
+        assertEquals(null, resetExecutor.lastKey);
+        assertTrue(audience.contains("Verwendung: /farmwelt reset force <welt>"));
     }
 
     private static Logger quietLogger() {
@@ -188,10 +228,18 @@ class FarmweltAdminCommandHandlerTest {
 
         private CompletableFuture<ResetResult> future;
         private String lastKey;
+        private ResetOptions lastOptions;
 
         @Override
         public CompletableFuture<ResetResult> reset(String farmworldKey) {
             lastKey = farmworldKey;
+            return future;
+        }
+
+        @Override
+        public CompletableFuture<ResetResult> reset(String farmworldKey, ResetOptions options) {
+            lastKey = farmworldKey;
+            lastOptions = options;
             return future;
         }
 

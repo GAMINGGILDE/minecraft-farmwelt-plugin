@@ -35,6 +35,10 @@ final class ResetCommandMessages {
                     "§cDie Farmwelt konnte durch Worlds nicht neu generiert werden.",
                     "§cBitte Serverlog prüfen!"
             );
+            case POST_RESET_FAILED -> List.of(
+                    "§cDie Farmwelt wurde neu erstellt, konnte aber nicht vollständig initialisiert werden.",
+                    "§cBitte Serverlog prüfen!"
+            );
             case STATE_SAVE_FAILED -> List.of(
                     "§cDie Welt wurde erfolgreich regeneriert, aber der Reset-State konnte nicht gespeichert werden.",
                     "§cBitte reset-state.yml und Serverlog prüfen!"

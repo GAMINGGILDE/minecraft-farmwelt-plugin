@@ -54,10 +54,12 @@ class FarmworldResetEngineTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             quietLogger()
     );
+    private final FakePostResetInitializer postResetInitializer = new FakePostResetInitializer(calls);
     private final FarmworldResetEngine engine = new FarmworldResetEngine(
             resetService,
             worldOperations,
             lifecycleService,
+            postResetInitializer,
             new DirectScheduler(),
             quietLogger()
     );
@@ -65,6 +67,9 @@ class FarmworldResetEngineTest {
     @BeforeEach
     void configureReset() {
         resetService.reload(List.of(config()));
+        postResetInitializer.result = CompletableFuture.completedFuture(PostResetResult.success());
+        postResetInitializer.receivedConfig = null;
+        postResetInitializer.receivedOptions = null;
         calls.clear();
     }
 
@@ -79,6 +84,7 @@ class FarmworldResetEngineTest {
                 "hasPlayers",
                 "regenerate",
                 "inspectRegenerated",
+                "postReset",
                 "state"
         ), calls);
         assertSame(originalWorld, lifecycleService.receivedWorld);
@@ -238,6 +244,40 @@ class FarmworldResetEngineTest {
     }
 
     @Test
+    void postResetFailureDoesNotCompleteStateAndReleasesLock() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        postResetInitializer.result = CompletableFuture.completedFuture(
+                PostResetResult.failure("post reset failed", new IllegalStateException("broken"))
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.POST_RESET_FAILED, result.status());
+        assertEquals(List.of(
+                "inspect",
+                "evacuate",
+                "hasPlayers",
+                "regenerate",
+                "inspectRegenerated",
+                "postReset"
+        ), calls);
+        assertFalse(calls.contains("state"));
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void passesOneTimeOptionsOnlyToPostResetPhase() {
+        ResetOptions options = ResetOptions.allowingEnderDragon();
+
+        ResetResult result = engine.reset("overworld", options).join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertSame(options, postResetInitializer.receivedOptions);
+        assertEquals(1, lifecycleService.invocations);
+    }
+
+    @Test
     void concurrentResetLocksTeleportUntilWorldsFutureCompletes() {
         CompletableFuture<World> pendingRegeneration = new CompletableFuture<>();
         lifecycleService.result = pendingRegeneration;
@@ -317,6 +357,19 @@ class FarmworldResetEngineTest {
 
     @Test
     void reloadDuringWorldsResetKeepsLockAndOriginalIntervalSnapshot() {
+        PostResetConfig originalPostReset = new PostResetConfig(
+                Map.of("show_advancement_messages", false),
+                java.util.Optional.empty(),
+                java.util.Optional.empty()
+        );
+        resetService.reload(List.of(new FarmworldResetConfig(
+                "overworld",
+                "farmwelt",
+                true,
+                Duration.ofDays(30),
+                FarmworldType.OVERWORLD,
+                originalPostReset
+        )));
         CompletableFuture<World> pendingRegeneration = new CompletableFuture<>();
         lifecycleService.result = pendingRegeneration;
         CompletableFuture<ResetResult> runningReset = engine.reset("overworld");
@@ -335,6 +388,8 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.SUCCESS, runningReset.join().status());
         assertEquals("replacement_farmwelt", resetService.getConfig("overworld").orElseThrow().worldName());
         assertEquals(Duration.ofDays(60), resetService.getConfig("overworld").orElseThrow().interval());
+        assertEquals("farmwelt", postResetInitializer.receivedConfig.worldName());
+        assertSame(originalPostReset, postResetInitializer.receivedConfig.postReset());
         assertEquals(
                 NOW.plus(Duration.ofDays(30)),
                 resetService.getState("overworld").orElseThrow().nextReset()
@@ -350,6 +405,7 @@ class FarmworldResetEngineTest {
                 resetService,
                 worldOperations,
                 lifecycleService,
+                postResetInitializer,
                 new DirectScheduler(),
                 logger
         );
@@ -517,6 +573,31 @@ class FarmworldResetEngineTest {
             calls.add("regenerate");
             receivedWorld = world;
             invocations++;
+            return result;
+        }
+    }
+
+    private static final class FakePostResetInitializer implements FarmworldPostResetInitializer {
+
+        private final List<String> calls;
+        private CompletableFuture<PostResetResult> result =
+                CompletableFuture.completedFuture(PostResetResult.success());
+        private FarmworldResetConfig receivedConfig;
+        private ResetOptions receivedOptions;
+
+        private FakePostResetInitializer(List<String> calls) {
+            this.calls = calls;
+        }
+
+        @Override
+        public CompletableFuture<PostResetResult> apply(
+                FarmworldResetConfig config,
+                World regeneratedWorld,
+                ResetOptions options
+        ) {
+            calls.add("postReset");
+            receivedConfig = config;
+            receivedOptions = options;
             return result;
         }
     }

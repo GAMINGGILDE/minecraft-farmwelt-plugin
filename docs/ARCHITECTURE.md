@@ -52,6 +52,8 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- FarmworldLifecycleService.java
     +-- WorldsFarmworldLifecycleService.java
     +-- FarmworldResetEngine.java
+    +-- FarmworldPostResetInitializer.java
+    +-- BukkitFarmworldPostResetInitializer.java
     +-- FarmworldResetService.java
     +-- BukkitFarmworldWorldOperations.java
     +-- FoliaFarmweltScheduler.java
@@ -88,13 +90,16 @@ Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen
 
 ## Reset-Architektur und Worlds
 
-Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Logging sowie `lastReset` und `nextReset`. Worlds besitzt den technischen, versionsspezifischen Welt-Lifecycle.
+Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Post-Reset-Initialisierung, Logging sowie `lastReset` und `nextReset`. Worlds besitzt den technischen, versionsspezifischen Welt-Lifecycle.
 
 ```text
 FarmworldResetEngine
     -> FarmworldLifecycleService
         -> WorldsFarmworldLifecycleService
             -> WorldsAccess.regenerate(world)
+    -> FarmworldPostResetInitializer
+        -> Bukkit Gamerule-/WorldBorder-API
+        -> EnderDragon EntityScheduler
 ```
 
 Die produktive Pipeline lautet:
@@ -105,11 +110,12 @@ Config-Snapshot und Lock
     -> Spieler evakuieren und leere Welt bestätigen
     -> WorldsAccess.regenerate(world)
     -> neue Weltinstanz über Bukkit prüfen
+    -> Gamerules, WorldBorder und Enderdragon-Policy anwenden
     -> Reset-State speichern
     -> Lock freigeben
 ```
 
-Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse. Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration und erfolgreicher Validierung geschrieben. Schlägt anschließend nur `reset-state.yml` fehl, lautet das Ergebnis `STATE_SAVE_FAILED`; die Welt ist dann trotzdem bereits regeneriert.
+Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse. Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration, Validierung und Post-Reset-Initialisierung geschrieben. Scheitert die Initialisierung, lautet das Ergebnis `POST_RESET_FAILED`, der State bleibt unverändert und der Lock wird freigegeben. Schlägt anschließend nur `reset-state.yml` fehl, lautet das Ergebnis `STATE_SAVE_FAILED`; die Welt ist dann trotzdem bereits regeneriert und initialisiert.
 
 `WorldsAccess.regenerate(...)` wird nicht in `FoliaFarmweltScheduler.runGlobal(...)` verpackt, da Worlds sein Global-/Folia-Scheduling selbst kapselt. Eigene kurze Bukkit-Prüfungen und asynchrone State-I/O verwenden weiterhin den Farmwelt-Scheduler. Fehler der Worlds-Future werden als `REGENERATE_FAILED` mit unveränderter Ursache abgebildet. Die interne `WorldOperationException.Reason`-API von Worlds wird bewusst nicht in Commands oder Business-Logik übernommen.
 
@@ -148,6 +154,7 @@ Vorhandene Befehle:
 /farmwelt info
 /farmwelt reload
 /farmwelt reset force <welt>
+/farmwelt reset force end --dragon
 /farmwelt debug claim
 /farmwelt debug monitor
 /farmwelt debug violations [spieler]

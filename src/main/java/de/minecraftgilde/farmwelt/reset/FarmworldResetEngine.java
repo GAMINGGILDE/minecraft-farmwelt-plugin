@@ -17,6 +17,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private final FarmworldResetService resetService;
     private final FarmworldWorldOperations worldOperations;
     private final FarmworldLifecycleService lifecycleService;
+    private final FarmworldPostResetInitializer postResetInitializer;
     private final FarmweltScheduler scheduler;
     private final Logger logger;
     private final Set<String> runningResets = ConcurrentHashMap.newKeySet();
@@ -25,17 +26,25 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             FarmworldResetService resetService,
             FarmworldWorldOperations worldOperations,
             FarmworldLifecycleService lifecycleService,
+            FarmworldPostResetInitializer postResetInitializer,
             FarmweltScheduler scheduler,
             Logger logger
     ) {
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.worldOperations = Objects.requireNonNull(worldOperations, "worldOperations");
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService");
+        this.postResetInitializer = Objects.requireNonNull(postResetInitializer, "postResetInitializer");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
     public CompletableFuture<ResetResult> reset(String farmworldKey) {
+        return reset(farmworldKey, ResetOptions.defaults());
+    }
+
+    @Override
+    public CompletableFuture<ResetResult> reset(String farmworldKey, ResetOptions options) {
+        Objects.requireNonNull(options, "options");
         if (farmworldKey == null || farmworldKey.isBlank()) {
             return CompletableFuture.completedFuture(new ResetResult(
                     farmworldKey == null ? "" : farmworldKey,
@@ -88,7 +97,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
         CompletableFuture<ResetResult> resetFuture;
         try {
-            resetFuture = execute(resetConfig)
+            resetFuture = execute(resetConfig, options)
                     .handle((result, failure) -> finish(resetConfig, result, failure));
         } catch (RuntimeException exception) {
             resetFuture = CompletableFuture.completedFuture(finish(resetConfig, null, exception));
@@ -110,12 +119,16 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         return !isResetRunning(farmworldKey);
     }
 
-    private CompletableFuture<ResetResult> execute(FarmworldResetConfig resetConfig) {
-        return validateWorld(resetConfig)
+    private CompletableFuture<ResetResult> execute(
+            FarmworldResetConfig resetConfig,
+            ResetOptions options
+    ) {
+        return validateWorld(resetConfig, options)
                 .thenCompose(this::evacuatePlayers)
                 .thenCompose(this::confirmWorldIsEmpty)
                 .thenCompose(this::regenerateWorld)
                 .thenCompose(this::validateRegeneratedWorld)
+                .thenCompose(this::applyPostReset)
                 .thenCompose(this::persistState)
                 .thenApply(state -> new ResetResult(
                         resetConfig.farmworldKey(),
@@ -126,7 +139,10 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                 ));
     }
 
-    private CompletableFuture<PipelineContext> validateWorld(FarmworldResetConfig resetConfig) {
+    private CompletableFuture<PipelineContext> validateWorld(
+            FarmworldResetConfig resetConfig,
+            ResetOptions options
+    ) {
         return mapOperationFailure(
                 scheduler.runGlobal(() -> worldOperations.inspect(resetConfig)),
                 ResetStatus.INVALID_CONFIGURATION,
@@ -166,7 +182,12 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             logger.info("Geladene Bukkit-Welt '" + world.getName() + "' gefunden.");
             long oldSeed = world.getSeed();
             logger.info("Alter Seed: " + oldSeed);
-            return CompletableFuture.completedFuture(new PipelineContext(resetConfig, world, oldSeed));
+            return CompletableFuture.completedFuture(new PipelineContext(
+                    resetConfig,
+                    options,
+                    world,
+                    oldSeed
+            ));
         });
     }
 
@@ -248,9 +269,52 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     + "' erfolgreich regeneriert.");
             return CompletableFuture.completedFuture(new RegeneratedContext(
                     context.resetConfig(),
+                    context.options(),
                     context.oldSeed(),
                     regeneratedWorld
             ));
+        });
+    }
+
+    private CompletableFuture<RegeneratedContext> applyPostReset(RegeneratedContext context) {
+        final CompletableFuture<PostResetResult> initialization;
+        try {
+            initialization = Objects.requireNonNull(
+                    postResetInitializer.apply(
+                            context.resetConfig(),
+                            context.regeneratedWorld(),
+                            context.options()
+                    ),
+                    "postResetInitializer.apply(...)"
+            );
+        } catch (RuntimeException exception) {
+            return failed(
+                    ResetStatus.POST_RESET_FAILED,
+                    "Die Farmwelt wurde neu erstellt, konnte aber nicht vollst\u00e4ndig initialisiert werden.",
+                    exception
+            );
+        }
+
+        return mapOperationFailure(
+                initialization,
+                ResetStatus.POST_RESET_FAILED,
+                "Die Farmwelt wurde neu erstellt, konnte aber nicht vollst\u00e4ndig initialisiert werden."
+        ).thenCompose(result -> {
+            if (result == null) {
+                return failed(
+                        ResetStatus.POST_RESET_FAILED,
+                        "Die Post-Reset-Initialisierung hat kein Ergebnis geliefert.",
+                        null
+                );
+            }
+            if (!result.successful()) {
+                return failed(
+                        ResetStatus.POST_RESET_FAILED,
+                        result.message(),
+                        result.cause().orElse(null)
+                );
+            }
+            return CompletableFuture.completedFuture(context);
         });
     }
 
@@ -371,7 +435,9 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
         String logMessage = "Reset für Farmwelt '" + resetConfig.farmworldKey()
                 + "' abgebrochen: " + message;
-        if (status == ResetStatus.REGENERATE_FAILED || status == ResetStatus.STATE_SAVE_FAILED) {
+        if (status == ResetStatus.REGENERATE_FAILED
+                || status == ResetStatus.POST_RESET_FAILED
+                || status == ResetStatus.STATE_SAVE_FAILED) {
             if (reportedCause == null) {
                 logger.severe(logMessage);
             } else {
@@ -404,6 +470,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private record PipelineContext(
             FarmworldResetConfig resetConfig,
+            ResetOptions options,
             World originalWorld,
             long oldSeed
     ) {
@@ -411,6 +478,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private record RegeneratedContext(
             FarmworldResetConfig resetConfig,
+            ResetOptions options,
             long oldSeed,
             World regeneratedWorld
     ) {

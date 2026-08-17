@@ -90,13 +90,30 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 | `/farmwelt info` | Zeigt Version, geladene Farmwelten, Monitor-Modus, Hook-Status und Jail-Modus. | `farmwelt.admin` | Admins |
 | `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` | Admins |
 | `/farmwelt reset force <welt>` | Startet sofort die vollständige sichere Reset-Pipeline. | `farmwelt.admin.reset` | Admins |
+| `/farmwelt reset force end --dragon` | Erlaubt nur für diesen End-Reset den von Minecraft erzeugten Enderdrachen. | `farmwelt.admin.reset` | Admins |
 | `/farmwelt debug claim` | Prüft den Claim-Provider und ob die aktuelle Spielerposition in einem Claim liegt. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug monitor` | Schaltet einen Debug-Modus um; danach kann ein Block per Rechtsklick geprüft werden. | `farmwelt.admin` | Admins/Technik |
 | `/farmwelt debug violations [spieler]` | Zeigt den aktuellen Violation-Status des eigenen oder eines online Spielers. | `farmwelt.admin` | Admins/Moderation |
 
 Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
 
-`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline.
+`/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung, Post-Reset-Initialisierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline. `--dragon` ist nur für die End-Farmwelt zulässig, beeinflusst ausschließlich deren einmalige Post-Reset-Policy und ändert die Config nicht.
+
+Nach einer Regeneration können ausschließlich konfigurierte Gamerules, eine WorldBorder-Größe und für das End die Dragon-Policy angewendet werden:
+
+```yaml
+reset:
+  post-reset:
+    gamerules:
+      players_sleeping_percentage: 50
+      show_advancement_messages: false
+    world-border:
+      size: 20000
+    end:
+      dragon: false
+```
+
+Fehlende Unterabschnitte verändern die jeweilige Einstellung nicht. Gamerules werden über die Bukkit-Registry aufgelöst und entsprechend ihrem API-Typ gesetzt; es werden dafür keine Minecraft-Commands ausgeführt.
 
 Die Verantwortungsgrenze ist bewusst schmal: Farmwelt orchestriert Konfiguration, Lock, Teleport-Sperre, Spieler-Evakuierung, Fehler und Reset-State. Worlds besitzt den versionsspezifischen dynamischen Welt-Lifecycle einschließlich Entladen, Regenerieren und erneutem Laden unter Folia.
 

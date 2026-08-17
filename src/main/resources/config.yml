@@ -9,13 +9,20 @@ farmworlds:
       - "Für Holz, Sand, Erde und weitere Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Phase 3 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
+      # Phase 3.5 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "overworld" verwechseln.
       world: "farmwelt"
       # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
+      # Wird erst nach erfolgreicher Regeneration und Validierung angewendet.
+      post-reset:
+        gamerules:
+          players_sleeping_percentage: 50
+          show_advancement_messages: false
+        world-border:
+          size: 20000
     teleport:
       type: command
       sender: player
@@ -30,13 +37,18 @@ farmworlds:
       - "Farmwelt für Nether-Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Phase 3 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
+      # Phase 3.5 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "nether" verwechseln.
       world: "netherfarm"
       # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
+      post-reset:
+        gamerules:
+          show_advancement_messages: false
+        world-border:
+          size: 20000
     teleport:
       type: command
       sender: player
@@ -51,13 +63,21 @@ farmworlds:
       - "Farmwelt für End-Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Phase 3 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
+      # Phase 3.5 erlaubt Statusabfragen und manuelle Force-Resets, aber noch keine automatischen Resets.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "end" verwechseln.
       world: "endfarm"
       # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "60d"
+      post-reset:
+        gamerules:
+          show_advancement_messages: false
+        world-border:
+          size: 20000
+        end:
+          # false entfernt vorhandene Enderdrachen; --dragon überschreibt dies nur einmalig.
+          dragon: false
     teleport:
       type: command
       sender: player
