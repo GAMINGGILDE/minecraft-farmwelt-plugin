@@ -17,7 +17,20 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.zip.GZIPOutputStream;
 
-/** Safely prepares DragonBattle saved data while Worlds replaces an End world. */
+/**
+ * Safely writes Minecraft-internal DragonFight saved data while Worlds replaces an End world.
+ *
+ * <p>This file preparation is deliberately retained alongside the runtime {@code DragonBattle}
+ * API and the {@code CreatureSpawnEvent} guard. For Folia/Minecraft 26.1.2 it ensures that a
+ * regenerated End starts without the initial DragonBattle state and its unwanted boss bar before
+ * Bukkit can expose the newly loaded world. The runtime API subsequently verifies the loaded
+ * battle state, while the event guard prevents a delayed dragon spawn.</p>
+ *
+ * <p>The NBT layout and the tags written by this class are Minecraft-version-sensitive internal
+ * details. Minecraft version, DataVersion, and DragonFight saved-data changes must be reviewed
+ * before enabling this writer for any server upgrade. Compatibility is therefore checked by
+ * {@link EndDragonFightCompatibility} before the lifecycle service invokes this store.</p>
+ */
 final class EndDragonFightDataStore {
 
     private static final byte TAG_END = 0;
@@ -44,8 +57,9 @@ final class EndDragonFightDataStore {
             throw new IOException("DragonBattle-Datei liegt außerhalb des Weltordners.");
         }
 
+        validateWorldFolder(normalizedWorldFolder);
+        prepareFightDataParent(normalizedWorldFolder, fightData.getParent());
         validateExistingFightData(fightData);
-        Files.createDirectories(fightData.getParent());
         Optional<Path> backup = backupExistingFightData(fightData);
         Path temporary = fightData.resolveSibling(
                 fightData.getFileName() + ".farmwelt-new-" + UUID.randomUUID() + ".tmp"
@@ -87,7 +101,42 @@ final class EndDragonFightDataStore {
             if (!Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException("Sicherung der DragonBattle-Datei fehlt: " + backup);
             }
+            if (Files.isSymbolicLink(backup)
+                    || !Files.isRegularFile(backup, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException(
+                        "Sicherung der DragonBattle-Datei ist keine regul\u00e4re Datei: " + backup
+                );
+            }
             move(backup, fightData);
+        }
+    }
+
+    private void validateWorldFolder(Path worldFolder) throws IOException {
+        if (Files.isSymbolicLink(worldFolder)
+                || !Files.isDirectory(worldFolder, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException(
+                    "Weltordner muss ein regul\u00e4res Verzeichnis ohne symbolischen Link sein: "
+                            + worldFolder
+            );
+        }
+    }
+
+    private void prepareFightDataParent(Path worldFolder, Path fightDataParent)
+            throws IOException {
+        Path current = worldFolder;
+        for (Path segment : worldFolder.relativize(fightDataParent)) {
+            current = current.resolve(segment);
+            if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createDirectory(current);
+                continue;
+            }
+            if (Files.isSymbolicLink(current)
+                    || !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException(
+                        "DragonBattle-Verzeichnispfad darf keine symbolischen Links oder "
+                                + "Nicht-Verzeichnisse enthalten: " + current
+                );
+            }
         }
     }
 

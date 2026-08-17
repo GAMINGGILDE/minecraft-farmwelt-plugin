@@ -265,6 +265,7 @@ class FarmworldResetEngineTest {
         assertFalse(calls.contains("state"));
         assertEquals(previousState, resetService.getState("overworld").orElseThrow());
         assertFalse(engine.isResetRunning("overworld"));
+        assertTrue(postResetInitializer.resetScopeClosed);
     }
 
     @Test
@@ -683,9 +684,16 @@ class FarmworldResetEngineTest {
                 CompletableFuture.completedFuture(PostResetResult.success());
         private FarmworldResetConfig receivedConfig;
         private ResetOptions receivedOptions;
+        private boolean resetScopeClosed;
 
         private FakePostResetInitializer(List<String> calls) {
             this.calls = calls;
+        }
+
+        @Override
+        public ResetScope beginReset(FarmworldResetConfig config, ResetOptions options) {
+            resetScopeClosed = false;
+            return () -> resetScopeClosed = true;
         }
 
         @Override

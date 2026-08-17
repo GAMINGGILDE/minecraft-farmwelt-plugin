@@ -119,7 +119,8 @@ class BukkitFarmworldPostResetInitializerTest {
     void emptyWorldSucceedsImmediatelyWithoutDelayedChecks() {
         DragonScenario scenario = dragonScenario(List.of(List.of()));
         ControllableScheduler scheduler = new ControllableScheduler();
-        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+        CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
+                initializer(name -> null, scheduler),
                 dragonDisabledConfig(),
                 scenario.world(),
                 ResetOptions.defaults()
@@ -128,6 +129,9 @@ class BukkitFarmworldPostResetInitializerTest {
         assertTrue(scenario.previouslyKilled().get());
         assertTrue(scenario.endPortalGenerated().get());
         assertEquals(1, scheduler.regionExecutions());
+        assertEquals(scenario.world(), scheduler.regionWorld());
+        assertEquals(0, scheduler.regionChunkX());
+        assertEquals(0, scheduler.regionChunkZ());
         assertTrue(result.isDone());
         assertTrue(result.join().successful());
         assertTrue(scheduler.delays().isEmpty());
@@ -142,7 +146,8 @@ class BukkitFarmworldPostResetInitializerTest {
                 List.of()
         ));
         ControllableScheduler scheduler = new ControllableScheduler();
-        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+        CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
+                initializer(name -> null, scheduler),
                 dragonDisabledConfig(),
                 scenario.world(),
                 ResetOptions.defaults()
@@ -167,7 +172,8 @@ class BukkitFarmworldPostResetInitializerTest {
                 List.of(dragon.entity())
         ));
         ControllableScheduler scheduler = new ControllableScheduler();
-        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+        CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
+                initializer(name -> null, scheduler),
                 dragonDisabledConfig(),
                 scenario.world(),
                 ResetOptions.defaults()
@@ -188,7 +194,8 @@ class BukkitFarmworldPostResetInitializerTest {
                 List.of(dragon.entity()), List.of()
         ));
         ControllableScheduler scheduler = new ControllableScheduler();
-        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+        CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
+                initializer(name -> null, scheduler),
                 dragonDisabledConfig(),
                 scenario.world(),
                 ResetOptions.defaults()
@@ -209,7 +216,8 @@ class BukkitFarmworldPostResetInitializerTest {
                 false
         );
         ControllableScheduler scheduler = new ControllableScheduler();
-        CompletableFuture<PostResetResult> result = initializer(name -> null, scheduler).apply(
+        CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
+                initializer(name -> null, scheduler),
                 dragonDisabledConfig(),
                 scenario.world(),
                 ResetOptions.defaults()
@@ -222,10 +230,30 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
+    void portalGenerationFailureFailsPostResetPolicy() {
+        DragonScenario scenario = dragonScenario(
+                List.of(List.of()),
+                true,
+                new IllegalStateException("portal generation failed")
+        );
+
+        PostResetResult result = applyWithConfiguredGuard(
+                initializer(name -> null),
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        ).join();
+
+        assertFalse(result.successful());
+        assertFalse(scenario.previouslyKilled().get());
+    }
+
+    @Test
     void verifiedDragonPolicyBlocksDragonSpawnDelayedUntilAPlayerEnters() {
         DragonScenario scenario = dragonScenario(List.of(List.of()));
         ControllableScheduler scheduler = new ControllableScheduler();
         BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
         CompletableFuture<PostResetResult> result = initializer.apply(
                 dragonDisabledConfig(),
                 scenario.world(),
@@ -243,7 +271,7 @@ class BukkitFarmworldPostResetInitializerTest {
     void configuredDragonPolicyArmsSpawnGuardAtPluginStartup() {
         World world = world("endfarm", null, List.of());
         BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
-        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
         CreatureSpawnEvent delayedSpawn = dragonSpawnEvent(world);
 
         initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
@@ -252,12 +280,115 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
+    void reloadFromDragonFalseToTrueDisablesConfiguredGuard() {
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, false)));
+        assertTrue(spawnIsSuppressed(initializer, world));
+
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, true)));
+
+        assertFalse(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
+    void reloadFromDragonTrueToFalseEnablesConfiguredGuard() {
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, true)));
+        assertFalse(spawnIsSuppressed(initializer, world));
+
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, false)));
+
+        assertTrue(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
+    void reloadRemovesGuardForWorldNoLongerConfigured() {
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, false)));
+        assertTrue(spawnIsSuppressed(initializer, world));
+
+        initializer.synchronizeDragonSpawnGuards(List.of());
+
+        assertFalse(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
+    void reloadDisablesGuardWhenFarmworldIsDisabled() {
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, false)));
+        assertTrue(spawnIsSuppressed(initializer, world));
+
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(false, false)));
+
+        assertFalse(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
+    void configuredGuardDoesNotAffectOtherEndWorlds() {
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonConfig(true, false)));
+
+        assertFalse(spawnIsSuppressed(initializer, world("another_end", null, List.of())));
+    }
+
+    @Test
+    void runningResetKeepsSnapshotSuppressionAcrossReload() {
+        FarmworldResetConfig resetSnapshot = dragonConfig(true, false);
+        FarmworldResetConfig reloadedConfig = dragonConfig(true, true);
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(resetSnapshot));
+        FarmworldPostResetInitializer.ResetScope resetScope = initializer.beginReset(
+                resetSnapshot,
+                ResetOptions.defaults()
+        );
+
+        initializer.synchronizeDragonSpawnGuards(List.of(reloadedConfig));
+
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        assertTrue(initializer.apply(
+                resetSnapshot,
+                scenario.world(),
+                ResetOptions.defaults()
+        ).join().successful());
+        resetScope.close();
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
+    void runningDragonAllowedResetKeepsSnapshotAllowAcrossReload() {
+        FarmworldResetConfig resetSnapshot = dragonConfig(true, true);
+        FarmworldResetConfig reloadedConfig = dragonConfig(true, false);
+        World world = world("endfarm", null, List.of());
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(resetSnapshot));
+        FarmworldPostResetInitializer.ResetScope resetScope = initializer.beginReset(
+                resetSnapshot,
+                ResetOptions.defaults()
+        );
+
+        initializer.synchronizeDragonSpawnGuards(List.of(reloadedConfig));
+
+        assertFalse(spawnIsSuppressed(initializer, world));
+        resetScope.close();
+        assertTrue(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
     void oneTimeDragonOverrideSkipsBattleStateSearchesAndDelays() {
         TestDragon dragon = enderDragon(true);
         DragonScenario scenario = dragonScenario(List.of(List.of(dragon.entity())));
         ControllableScheduler scheduler = new ControllableScheduler();
         BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
-        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+        FarmworldPostResetInitializer.ResetScope resetScope = initializer.beginReset(
+                dragonDisabledConfig(),
+                ResetOptions.allowingEnderDragon()
+        );
 
         PostResetResult result = initializer.apply(
                 dragonDisabledConfig(),
@@ -276,6 +407,48 @@ class BukkitFarmworldPostResetInitializerTest {
         assertTrue(scheduler.delays().isEmpty());
         assertFalse(dragon.removed().get());
         assertFalse(delayedSpawn.isCancelled());
+        resetScope.close();
+
+        CreatureSpawnEvent laterSpawn = dragonSpawnEvent(scenario.world());
+        initializer.preventSuppressedEnderDragonSpawn(laterSpawn);
+        assertTrue(laterSpawn.isCancelled());
+    }
+
+    @Test
+    void failedDragonOverrideScopeRestoresConfiguredSuppression() {
+        World world = world("endfarm", null, List.of());
+        FarmworldResetConfig config = dragonConfig(true, false);
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
+        FarmworldPostResetInitializer.ResetScope resetScope = initializer.beginReset(
+                config,
+                ResetOptions.allowingEnderDragon()
+        );
+        assertFalse(spawnIsSuppressed(initializer, world));
+
+        // The engine closes this scope from whenComplete for both success and failure results.
+        resetScope.close();
+
+        assertTrue(spawnIsSuppressed(initializer, world));
+    }
+
+    @Test
+    void pluginShutdownClearsTemporaryDragonOverrideState() {
+        World world = world("endfarm", null, List.of());
+        FarmworldResetConfig config = dragonConfig(true, false);
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
+        FarmworldPostResetInitializer.ResetScope resetScope = initializer.beginReset(
+                config,
+                ResetOptions.allowingEnderDragon()
+        );
+        assertFalse(spawnIsSuppressed(initializer, world));
+
+        initializer.shutdownDragonSpawnGuards();
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
+
+        assertTrue(spawnIsSuppressed(initializer, world));
+        resetScope.close();
     }
 
     @Test
@@ -284,7 +457,6 @@ class BukkitFarmworldPostResetInitializerTest {
         DragonScenario scenario = dragonScenario(List.of(List.of(dragon.entity())));
         ControllableScheduler scheduler = new ControllableScheduler();
         BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
-        initializer.initializeDragonSpawnGuard(List.of(dragonDisabledConfig()));
         FarmworldResetConfig config = config(
                 FarmworldType.END,
                 new PostResetConfig(
@@ -293,6 +465,7 @@ class BukkitFarmworldPostResetInitializerTest {
                         Optional.of(new EndPostResetConfig(true))
                 )
         );
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
 
         PostResetResult result = initializer.apply(
                 config,
@@ -315,14 +488,41 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     private static FarmworldResetConfig dragonDisabledConfig() {
-        return config(
+        return dragonConfig(true, false);
+    }
+
+    private static FarmworldResetConfig dragonConfig(boolean enabled, boolean dragon) {
+        return new FarmworldResetConfig(
+                "end",
+                "endfarm",
+                enabled,
+                Duration.ofDays(30),
                 FarmworldType.END,
                 new PostResetConfig(
                         Map.of(),
                         Optional.empty(),
-                        Optional.of(new EndPostResetConfig(false))
+                        Optional.of(new EndPostResetConfig(dragon))
                 )
         );
+    }
+
+    private static boolean spawnIsSuppressed(
+            BukkitFarmworldPostResetInitializer initializer,
+            World world
+    ) {
+        CreatureSpawnEvent event = dragonSpawnEvent(world);
+        initializer.preventSuppressedEnderDragonSpawn(event);
+        return event.isCancelled();
+    }
+
+    private static CompletableFuture<PostResetResult> applyWithConfiguredGuard(
+            BukkitFarmworldPostResetInitializer initializer,
+            FarmworldResetConfig config,
+            World world,
+            ResetOptions options
+    ) {
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
+        return initializer.apply(config, world, options);
     }
 
     private static BukkitFarmworldPostResetInitializer.ResolvedGameRule resolved(
@@ -489,12 +689,20 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     private static DragonScenario dragonScenario(List<List<EnderDragon>> checks) {
-        return dragonScenario(checks, true);
+        return dragonScenario(checks, true, null);
     }
 
     private static DragonScenario dragonScenario(
             List<List<EnderDragon>> checks,
             boolean battleStatePersists
+    ) {
+        return dragonScenario(checks, battleStatePersists, null);
+    }
+
+    private static DragonScenario dragonScenario(
+            List<List<EnderDragon>> checks,
+            boolean battleStatePersists,
+            RuntimeException portalFailure
     ) {
         AtomicInteger checkIndex = new AtomicInteger();
         AtomicInteger battleLookups = new AtomicInteger();
@@ -507,6 +715,9 @@ class BukkitFarmworldPostResetInitializerTest {
                 new Class<?>[]{DragonBattle.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "generateEndPortal" -> {
+                        if (portalFailure != null) {
+                            throw portalFailure;
+                        }
                         endPortalGenerated.set((Boolean) arguments[0]);
                         yield true;
                     }
@@ -635,6 +846,9 @@ class BukkitFarmworldPostResetInitializerTest {
         private final Deque<PendingOperation<?>> pending = new ArrayDeque<>();
         private final List<Long> delays = new java.util.ArrayList<>();
         private int regionExecutions;
+        private World regionWorld;
+        private int regionChunkX;
+        private int regionChunkZ;
 
         @Override
         public <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation) {
@@ -660,6 +874,9 @@ class BukkitFarmworldPostResetInitializerTest {
                 CheckedSupplier<T> operation
         ) {
             regionExecutions++;
+            regionWorld = world;
+            regionChunkX = chunkX;
+            regionChunkZ = chunkZ;
             return execute(operation);
         }
 
@@ -679,6 +896,18 @@ class BukkitFarmworldPostResetInitializerTest {
 
         private int regionExecutions() {
             return regionExecutions;
+        }
+
+        private World regionWorld() {
+            return regionWorld;
+        }
+
+        private int regionChunkX() {
+            return regionChunkX;
+        }
+
+        private int regionChunkZ() {
+            return regionChunkZ;
         }
 
         private <T> CompletableFuture<T> execute(CheckedSupplier<T> operation) {

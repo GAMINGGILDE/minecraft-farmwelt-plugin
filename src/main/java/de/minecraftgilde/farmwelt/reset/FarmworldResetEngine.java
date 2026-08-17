@@ -95,6 +95,17 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         logger.info("Reset für Farmwelt '" + farmworldKey + "' ("
                 + resetConfig.worldName() + ") gestartet.");
 
+        final FarmworldPostResetInitializer.ResetScope resetScope;
+        try {
+            resetScope = Objects.requireNonNull(
+                    postResetInitializer.beginReset(resetConfig, options),
+                    "postResetInitializer.beginReset(...)"
+            );
+        } catch (RuntimeException exception) {
+            runningResets.remove(farmworldKey);
+            return CompletableFuture.completedFuture(finish(resetConfig, null, exception));
+        }
+
         CompletableFuture<ResetResult> resetFuture;
         try {
             resetFuture = execute(resetConfig, options)
@@ -103,7 +114,20 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             resetFuture = CompletableFuture.completedFuture(finish(resetConfig, null, exception));
         }
 
-        return resetFuture.whenComplete((result, failure) -> runningResets.remove(farmworldKey));
+        return resetFuture.whenComplete((result, failure) -> {
+            try {
+                resetScope.close();
+            } catch (RuntimeException exception) {
+                logger.log(
+                        Level.SEVERE,
+                        "Tempor\u00e4re Dragon-Policy f\u00fcr '" + resetConfig.worldName()
+                                + "' konnte nicht bereinigt werden.",
+                        exception
+                );
+            } finally {
+                runningResets.remove(farmworldKey);
+            }
+        });
     }
 
     public boolean isResetRunning(String farmworldKey) {

@@ -24,6 +24,7 @@ public final class WorldsFarmworldLifecycleService
 
     private final WorldsAccess worldsAccess;
     private final EndDragonFightDataStore dragonFightDataStore;
+    private final EndDragonFightCompatibility dragonFightCompatibility;
     private final Logger logger;
     private final Map<World, PendingDataReset> pendingDataResets =
             Collections.synchronizedMap(new IdentityHashMap<>());
@@ -31,12 +32,17 @@ public final class WorldsFarmworldLifecycleService
     WorldsFarmworldLifecycleService(
             WorldsAccess worldsAccess,
             EndDragonFightDataStore dragonFightDataStore,
+            EndDragonFightCompatibility dragonFightCompatibility,
             Logger logger
     ) {
         this.worldsAccess = Objects.requireNonNull(worldsAccess, "worldsAccess");
         this.dragonFightDataStore = Objects.requireNonNull(
                 dragonFightDataStore,
                 "dragonFightDataStore"
+        );
+        this.dragonFightCompatibility = Objects.requireNonNull(
+                dragonFightCompatibility,
+                "dragonFightCompatibility"
         );
         this.logger = Objects.requireNonNull(logger, "logger");
     }
@@ -53,6 +59,7 @@ public final class WorldsFarmworldLifecycleService
         return new WorldsFarmworldLifecycleService(
                 worldsAccess,
                 new EndDragonFightDataStore(Bukkit.getUnsafe().getDataVersion()),
+                EndDragonFightCompatibility.runningServer(),
                 logger
         );
     }
@@ -71,6 +78,12 @@ public final class WorldsFarmworldLifecycleService
 
         PendingDataReset pendingReset = null;
         if (options.resetEndDragonFightData()) {
+            try {
+                dragonFightCompatibility.requireSupported();
+            } catch (RuntimeException exception) {
+                logger.log(Level.SEVERE, exception.getMessage(), exception);
+                return CompletableFuture.failedFuture(exception);
+            }
             pendingReset = new PendingDataReset();
             synchronized (pendingDataResets) {
                 if (pendingDataResets.putIfAbsent(world, pendingReset) != null) {
@@ -127,16 +140,18 @@ public final class WorldsFarmworldLifecycleService
 
         pendingReset.unloadEventReceived = true;
         try {
+            logger.info("DragonBattle-Saved-Data f\u00fcr '" + event.getWorld().getName()
+                    + "' werden f\u00fcr Reset vorbereitet.");
             pendingReset.stagedData = dragonFightDataStore.stage(
                     event.getWorld().getWorldFolder().toPath()
             );
             if (pendingReset.stagedData.hadFightData()) {
-                logger.info("DragonBattle-Daten für '" + event.getWorld().getName()
-                        + "' vor der Worlds-Regeneration zurückgesetzt.");
+                logger.info("Bestehende DragonBattle-Daten gesichert.");
             } else {
                 logger.info("Für '" + event.getWorld().getName()
                         + "' waren keine alten DragonBattle-Daten vorhanden.");
             }
+            logger.info("DragonBattle-Saved-Data erfolgreich zur\u00fcckgesetzt.");
         } catch (IOException | RuntimeException exception) {
             pendingReset.preparationFailure = exception;
             event.setCancelled(true);

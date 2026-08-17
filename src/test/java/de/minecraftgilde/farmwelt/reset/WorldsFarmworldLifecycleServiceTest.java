@@ -1,6 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,6 +14,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -159,6 +161,37 @@ class WorldsFarmworldLifecycleServiceTest {
     }
 
     @Test
+    void unsupportedMinecraftVersionRejectsDataResetBeforeWorldsOrFileWrite(
+            @TempDir Path tempDir
+    ) throws Exception {
+        Path fightData = createFightData(tempDir, "must remain untouched");
+        AtomicBoolean worldsInvoked = new AtomicBoolean();
+        WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
+            worldsInvoked.set(true);
+            return CompletableFuture.completedFuture(world);
+        });
+        WorldsFarmworldLifecycleService service = new WorldsFarmworldLifecycleService(
+                worldsAccess,
+                new EndDragonFightDataStore(4790),
+                new EndDragonFightCompatibility(() -> "26.2"),
+                quietLogger()
+        );
+
+        CompletionException exception = assertThrows(
+                CompletionException.class,
+                () -> service.regenerate(
+                        world("endfarm", tempDir),
+                        new FarmworldRegenerationOptions(true)
+                ).join()
+        );
+
+        assertTrue(exception.getCause().getMessage().contains("nicht freigegeben"));
+        assertTrue(exception.getCause().getMessage().contains("26.1.2"));
+        assertFalse(worldsInvoked.get());
+        assertEquals("must remain untouched", Files.readString(fightData));
+    }
+
+    @Test
     void failsClosedWhenWorldsDoesNotPublishItsRegenerationEvent(@TempDir Path tempDir)
             throws Exception {
         Path fightData = createFightData(tempDir, "must stay untouched");
@@ -301,15 +334,20 @@ class WorldsFarmworldLifecycleServiceTest {
     }
 
     private static WorldsFarmworldLifecycleService service(WorldsAccess worldsAccess) {
+        return new WorldsFarmworldLifecycleService(
+                worldsAccess,
+                new EndDragonFightDataStore(4790),
+                new EndDragonFightCompatibility(() -> "26.1.2"),
+                quietLogger()
+        );
+    }
+
+    private static Logger quietLogger() {
         Logger logger = Logger.getLogger(
                 "WorldsFarmworldLifecycleServiceTest-" + System.nanoTime()
         );
         logger.setLevel(java.util.logging.Level.OFF);
-        return new WorldsFarmworldLifecycleService(
-                worldsAccess,
-                new EndDragonFightDataStore(4790),
-                logger
-        );
+        return logger;
     }
 
     private static Object defaultValue(Class<?> type) {

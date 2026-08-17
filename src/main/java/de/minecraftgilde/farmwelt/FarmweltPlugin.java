@@ -43,6 +43,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     private FarmworldResetService resetService;
     private FarmworldResetEngine resetEngine;
     private WorldsFarmworldLifecycleService worldsLifecycleService;
+    private BukkitFarmworldPostResetInitializer postResetInitializer;
 
     @Override
     public void onEnable() {
@@ -74,9 +75,12 @@ public final class FarmweltPlugin extends JavaPlugin {
                         .collect(Collectors.toUnmodifiableSet())
         );
         FoliaFarmweltScheduler resetScheduler = new FoliaFarmweltScheduler(this);
-        BukkitFarmworldPostResetInitializer postResetInitializer =
-                new BukkitFarmworldPostResetInitializer(this, resetScheduler, getLogger());
-        postResetInitializer.initializeDragonSpawnGuard(resetService.getConfiguredWorlds());
+        postResetInitializer = new BukkitFarmworldPostResetInitializer(
+                this,
+                resetScheduler,
+                getLogger()
+        );
+        postResetInitializer.synchronizeDragonSpawnGuards(resetService.getConfiguredWorlds());
         getServer().getPluginManager().registerEvents(postResetInitializer, this);
         resetEngine = new FarmworldResetEngine(
                 resetService,
@@ -115,6 +119,9 @@ public final class FarmweltPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (postResetInitializer != null) {
+            postResetInitializer.shutdownDragonSpawnGuards();
+        }
         getLogger().info("Farmwelt wurde gestoppt.");
     }
 
@@ -129,6 +136,7 @@ public final class FarmweltPlugin extends JavaPlugin {
         if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
             throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
         }
+        postResetInitializer.synchronizeDragonSpawnGuards(resetService.getConfiguredWorlds());
         logResetStatus();
         claimProtectionService.reload();
         violationService.reload(configManager);
