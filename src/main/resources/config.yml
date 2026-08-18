@@ -9,7 +9,7 @@ farmworlds:
       - "Für Holz, Sand, Erde und weitere Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Der Scheduler erkennt fällige Termine, löst aber noch keine automatischen Resets aus.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "overworld" verwechseln.
       world: "farmwelt"
@@ -37,7 +37,7 @@ farmworlds:
       - "Farmwelt für Nether-Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Der Scheduler erkennt fällige Termine, löst aber noch keine automatischen Resets aus.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "nether" verwechseln.
       world: "netherfarm"
@@ -63,7 +63,7 @@ farmworlds:
       - "Farmwelt für End-Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
-      # Der Scheduler erkennt fällige Termine, löst aber noch keine automatischen Resets aus.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "end" verwechseln.
       world: "endfarm"
