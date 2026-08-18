@@ -91,7 +91,7 @@ Vor dem Reset in `worlds_farmwelt` eine kleine, eindeutig erkennbare Teststruktu
 13. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
 14. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
 
-Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Phase 3.5 startet weiterhin keinen automatischen Reset-Scheduler und enthält weder Countdown/Broadcasts noch Overdue-Aktion oder Startup-Reset.
+Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Der 60-sekündliche Scheduler erkennt aktuell nur Fälligkeiten und enthält weder Reset-Ausführung, Countdown/Broadcasts, Overdue-Aktion noch Startup-Reset.
 
 ## Empfohlene Startwerte
 

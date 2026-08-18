@@ -56,6 +56,8 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- BukkitFarmworldPostResetInitializer.java
     +-- FarmworldResetService.java
     +-- BukkitFarmworldWorldOperations.java
+    +-- AutomaticResetScheduler.java
+    +-- ResetDueStateEvaluator.java
     +-- FoliaFarmweltScheduler.java
     +-- YamlResetStateRepository.java
 ```
@@ -76,6 +78,9 @@ Beim Start:
 8. `FarmweltCommand` wird zusätzlich als Listener registriert, weil der Monitor-Debug auf Rechtsklicks reagiert.
 9. `FarmweltGuiListener` verarbeitet GUI-Klicks.
 10. `ResourceBreakListener` verarbeitet Blockabbau- und Explosions-Events.
+11. `AutomaticResetScheduler` startet genau einen globalen Folia-Task zur Fälligkeitsprüfung.
+
+Beim Stoppen bricht `FarmweltPlugin` den eigenen Task des automatischen Schedulers gezielt ab. Ein Config-Reload startet keinen weiteren Task; der bestehende Scheduler liest bei jedem Lauf den aktuellen Snapshot des `FarmworldResetService`.
 
 Beim Reload über `/farmwelt reload`:
 
@@ -118,6 +123,8 @@ Config-Snapshot und Lock
 Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse. Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration, Validierung und Post-Reset-Initialisierung geschrieben. Scheitert die Initialisierung, lautet das Ergebnis `POST_RESET_FAILED`, der State bleibt unverändert und der Lock wird freigegeben. Schlägt anschließend nur `reset-state.yml` fehl, lautet das Ergebnis `STATE_SAVE_FAILED`; die Welt ist dann trotzdem bereits regeneriert und initialisiert.
 
 `WorldsAccess.regenerate(...)` wird nicht in `FoliaFarmweltScheduler.runGlobal(...)` verpackt, da Worlds sein Global-/Folia-Scheduling selbst kapselt. Eigene kurze Bukkit-Prüfungen und asynchrone State-I/O verwenden weiterhin den Farmwelt-Scheduler. Fehler der Worlds-Future werden als `REGENERATE_FAILED` mit unveränderter Ursache abgebildet. Die interne `WorldOperationException.Reason`-API von Worlds wird bewusst nicht in Commands oder Business-Logik übernommen.
+
+`AutomaticResetScheduler` prüft alle 60 Sekunden die vorhandenen persistenten `nextReset`-Zeitpunkte gegen ein aktuelles `Instant`. `ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Der globale Task führt in dieser Phase bei `DUE` bewusst keine Aktion aus und besitzt keine Referenz auf die Reset-Engine; Welt-, Spieler- und Endfarm-Zustände bleiben dadurch unverändert.
 
 ## ConfigManager
 
@@ -468,6 +475,7 @@ Aktuelle Folia-relevante Punkte:
 - Teleportbefehle aus der GUI werden über den Entity-Scheduler des Spielers geplant.
 - Spieler-Evakuierungen verwenden den Entity-Scheduler und `teleportAsync`.
 - Kurze eigene Bukkit-Weltprüfungen laufen über den Global-Region-Scheduler.
+- Die rein zeitliche automatische Fälligkeitsprüfung läuft alle 60 Sekunden über den Global-Region-Scheduler und verändert keine Welt.
 - Dynamisches Entladen, Regenerieren und erneutes Laden übernimmt Worlds mit seiner versionsspezifischen Folia-Implementierung.
 - Der Aufruf `WorldsAccess.regenerate(...)` erhält keine zusätzliche Scheduler-Hülle durch Farmwelt.
 - Jail-Konsolenbefehle werden über den Global-Region-Scheduler geplant.

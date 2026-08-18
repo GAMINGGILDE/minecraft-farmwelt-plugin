@@ -32,7 +32,7 @@ Server starten
 
 ### Fälliger automatischer Reset
 
-Nach Einführung des automatischen Reset-Schedulers wird geprüft:
+Nach der späteren Anbindung des Schedulers an die Reset-Ausführung wird geprüft:
 
 ```text
 nextReset liegt in der Vergangenheit

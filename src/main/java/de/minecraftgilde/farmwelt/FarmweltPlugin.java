@@ -7,6 +7,7 @@ import de.minecraftgilde.farmwelt.config.ConfigManager;
 import de.minecraftgilde.farmwelt.gui.FarmweltMenu;
 import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
 import de.minecraftgilde.farmwelt.listener.ResourceBreakListener;
+import de.minecraftgilde.farmwelt.reset.AutomaticResetScheduler;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldPostResetInitializer;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
@@ -40,6 +41,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     private MessageService messageService;
     private ViolationService violationService;
     private JailActionService jailActionService;
+    private AutomaticResetScheduler automaticResetScheduler;
     private FarmworldResetService resetService;
     private FarmworldResetEngine resetEngine;
     private WorldsFarmworldLifecycleService worldsLifecycleService;
@@ -114,11 +116,22 @@ public final class FarmweltPlugin extends JavaPlugin {
                 this
         );
 
+        automaticResetScheduler = new AutomaticResetScheduler(
+                this,
+                getServer().getGlobalRegionScheduler(),
+                resetService,
+                Clock.systemUTC()
+        );
+        automaticResetScheduler.start();
+
         getLogger().info("Farmwelt wurde gestartet.");
     }
 
     @Override
     public void onDisable() {
+        if (automaticResetScheduler != null) {
+            automaticResetScheduler.stop();
+        }
         if (postResetInitializer != null) {
             postResetInitializer.shutdownDragonSpawnGuards();
         }
