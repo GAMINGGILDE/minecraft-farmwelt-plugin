@@ -5,6 +5,7 @@
 </p>
 <p align="center">
   <a href="https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/GAMINGGILDE/minecraft-farmwelt-plugin/build.yml?branch=main&amp;label=build&amp;style=flat-square&amp;logo=githubactions&amp;logoColor=white"></a>
+  <a href="https://www.codefactor.io/repository/github/gaminggilde/minecraft-farmwelt-plugin"><img src="https://www.codefactor.io/repository/github/gaminggilde/minecraft-farmwelt-plugin/badge?style=flat-square" alt="CodeFactor" /></a>
   <a href="https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/releases"><img alt="Release" src="https://img.shields.io/github/v/release/GAMINGGILDE/minecraft-farmwelt-plugin?label=release&amp;cacheSeconds=300&amp;style=flat-square&amp;logo=github&amp;logoColor=white"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GAMINGGILDE/minecraft-farmwelt-plugin?style=flat-square&amp;logo=opensourceinitiative&amp;logoColor=white"></a>
   <img alt="Java 25" src="https://img.shields.io/badge/Java-25-orange?style=flat-square&amp;logo=openjdk&amp;logoColor=white">
