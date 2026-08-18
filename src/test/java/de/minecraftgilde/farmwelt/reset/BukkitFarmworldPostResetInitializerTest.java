@@ -28,6 +28,7 @@ import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.boss.DragonBattle;
+import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.plugin.Plugin;
@@ -329,6 +330,91 @@ class BukkitFarmworldPostResetInitializerTest {
         initializer.preventSuppressedEnderDragonSpawn(delayedSpawn);
 
         assertTrue(delayedSpawn.isCancelled());
+    }
+
+    @Test
+    void suppressedWorldWithoutActiveVanillaRespawnStillBlocksDragonSpawn() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        scenario.previouslyKilled().set(true);
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        assertEquals(DragonBattle.RespawnPhase.NONE, scenario.respawnPhase().get());
+        assertTrue(scenario.respawnCrystals().get().isEmpty());
+        assertTrue(scenario.previouslyKilled().get());
+    }
+
+    @Test
+    void suppressedWorldAllowsDragonSpawnThroughoutActiveVanillaRespawnPhases() {
+        for (DragonBattle.RespawnPhase phase : DragonBattle.RespawnPhase.values()) {
+            if (phase == DragonBattle.RespawnPhase.NONE) {
+                continue;
+            }
+            DragonScenario scenario = dragonScenario(List.of(List.of()));
+            scenario.previouslyKilled().set(true);
+            scenario.respawnPhase().set(phase);
+            BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+            initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+            assertFalse(
+                    spawnIsSuppressed(initializer, scenario.world()),
+                    () -> "Respawn-Phase " + phase + " wurde unerwartet blockiert."
+            );
+            assertTrue(scenario.previouslyKilled().get());
+        }
+    }
+
+    @Test
+    void respawnCrystalsAllowFinalSpawnAfterPaperHasClearedRespawnPhase() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        scenario.previouslyKilled().set(true);
+        scenario.respawnCrystals().set(testRespawnCrystals(4));
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+        assertEquals(DragonBattle.RespawnPhase.NONE, scenario.respawnPhase().get());
+        assertTrue(scenario.previouslyKilled().get());
+    }
+
+    @Test
+    void incompleteCrystalStateWithoutActivePhaseDoesNotBypassSuppression() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        scenario.previouslyKilled().set(true);
+        scenario.respawnCrystals().set(testRespawnCrystals(3));
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
+    void suppressionResumesAfterVanillaRespawnStateEnds() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        scenario.previouslyKilled().set(true);
+        scenario.respawnPhase().set(DragonBattle.RespawnPhase.END);
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+
+        scenario.respawnPhase().set(DragonBattle.RespawnPhase.NONE);
+        scenario.respawnCrystals().set(List.of());
+
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        assertTrue(scenario.previouslyKilled().get());
+    }
+
+    @Test
+    void activeRespawnPhaseDoesNotAllowAFreshFirstFightThroughSuppression() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        scenario.respawnPhase().set(DragonBattle.RespawnPhase.SUMMONING_DRAGON);
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        assertFalse(scenario.previouslyKilled().get());
     }
 
     @Test
@@ -824,6 +910,14 @@ class BukkitFarmworldPostResetInitializerTest {
         );
     }
 
+    private static List<EnderCrystal> testRespawnCrystals(int count) {
+        List<EnderCrystal> crystals = new java.util.ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            crystals.add(proxy(EnderCrystal.class));
+        }
+        return List.copyOf(crystals);
+    }
+
     private static TestDragon enderDragon(boolean removalSucceeds) {
         return enderDragon(removalSucceeds, true);
     }
@@ -915,6 +1009,10 @@ class BukkitFarmworldPostResetInitializerTest {
         AtomicInteger blockLookups = new AtomicInteger();
         AtomicBoolean previouslyKilled = new AtomicBoolean();
         AtomicBoolean endPortalGenerated = new AtomicBoolean();
+        AtomicReference<DragonBattle.RespawnPhase> respawnPhase =
+                new AtomicReference<>(DragonBattle.RespawnPhase.NONE);
+        AtomicReference<List<EnderCrystal>> respawnCrystals =
+                new AtomicReference<>(List.of());
 
         DragonBattle battle = (DragonBattle) Proxy.newProxyInstance(
                 DragonBattle.class.getClassLoader(),
@@ -934,6 +1032,8 @@ class BukkitFarmworldPostResetInitializerTest {
                         yield null;
                     }
                     case "hasBeenPreviouslyKilled" -> previouslyKilled.get();
+                    case "getRespawnPhase" -> respawnPhase.get();
+                    case "getRespawnCrystals" -> respawnCrystals.get();
                     case "getEndPortalLocation" -> portalState == PortalState.MISSING_LOCATION
                             ? null
                             : new Location(null, 0, 64, 0);
@@ -980,6 +1080,8 @@ class BukkitFarmworldPostResetInitializerTest {
                 battle,
                 previouslyKilled,
                 endPortalGenerated,
+                respawnPhase,
+                respawnCrystals,
                 battleLookups,
                 entityLookups,
                 blockLookups
@@ -1208,6 +1310,8 @@ class BukkitFarmworldPostResetInitializerTest {
             DragonBattle battle,
             AtomicBoolean previouslyKilled,
             AtomicBoolean endPortalGenerated,
+            AtomicReference<DragonBattle.RespawnPhase> respawnPhase,
+            AtomicReference<List<EnderCrystal>> respawnCrystals,
             AtomicInteger battleLookups,
             AtomicInteger entityLookups,
             AtomicInteger blockLookups

@@ -39,6 +39,7 @@ public final class BukkitFarmworldPostResetInitializer
 
     private static final long DRAGON_REMOVAL_VERIFICATION_DELAY_TICKS = 5L;
     private static final long DRAGON_KILL_PORTAL_REPAIR_DELAY_TICKS = 1L;
+    private static final int MINIMUM_VANILLA_DRAGON_RESPAWN_CRYSTALS = 4;
     private static final int EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS = 4;
     private static final int EXIT_PORTAL_VERTICAL_VERIFICATION_RADIUS = 2;
 
@@ -167,7 +168,7 @@ public final class BukkitFarmworldPostResetInitializer
         loggedSuppressedDragonSpawns.clear();
     }
 
-    /** Returns the single effective decision used by the EnderDragon spawn listener. */
+    /** Returns whether the spawn guard applies before inspecting the live DragonBattle state. */
     public boolean shouldSuppressEnderDragonSpawn(String worldName) {
         Objects.requireNonNull(worldName, "worldName");
         if (temporaryDragonAllowWorlds.containsKey(worldName)
@@ -184,8 +185,14 @@ public final class BukkitFarmworldPostResetInitializer
         if (!(event.getEntity() instanceof EnderDragon dragon)) {
             return;
         }
-        String worldName = dragon.getWorld().getName();
+        World world = dragon.getWorld();
+        String worldName = world.getName();
         if (!shouldSuppressEnderDragonSpawn(worldName)) {
+            return;
+        }
+        if (isVanillaEnderDragonRespawnInProgress(world)) {
+            logger.info("Vanilla-Enderdrachen-Respawn in '" + worldName
+                    + "' erkannt; Spawn trotz Dragon-Suppression erlaubt.");
             return;
         }
 
@@ -194,6 +201,23 @@ public final class BukkitFarmworldPostResetInitializer
             logger.info("Verz\u00f6gerten Enderdrachen-Spawn in '" + worldName
                     + "' gem\u00e4\u00df Dragon-Policy verhindert.");
         }
+    }
+
+    private boolean isVanillaEnderDragonRespawnInProgress(World world) {
+        DragonBattle battle = world.getEnderDragonBattle();
+        if (battle == null || !battle.hasBeenPreviouslyKilled()) {
+            return false;
+        }
+
+        DragonBattle.RespawnPhase phase = battle.getRespawnPhase();
+        if (phase != DragonBattle.RespawnPhase.NONE) {
+            return true;
+        }
+
+        // Paper clears the phase immediately before adding the respawned dragon, while the
+        // crystals remain associated with the battle until after CreatureSpawnEvent returns.
+        return battle.getRespawnCrystals().size()
+                >= MINIMUM_VANILLA_DRAGON_RESPAWN_CRYSTALS;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
