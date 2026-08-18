@@ -123,6 +123,47 @@ class FarmworldResetServiceTest {
     }
 
     @Test
+    void enablingPreviouslyDisabledConfigInitializesAndPersistsState() {
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig disabledConfig = new FarmworldResetConfig(
+                "overworld", "farmwelt", false, Duration.ofDays(30)
+        );
+
+        assertTrue(service.reload(List.of(disabledConfig)));
+        assertTrue(service.reload(List.of(config(Duration.ofDays(30)))));
+
+        FarmworldResetState initializedState = service.getState("overworld").orElseThrow();
+        assertTrue(initializedState.lastReset().isEmpty());
+        assertEquals(NOW.plus(Duration.ofDays(30)), initializedState.nextReset());
+        assertEquals(initializedState, repository.states.get("overworld"));
+        assertEquals(1, repository.saveCount);
+    }
+
+    @Test
+    void reenabledConfigReusesExistingPersistentState() {
+        FarmworldResetState existingState = new FarmworldResetState(
+                "overworld",
+                Optional.of(Instant.parse("2026-07-01T00:00:00Z")),
+                Instant.parse("2026-09-01T00:00:00Z")
+        );
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository(Map.of(
+                "overworld", existingState
+        ));
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig disabledConfig = new FarmworldResetConfig(
+                "overworld", "farmwelt", false, Duration.ofDays(30)
+        );
+
+        assertTrue(service.reload(List.of(disabledConfig)));
+        assertTrue(service.reload(List.of(config(Duration.ofDays(60)))));
+
+        assertEquals(existingState, service.getState("overworld").orElseThrow());
+        assertEquals(existingState, repository.states.get("overworld"));
+        assertEquals(0, repository.saveCount);
+    }
+
+    @Test
     void completesResetWithSnapshotIntervalAndPersistsState() throws IOException {
         InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
         FarmworldResetService service = createService(repository);
@@ -154,6 +195,46 @@ class FarmworldResetServiceTest {
 
         assertEquals(stateBeforeCompletion, service.getState("overworld").orElseThrow());
         assertEquals(stateBeforeCompletion, repository.states.get("overworld"));
+    }
+
+    @Test
+    void completingOneFarmworldKeepsOtherPersistentStatesUnchanged() throws IOException {
+        FarmworldResetState overworldState = state(
+                "overworld",
+                "2026-07-01T00:00:00Z",
+                "2026-09-01T00:00:00Z"
+        );
+        FarmworldResetState netherState = state(
+                "nether",
+                "2026-07-02T00:00:00Z",
+                "2026-09-02T00:00:00Z"
+        );
+        FarmworldResetState endState = state(
+                "end",
+                "2026-07-03T00:00:00Z",
+                "2026-10-03T00:00:00Z"
+        );
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository(Map.of(
+                "overworld", overworldState,
+                "nether", netherState,
+                "end", endState
+        ));
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig overworldConfig = config(Duration.ofDays(30));
+        service.reload(List.of(
+                overworldConfig,
+                new FarmworldResetConfig("nether", "farmwelt_nether", true, Duration.ofDays(30)),
+                new FarmworldResetConfig("end", "farmwelt_end", true, Duration.ofDays(60))
+        ));
+
+        Instant completion = Instant.parse("2026-08-17T07:00:00Z");
+        FarmworldResetState completedState = service.completeReset(overworldConfig, completion);
+
+        assertEquals(Optional.of(completion), completedState.lastReset());
+        assertEquals(completion.plus(Duration.ofDays(30)), completedState.nextReset());
+        assertEquals(completedState, repository.states.get("overworld"));
+        assertEquals(netherState, repository.states.get("nether"));
+        assertEquals(endState, repository.states.get("end"));
     }
 
     @Test
@@ -192,6 +273,14 @@ class FarmworldResetServiceTest {
 
     private FarmworldResetConfig config(Duration interval) {
         return new FarmworldResetConfig("overworld", "farmwelt", true, interval);
+    }
+
+    private FarmworldResetState state(String farmworldKey, String lastReset, String nextReset) {
+        return new FarmworldResetState(
+                farmworldKey,
+                Optional.of(Instant.parse(lastReset)),
+                Instant.parse(nextReset)
+        );
     }
 
     private static final class InMemoryResetStateRepository implements ResetStateRepository {

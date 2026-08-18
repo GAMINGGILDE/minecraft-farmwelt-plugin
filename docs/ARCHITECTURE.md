@@ -527,7 +527,7 @@ GriefPrevention:
 
 ## Datenhaltung
 
-Farmwelt nutzt keine Datenbank. Neben der Config persistiert `reset-state.yml` den letzten und nächsten Reset-Zeitpunkt pro logischer Farmwelt.
+Farmwelt nutzt keine Datenbank. Neben der Config persistiert `reset-state.yml` den letzten und nächsten Reset-Zeitpunkt pro logischer Farmwelt. Die Datei wird vom Plugin verwaltet und sollte im normalen Betrieb nicht manuell editiert werden. Ein Neustart oder eine Intervalländerung per Reload verschiebt einen bereits gespeicherten nächsten Reset nicht; das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset.
 
 In-Memory-Daten:
 

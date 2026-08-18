@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -49,9 +50,10 @@ class FarmworldResetEngineTest {
             calls,
             CompletableFuture.completedFuture(regeneratedWorld)
     );
+    private final MutableClock clock = new MutableClock(NOW, ZoneOffset.UTC);
     private final FarmworldResetService resetService = new FarmworldResetService(
             repository,
-            Clock.fixed(NOW, ZoneOffset.UTC),
+            clock,
             quietLogger()
     );
     private final FakePostResetInitializer postResetInitializer = new FakePostResetInitializer(calls);
@@ -66,6 +68,7 @@ class FarmworldResetEngineTest {
 
     @BeforeEach
     void configureReset() {
+        clock.setInstant(NOW);
         resetService.reload(List.of(config()));
         postResetInitializer.result = CompletableFuture.completedFuture(PostResetResult.success());
         postResetInitializer.receivedConfig = null;
@@ -93,6 +96,22 @@ class FarmworldResetEngineTest {
         assertEquals(NOW, state.lastReset().orElseThrow());
         assertEquals(NOW.plus(Duration.ofDays(30)), state.nextReset());
         assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void successfulResetUsesActualCompletionInstantForSchedule() {
+        CompletableFuture<World> pendingRegeneration = new CompletableFuture<>();
+        lifecycleService.result = pendingRegeneration;
+        CompletableFuture<ResetResult> runningReset = engine.reset("overworld");
+        Instant completedAt = NOW.plus(Duration.ofMinutes(2)).plusSeconds(30);
+
+        clock.setInstant(completedAt);
+        pendingRegeneration.complete(regeneratedWorld);
+
+        assertEquals(ResetStatus.SUCCESS, runningReset.join().status());
+        FarmworldResetState state = resetService.getState("overworld").orElseThrow();
+        assertEquals(completedAt, state.lastReset().orElseThrow());
+        assertEquals(completedAt.plus(Duration.ofDays(30)), state.nextReset());
     }
 
     @Test
@@ -751,6 +770,36 @@ class FarmworldResetEngineTest {
                 throw new IOException("state failed");
             }
             this.states = new LinkedHashMap<>(states);
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+
+        private Instant instant;
+        private final ZoneId zone;
+
+        private MutableClock(Instant instant, ZoneId zone) {
+            this.instant = instant;
+            this.zone = zone;
+        }
+
+        private void setInstant(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zone;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return new MutableClock(instant, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
         }
     }
 }
