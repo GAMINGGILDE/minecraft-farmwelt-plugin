@@ -31,7 +31,7 @@ Das Plugin soll Spieler in Farmwelten lenken und Moderatoren entlasten. Es ist k
 - `enforce`-Modus mit sichtbarem Blockabbruch ab konfigurierter Schwelle.
 - Explosionsschutz im `enforce`-Modus: erkannte Ressourcen werden aus Explosionslisten entfernt.
 - Violation-Zähler mit Zeitfenster und Cooldowns.
-- Reset-Status und sichere manuelle Resets über den bestehenden `/farmwelt`-Befehl.
+- Reset-Status, automatische Intervall-Resets und sichere manuelle Resets über die zentrale Reset-Pipeline.
 - `/farmwelt info`, `/farmwelt reload` und Debug-Befehle.
 - GitHub Action für den Gradle-Build.
 
@@ -105,6 +105,8 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
 
 `/farmwelt reset force <welt>` führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` überspringt ausschließlich den zukünftigen Termin. Deaktivierung, Reset-Lock, API-basierter Hauptweltschutz, Evakuierung, Worlds-Regeneration, Ergebnisvalidierung, Post-Reset-Initialisierung und State-Persistenz bleiben Teil der normalen sicheren Pipeline. `--dragon` ist nur für die End-Farmwelt zulässig. Es setzt den DragonBattle-Zustand für diesen Reset auf einen frischen Erstkampf und hält die einmalige Spawn-Freigabe bei `dragon: false` bis zum tatsächlichen Vanilla-Spawn offen; die Config wird dabei nicht geändert. Ohne `--dragon` beendet `dragon: false` den geladenen Kampf vollständig, blendet die Bossbar aus und erzeugt ein aktives End-Ausgangsportal. Nach dem Tod eines freigegebenen Drachen wird das aktive Ausgangsportal in der End-Farmwelt nochmals verifiziert und bei Bedarf aufgebaut.
+
+Aktivierte Reset-Pläne werden alle 60 Sekunden geprüft. Ist `nextReset` erreicht, startet der Scheduler dieselbe vollständige Reset-Pipeline ohne `--dragon`; Lock, Sicherheitsprüfungen und State-Persistenz verhalten sich daher wie beim normalen Reset. Ein fehlgeschlagener Reset verschiebt `nextReset` nicht. Countdown, Broadcasts, Retry-Backoff und eine besondere Startup-Policy sind noch nicht enthalten.
 
 Nach einer Regeneration können ausschließlich konfigurierte Gamerules, eine WorldBorder-Größe und für das End die Dragon-Policy angewendet werden:
 

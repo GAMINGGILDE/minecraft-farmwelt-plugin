@@ -32,7 +32,7 @@ Server starten
 
 ### Fälliger automatischer Reset
 
-Nach der späteren Anbindung des Schedulers an die Reset-Ausführung wird geprüft:
+Für die reale Scheduler-/Worlds-Integration wird geprüft:
 
 ```text
 nextReset liegt in der Vergangenheit

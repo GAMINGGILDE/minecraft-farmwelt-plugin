@@ -15,10 +15,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Owns reset configurations and their persistent schedule state.
+ * Verwaltet Reset-Konfigurationen und deren persistenten Zeitplan.
  *
- * <p>Reloading never recalculates an existing {@code nextReset}. A changed interval is therefore
- * only available for calculating a later schedule after a successful reset in a future phase.</p>
+ * <p>Ein Reload berechnet ein vorhandenes {@code nextReset} nie neu. Ein geändertes Intervall
+ * wird daher erst nach dem nächsten erfolgreichen Reset für den Folgetermin verwendet.</p>
  */
 public final class FarmworldResetService {
 

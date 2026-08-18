@@ -59,7 +59,7 @@ Zielplattform sind aktuell Minecraft/Folia 26.1.2 und Java 25. Die technische So
 
 ## Reset-Lifecycle und Persistenz
 
-- Aktuell existieren Status/Persistenz, sichere manuelle Force-Resets und ein 60-sekündliches Folia-Grundgerüst, das Fälligkeiten nur als `NOT_DUE`, `DUE` oder `DISABLED` bewertet. Es löst noch keinen automatischen Reset aus. `force` überspringt nur den zukünftigen Termin, niemals Deaktivierung, Lock oder Sicherheitsprüfungen.
+- Status/Persistenz, sichere manuelle Force-Resets und der 60-sekündliche Folia-Scheduler verwenden dieselbe zentrale Reset-Engine. Der Scheduler bewertet `NOT_DUE`, `DUE` oder `DISABLED` und stößt nur bei `DUE` einen normalen Reset ohne Dragon-Override an. Er blockiert nicht auf Reset-Futures und besitzt keinen eigenen Reset-Lock. `force` überspringt nur den zukünftigen Termin, niemals Deaktivierung, Lock oder Sicherheitsprüfungen.
 - Pro logischer Farmwelt darf höchstens ein Reset laufen. Der Lock steuert zugleich die Teleport-Verfügbarkeit und muss auf jedem Erfolgs- und Fehlerpfad freigegeben werden.
 - Pipeline-Reihenfolge erhalten: Config-Snapshot/Dragon-Scope, Weltprüfung, Spielerevakuierung, erneute Leerprüfung, Worlds-Regeneration, Validierung der neuen Weltinstanz, Post-Reset-Initialisierung und erst danach State-Persistenz.
 - Nur geladene, passend benannte und dimensionierte Farmwelten dürfen zurückgesetzt werden. Vanilla-Hauptdimensionen und die geschützte Hauptwelt niemals regenerieren. Spieler Folia-sicher per Entity-Scheduler und `teleportAsync` in eine sichere, nicht selbst zurückzusetzende Overworld evakuieren.

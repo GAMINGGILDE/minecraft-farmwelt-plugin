@@ -120,6 +120,7 @@ public final class FarmweltPlugin extends JavaPlugin {
                 this,
                 getServer().getGlobalRegionScheduler(),
                 resetService,
+                resetEngine,
                 Clock.systemUTC()
         );
         automaticResetScheduler.start();

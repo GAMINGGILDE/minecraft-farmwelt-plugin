@@ -3,7 +3,7 @@ package de.minecraftgilde.farmwelt.reset;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/** Command-facing API of the reset engine. */
+/** Zentrale API zum Starten der vollständigen Reset-Pipeline. */
 public interface FarmworldResetExecutor extends FarmworldAvailabilityService {
 
     CompletableFuture<ResetResult> reset(String farmworldKey);
