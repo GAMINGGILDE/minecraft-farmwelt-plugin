@@ -98,6 +98,20 @@ Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen
 
 Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Post-Reset-Initialisierung, Logging sowie `lastReset` und `nextReset`. Worlds besitzt den technischen, versionsspezifischen Welt-Lifecycle.
 
+Der vollständige automatische Steuerungs- und Persistenzpfad ist:
+
+```text
+StartupResetCoordinator (einmaliger Catch-up nach 60 Sekunden)
+    -> AutomaticResetScheduler (reguläre Prüfung danach)
+        -> ResetDueStateEvaluator
+            -> FarmworldResetExecutor
+                -> FarmworldResetEngine
+                    -> FarmworldResetService
+                        -> ResetStateRepository (reset-state.yml)
+```
+
+Startup-Catch-up und periodischer Scheduler benutzen denselben Executor und damit dieselbe Engine wie der manuelle Force-Reset. Nur ein vollständig erfolgreicher Engine-Durchlauf verschiebt den persistenten State; Coordinator und Scheduler besitzen weder eigene Resetlogik noch einen zusätzlichen Reset-Lock.
+
 ```text
 FarmworldResetEngine
     -> FarmworldLifecycleService
