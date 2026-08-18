@@ -105,6 +105,8 @@ Die vollständige Reihenfolge mit Befehlen steht in [docs/RELEASE.md](docs/RELEA
 
 Status, Reload und Force-Reset können auch aus der Konsole ausgeführt werden. Die Debug-Befehle sind Spielerbefehle, weil sie Positionen, Rechtsklicks oder online Spieler verwenden. Bei Status und Reset ist `<welt>` immer die logische ID `overworld`, `nether` oder `end`, niemals ein frei eingegebener Bukkit-Weltname.
 
+Der Reset-Status unterscheidet fünf Zustände: `Geplant` steht für einen aktiven zukünftigen Termin, `Überfällig` für einen erreichten oder vergangenen Termin, `Läuft` für eine bereits aktive Reset-Pipeline, `Deaktiviert` für einen ausgeschalteten Reset-Plan und `Kein Zeitplan` für einen aktivierten Plan ohne nutzbaren State. `Läuft` hat Vorrang vor der zeitlichen Fälligkeit. Bei deaktivierten Plänen oder fehlendem State zeigt `Verbleibend` deshalb `-` statt einer irreführenden Überfälligkeit.
+
 Reset-Pläne werden ausschließlich unter `farmworlds.<id>.reset` konfiguriert und sind nur aktiv, wenn sowohl `farmworlds.<id>.enabled` als auch `reset.enabled` auf `true` stehen. Das Intervall ist pro Farmwelt unabhängig und akzeptiert positive Ganzzahlen mit `m` für Minuten, `h` für Stunden oder `d` für Tage, zum Beispiel `interval: "30d"` oder `interval: "60d"`. Fehlende oder ungültige Welt- und Intervallwerte deaktivieren den betroffenen Reset-Plan sicher.
 
 Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. Die vom Plugin verwaltete `reset-state.yml` sollte im normalen Produktivbetrieb nicht manuell verändert werden.

@@ -190,8 +190,9 @@ public final class FarmweltPlugin extends JavaPlugin {
         FarmweltAdminCommandHandler adminCommandHandler = new FarmweltAdminCommandHandler(
                 resetService,
                 resetEngine,
-                new FarmworldStatusFormatter(Clock.systemUTC(), ZoneId.systemDefault()),
+                new FarmworldStatusFormatter(ZoneId.systemDefault()),
                 this::reloadFarmweltConfiguration,
+                Clock.systemUTC(),
                 getLogger()
         );
         return new FarmweltCommand(

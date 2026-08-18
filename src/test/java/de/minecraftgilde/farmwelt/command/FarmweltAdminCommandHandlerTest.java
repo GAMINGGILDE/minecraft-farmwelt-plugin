@@ -34,8 +34,9 @@ class FarmweltAdminCommandHandlerTest {
 
     private static final Instant NOW = Instant.parse("2026-08-17T08:00:00Z");
 
+    private final InMemoryRepository repository = new InMemoryRepository();
     private final FarmworldResetService resetService = new FarmworldResetService(
-            new InMemoryRepository(),
+            repository,
             Clock.fixed(NOW, ZoneOffset.UTC),
             quietLogger()
     );
@@ -44,8 +45,9 @@ class FarmweltAdminCommandHandlerTest {
     private final FarmweltAdminCommandHandler handler = new FarmweltAdminCommandHandler(
             resetService,
             resetExecutor,
-            new FarmworldStatusFormatter(Clock.fixed(NOW, ZoneOffset.UTC), ZoneOffset.UTC),
+            new FarmworldStatusFormatter(ZoneOffset.UTC),
             reloadCount::incrementAndGet,
+            Clock.fixed(NOW, ZoneOffset.UTC),
             quietLogger()
     );
 
@@ -72,10 +74,12 @@ class FarmweltAdminCommandHandlerTest {
 
         assertTrue(handler.handle(audience, new String[]{"status"}));
         assertTrue(audience.contains("Farmwelt Reset-Status"));
+        assertTrue(audience.contains("Status: §aGeplant"));
 
         audience.clear();
         assertTrue(handler.handle(audience, new String[]{"status", "overworld"}));
         assertTrue(audience.contains("Reset-Status: §eoverworld"));
+        assertTrue(audience.contains("Status: §aGeplant"));
         assertTrue(audience.contains("Weltname: §ftest_farmwelt"));
 
         audience.clear();
@@ -87,6 +91,22 @@ class FarmweltAdminCommandHandlerTest {
         assertTrue(handler.handle(audience, new String[]{"reset", "force", "overworld"}));
         assertEquals("overworld", resetExecutor.lastKey);
         assertTrue(audience.contains("wurde gestartet"));
+    }
+
+    @Test
+    void statusCommandsOnlyReadExistingResetData() {
+        TestAudience audience = TestAudience.withPermissions(
+                FarmweltAdminCommandHandler.STATUS_PERMISSION
+        );
+        Map<String, FarmworldResetState> statesBefore = repository.states();
+        int savesBefore = repository.saveCount;
+
+        handler.handle(audience, new String[]{"status"});
+        handler.handle(audience, new String[]{"status", "overworld"});
+
+        assertEquals(statesBefore, repository.states());
+        assertEquals(savesBefore, repository.saveCount);
+        assertEquals(null, resetExecutor.lastKey);
     }
 
     @Test
@@ -294,6 +314,7 @@ class FarmweltAdminCommandHandlerTest {
     private static final class InMemoryRepository implements ResetStateRepository {
 
         private Map<String, FarmworldResetState> states = new LinkedHashMap<>();
+        private int saveCount;
 
         @Override
         public Map<String, FarmworldResetState> load() {
@@ -303,6 +324,11 @@ class FarmweltAdminCommandHandlerTest {
         @Override
         public void save(Map<String, FarmworldResetState> states) {
             this.states = new LinkedHashMap<>(states);
+            saveCount++;
+        }
+
+        private Map<String, FarmworldResetState> states() {
+            return new LinkedHashMap<>(states);
         }
     }
 }

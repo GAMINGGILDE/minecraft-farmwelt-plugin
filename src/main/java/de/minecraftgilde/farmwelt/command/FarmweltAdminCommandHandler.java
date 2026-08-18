@@ -3,10 +3,15 @@ package de.minecraftgilde.farmwelt.command;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetExecutor;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
+import de.minecraftgilde.farmwelt.reset.FarmworldResetState;
 import de.minecraftgilde.farmwelt.reset.FarmworldType;
 import de.minecraftgilde.farmwelt.reset.ResetOptions;
+import de.minecraftgilde.farmwelt.reset.ResetDueState;
+import de.minecraftgilde.farmwelt.reset.ResetDueStateEvaluator;
 import de.minecraftgilde.farmwelt.reset.ResetResult;
 import de.minecraftgilde.farmwelt.reset.ResetStatus;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -28,6 +33,8 @@ public final class FarmweltAdminCommandHandler {
     private final FarmworldResetExecutor resetExecutor;
     private final FarmworldStatusFormatter statusFormatter;
     private final ReloadAction reloadAction;
+    private final ResetDueStateEvaluator dueStateEvaluator;
+    private final Clock clock;
     private final Logger logger;
 
     public FarmweltAdminCommandHandler(
@@ -35,12 +42,15 @@ public final class FarmweltAdminCommandHandler {
             FarmworldResetExecutor resetExecutor,
             FarmworldStatusFormatter statusFormatter,
             ReloadAction reloadAction,
+            Clock clock,
             Logger logger
     ) {
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.resetExecutor = Objects.requireNonNull(resetExecutor, "resetExecutor");
         this.statusFormatter = Objects.requireNonNull(statusFormatter, "statusFormatter");
         this.reloadAction = Objects.requireNonNull(reloadAction, "reloadAction");
+        this.dueStateEvaluator = new ResetDueStateEvaluator();
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
@@ -232,10 +242,15 @@ public final class FarmweltAdminCommandHandler {
     }
 
     private FarmworldResetStatusSnapshot snapshot(FarmworldResetConfig config) {
+        Optional<FarmworldResetState> state = resetService.getState(config.farmworldKey());
+        Instant evaluatedAt = clock.instant();
+        ResetDueState dueState = dueStateEvaluator.evaluate(config, state, evaluatedAt);
         return new FarmworldResetStatusSnapshot(
                 config,
-                resetService.getState(config.farmworldKey()),
-                resetExecutor.isResetRunning(config.farmworldKey())
+                state,
+                resetExecutor.isResetRunning(config.farmworldKey()),
+                dueState,
+                evaluatedAt
         );
     }
 

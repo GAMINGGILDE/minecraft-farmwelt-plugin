@@ -3,9 +3,8 @@ package de.minecraftgilde.farmwelt.command;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetState;
 import de.minecraftgilde.farmwelt.reset.FarmworldType;
-import java.time.Clock;
+import de.minecraftgilde.farmwelt.reset.ResetDueState;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -18,20 +17,17 @@ public final class FarmworldStatusFormatter {
     private static final String VALUE = "§f";
     private static final String LABEL = "§7";
 
-    private final Clock clock;
     private final DateTimeFormatter instantFormatter;
     private final GermanDurationFormatter durationFormatter;
 
-    public FarmworldStatusFormatter(Clock clock, ZoneId zoneId) {
-        this(clock, zoneId, new GermanDurationFormatter());
+    public FarmworldStatusFormatter(ZoneId zoneId) {
+        this(zoneId, new GermanDurationFormatter());
     }
 
     FarmworldStatusFormatter(
-            Clock clock,
             ZoneId zoneId,
             GermanDurationFormatter durationFormatter
     ) {
-        this.clock = Objects.requireNonNull(clock, "clock");
         this.instantFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
                 .withZone(Objects.requireNonNull(zoneId, "zoneId"));
         this.durationFormatter = Objects.requireNonNull(durationFormatter, "durationFormatter");
@@ -54,7 +50,7 @@ public final class FarmworldStatusFormatter {
             lines.add(LABEL + "Reset läuft: " + running(snapshot.resetRunning()));
             lines.add(LABEL + "Letzter Reset: " + formatLastReset(snapshot.state()));
             lines.add(LABEL + "Nächster Reset: " + formatNextReset(snapshot.state()));
-            lines.add(LABEL + "Verbleibend: " + formatRemaining(snapshot.state()));
+            lines.add(LABEL + "Verbleibend: " + formatRemaining(snapshot));
             lines.add(LABEL + "Intervall: " + VALUE + durationFormatter.format(config.interval()));
         }
         return List.copyOf(lines);
@@ -65,6 +61,7 @@ public final class FarmworldStatusFormatter {
         List<String> lines = new ArrayList<>();
         lines.add("§6Reset-Status: §e" + config.farmworldKey());
         lines.add("");
+        lines.add(LABEL + "Status: " + status(snapshot));
         lines.add(LABEL + "Weltname: " + VALUE + config.worldName());
         lines.add(LABEL + "Typ: " + VALUE + typeName(config.farmworldType()));
         lines.add(LABEL + "Reset aktiviert: " + yesNo(config.enabled()));
@@ -72,7 +69,7 @@ public final class FarmworldStatusFormatter {
         lines.add(LABEL + "Intervall: " + VALUE + durationFormatter.format(config.interval()));
         lines.add(LABEL + "Letzter Reset: " + formatLastReset(snapshot.state()));
         lines.add(LABEL + "Nächster Reset: " + formatNextReset(snapshot.state()));
-        lines.add(LABEL + "Verbleibend: " + formatRemaining(snapshot.state()));
+        lines.add(LABEL + "Verbleibend: " + formatRemaining(snapshot));
         return List.copyOf(lines);
     }
 
@@ -88,24 +85,38 @@ public final class FarmworldStatusFormatter {
                 .orElse(VALUE + "-");
     }
 
-    String formatRemaining(Optional<FarmworldResetState> state) {
-        if (state.isEmpty()) {
+    String formatRemaining(FarmworldResetStatusSnapshot snapshot) {
+        if (!snapshot.config().enabled()
+                || snapshot.state().isEmpty()
+                || snapshot.dueState() == ResetDueState.DISABLED) {
             return VALUE + "-";
         }
 
-        Instant now = clock.instant();
-        Instant nextReset = state.orElseThrow().nextReset();
-        if (!nextReset.isAfter(now)) {
+        if (snapshot.dueState() == ResetDueState.DUE) {
             return "§cÜberfällig";
         }
-        return VALUE + durationFormatter.format(Duration.between(now, nextReset));
+        return VALUE + durationFormatter.format(Duration.between(
+                snapshot.evaluatedAt(),
+                snapshot.state().orElseThrow().nextReset()
+        ));
     }
 
     private String status(FarmworldResetStatusSnapshot snapshot) {
+        if (snapshot.resetRunning()) {
+            return "§eLäuft";
+        }
         if (!snapshot.config().enabled()) {
             return "§cDeaktiviert";
         }
-        return snapshot.resetRunning() ? "§eLäuft" : "§aBereit";
+        if (snapshot.state().isEmpty()
+                || snapshot.dueState() == ResetDueState.DISABLED) {
+            return "§eKein Zeitplan";
+        }
+        return switch (snapshot.dueState()) {
+            case DUE -> "§cÜberfällig";
+            case NOT_DUE -> "§aGeplant";
+            case DISABLED -> throw new IllegalStateException("DISABLED wurde bereits behandelt.");
+        };
     }
 
     private String yesNo(boolean value) {
