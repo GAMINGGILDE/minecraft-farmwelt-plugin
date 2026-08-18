@@ -36,7 +36,7 @@ Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `en
 
 Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen. `--dragon` ist nur für `end` zulässig. Es ersetzt alte DragonBattle-Daten durch den Zustand eines frischen Erstkampfs. Bei konfiguriertem `dragon: false` bleibt die einmalige Ausnahme auch nach Abschluss der Reset-Pipeline aktiv, bis Minecraft den Drachen tatsächlich erzeugt hat; die Config selbst wird nicht verändert. Ein normaler Reset mit `dragon: false` beendet dagegen auch einen zuvor geladenen Erstkampf, entfernt dessen Bossbar und aktiviert das End-Ausgangsportal. Nach dem Tod eines freigegebenen Drachen stellt das Plugin das aktive Ausgangsportal erneut auf der End-Ursprungregion sicher.
 
-Ein Reload verwendet denselben `FarmworldResetService`, dieselbe `FarmworldResetEngine` und denselben automatischen Scheduler weiter. Dadurch entstehen keine doppelten Scheduler-Tasks, laufende Locks und deren immutable Config-Snapshots bleiben erhalten und gespeicherte `nextReset`-Werte werden nicht neu berechnet.
+Ein Reload verwendet denselben `FarmworldResetService`, dieselbe `FarmworldResetEngine` und denselben Startup-/Automatik-Lifecycle weiter. Dadurch entstehen weder eine zweite Startup-Nachholung noch doppelte periodische Scheduler-Tasks; laufende Locks und deren immutable Config-Snapshots bleiben erhalten und gespeicherte `nextReset`-Werte werden nicht neu berechnet.
 
 ## Manueller End-to-End-Reset auf Folia
 
@@ -91,13 +91,13 @@ Vor dem Reset in `worlds_farmwelt` eine kleine, eindeutig erkennbare Teststruktu
 13. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
 14. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
 
-Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Der 60-sekündliche Scheduler startet fällige Resets über dieselbe Pipeline; Countdown/Broadcasts, Retry-Backoff und eine besondere Startup-Policy sind noch nicht enthalten.
+Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Nach 60 Sekunden Startup-Verzögerung werden bereits überfällige Resets sequenziell über dieselbe Pipeline nachgeholt; erst danach startet der reguläre 60-Sekunden-Scheduler. Countdown/Broadcasts und Retry-Backoff sind noch nicht enthalten. Die Startup-Policy ist in Version 2 fest und nicht konfigurierbar.
 
 ## Automatischer 1-Minuten-Test
 
 Nur auf einem wegwerfbaren Testserver testen. Für die Zielwelt `reset.enabled: true` und `reset.interval: "1m"` setzen. Ein vorhandener `next-reset` wird durch Reload oder Intervalländerung absichtlich nicht neu berechnet. Den Server deshalb stoppen, `plugins/Farmwelt/reset-state.yml` sichern und ausschließlich den Abschnitt `worlds.<logische-id>` der Testwelt aus der Arbeitskopie entfernen. Beim nächsten Start initialisiert Farmwelt diesen fehlenden State mit dem neuen Intervall; die States anderer Welten bleiben erhalten.
 
-Nach dem Start `/farmwelt status <logische-id>` prüfen und bis zum ersten 60-Sekunden-Tick nach `nextReset` warten. Anschließend müssen Serverlog und Weltregeneration den automatischen Reset zeigen. Erst nach Erfolg dürfen `last-reset` und `next-reset` in `reset-state.yml` aktualisiert sein; der neue `next-reset` liegt eine Minute nach dem tatsächlichen Abschluss. Bei einem Fehler bleibt der alte fällige Termin stehen. Nach dem Test den Server stoppen und Testconfig beziehungsweise gesicherte State-Datei kontrolliert wiederherstellen.
+Nach dem Start `/farmwelt status <logische-id>` prüfen. Liegt `nextReset` nach Ablauf der 60-sekündigen Startup-Verzögerung bereits in der Vergangenheit, muss genau ein Catch-up-Reset starten. Andernfalls beginnt danach der reguläre Scheduler und prüft im 60-Sekunden-Takt. Erst nach Erfolg dürfen `last-reset` und `next-reset` in `reset-state.yml` aktualisiert sein; der neue `next-reset` liegt eine Minute nach dem tatsächlichen Abschluss. Bei einem Fehler bleibt der alte fällige Termin stehen. Nach dem Test den Server stoppen und Testconfig beziehungsweise gesicherte State-Datei kontrolliert wiederherstellen.
 
 ## Empfohlene Startwerte
 

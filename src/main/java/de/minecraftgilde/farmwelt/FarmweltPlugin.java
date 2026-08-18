@@ -14,6 +14,7 @@ import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetEngine;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FoliaFarmweltScheduler;
+import de.minecraftgilde.farmwelt.reset.StartupResetCoordinator;
 import de.minecraftgilde.farmwelt.reset.WorldsFarmworldLifecycleService;
 import de.minecraftgilde.farmwelt.reset.YamlResetStateRepository;
 import de.minecraftgilde.farmwelt.service.ClaimProtectionService;
@@ -41,7 +42,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     private MessageService messageService;
     private ViolationService violationService;
     private JailActionService jailActionService;
-    private AutomaticResetScheduler automaticResetScheduler;
+    private StartupResetCoordinator startupResetCoordinator;
     private FarmworldResetService resetService;
     private FarmworldResetEngine resetEngine;
     private WorldsFarmworldLifecycleService worldsLifecycleService;
@@ -116,22 +117,28 @@ public final class FarmweltPlugin extends JavaPlugin {
                 this
         );
 
-        automaticResetScheduler = new AutomaticResetScheduler(
+        AutomaticResetScheduler automaticResetScheduler = new AutomaticResetScheduler(
                 this,
                 getServer().getGlobalRegionScheduler(),
                 resetService,
                 resetEngine,
                 Clock.systemUTC()
         );
-        automaticResetScheduler.start();
+        startupResetCoordinator = new StartupResetCoordinator(
+                this,
+                getServer().getGlobalRegionScheduler(),
+                automaticResetScheduler,
+                Clock.systemUTC()
+        );
+        startupResetCoordinator.start();
 
         getLogger().info("Farmwelt wurde gestartet.");
     }
 
     @Override
     public void onDisable() {
-        if (automaticResetScheduler != null) {
-            automaticResetScheduler.stop();
+        if (startupResetCoordinator != null) {
+            startupResetCoordinator.stop();
         }
         if (postResetInitializer != null) {
             postResetInitializer.shutdownDragonSpawnGuards();

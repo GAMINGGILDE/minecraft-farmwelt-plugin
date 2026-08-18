@@ -37,9 +37,13 @@ Für die reale Scheduler-/Worlds-Integration wird geprüft:
 ```text
 nextReset liegt in der Vergangenheit
 → Serverstart
+→ 60 Sekunden Startup-Sicherheitsverzögerung
 → genau ein Reset
 → neuer nextReset persistiert
+→ danach genau ein periodischer Scheduler
 ```
+
+Sind mehrere Farmwelten beim Start überfällig, werden ihre vollständigen Reset-Abschlüsse in Konfigurationsreihenfolge abgewartet. Ein fehlgeschlagener Reset darf die Nachholung der folgenden Welten nicht verhindern. Beim Stop während der Verzögerung darf kein Reset mehr beginnen; beim Stop während eines laufenden Catch-ups darf keine weitere Farmwelt neu gestartet werden.
 
 ## Fehlerdiagnose
 

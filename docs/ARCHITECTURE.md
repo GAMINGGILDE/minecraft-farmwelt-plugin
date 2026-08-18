@@ -56,6 +56,7 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- BukkitFarmworldPostResetInitializer.java
     +-- FarmworldResetService.java
     +-- BukkitFarmworldWorldOperations.java
+    +-- StartupResetCoordinator.java
     +-- AutomaticResetScheduler.java
     +-- ResetDueStateEvaluator.java
     +-- FoliaFarmweltScheduler.java
@@ -78,9 +79,9 @@ Beim Start:
 8. `FarmweltCommand` wird zusätzlich als Listener registriert, weil der Monitor-Debug auf Rechtsklicks reagiert.
 9. `FarmweltGuiListener` verarbeitet GUI-Klicks.
 10. `ResourceBreakListener` verarbeitet Blockabbau- und Explosions-Events.
-11. `AutomaticResetScheduler` startet genau einen globalen Folia-Task zur Fälligkeitsprüfung und stößt fällige Resets über `FarmworldResetExecutor` an.
+11. `StartupResetCoordinator` plant genau einen um 60 Sekunden verzögerten globalen Folia-Task. Er holt beim Start überfällige Welten sequenziell nach und startet erst danach den periodischen `AutomaticResetScheduler`.
 
-Beim Stoppen bricht `FarmweltPlugin` den eigenen Task des automatischen Schedulers gezielt ab. Ein Config-Reload startet keinen weiteren Task; der bestehende Scheduler liest bei jedem Lauf den aktuellen Snapshot des `FarmworldResetService`.
+Beim Stoppen bricht `FarmweltPlugin` über den Coordinator den noch wartenden Startup-Task oder den periodischen Task gezielt ab. Ein bereits laufender Reset wird nicht künstlich beendet; nach dem Stop startet die Catch-up-Kette aber weder eine weitere Welt noch den periodischen Scheduler. Eine Lifecycle-Generation schützt dabei auch gegen verspätete Future-Abschlüsse. Ein Config-Reload startet weder eine zweite Startup-Sequenz noch einen weiteren periodischen Task; die bestehende Komponente liest bei jeder Prüfung den aktuellen Snapshot des `FarmworldResetService`.
 
 Beim Reload über `/farmwelt reload`:
 
@@ -124,7 +125,9 @@ Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht kei
 
 `WorldsAccess.regenerate(...)` wird nicht in `FoliaFarmweltScheduler.runGlobal(...)` verpackt, da Worlds sein Global-/Folia-Scheduling selbst kapselt. Eigene kurze Bukkit-Prüfungen und asynchrone State-I/O verwenden weiterhin den Farmwelt-Scheduler. Fehler der Worlds-Future werden als `REGENERATE_FAILED` mit unveränderter Ursache abgebildet. Die interne `WorldOperationException.Reason`-API von Worlds wird bewusst nicht in Commands oder Business-Logik übernommen.
 
-`AutomaticResetScheduler` prüft alle 60 Sekunden die vorhandenen persistenten `nextReset`-Zeitpunkte gegen ein aktuelles `Instant`. `ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere fällige Welten werden unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` im Scheduler erwartungsgemäß ohne Warnung behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung der anderen Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert.
+`ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Nach einer festen Startup-Sicherheitsverzögerung von 60 Sekunden ermittelt `StartupResetCoordinator` damit die überfälligen Welten in stabiler Konfigurationsreihenfolge. Die Reset-Futures werden per `thenCompose` sequenziell verkettet; vor dem Start jeder Welt wird deren aktueller State erneut mit derselben Due-Logik bewertet. Ein Fehler oder `ALREADY_RUNNING` wird verarbeitet, ohne die nächste Welt zu blockieren. Es gibt pro überfälliger Welt nur einen Versuch, nicht je verpasstem Intervall. Der Coordinator manipuliert keine States und besitzt keinen Reset-Lock.
+
+Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden die persistenten `nextReset`-Zeitpunkte gegen ein aktuelles `Instant`. Nur bei `DUE` ruft er nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` erwartungsgemäß ohne Warnung behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert.
 
 ## ConfigManager
 
@@ -475,7 +478,7 @@ Aktuelle Folia-relevante Punkte:
 - Teleportbefehle aus der GUI werden über den Entity-Scheduler des Spielers geplant.
 - Spieler-Evakuierungen verwenden den Entity-Scheduler und `teleportAsync`.
 - Kurze eigene Bukkit-Weltprüfungen laufen über den Global-Region-Scheduler.
-- Die zeitliche automatische Fälligkeitsprüfung läuft alle 60 Sekunden über den Global-Region-Scheduler. Sie wartet nicht auf Reset-Futures; die angestoßene Pipeline verwendet ihre bestehenden Folia-Kontexte.
+- Startup-Delay und periodische Fälligkeitsprüfung laufen über den Global-Region-Scheduler. Die Startup-Kette wartet ausschließlich nicht-blockierend über `CompletableFuture` auf Reset-Abschlüsse; der periodische Task wartet nicht auf Reset-Futures. Die angestoßene Pipeline verwendet jeweils ihre bestehenden Folia-Kontexte.
 - Dynamisches Entladen, Regenerieren und erneutes Laden übernimmt Worlds mit seiner versionsspezifischen Folia-Implementierung.
 - Der Aufruf `WorldsAccess.regenerate(...)` erhält keine zusätzliche Scheduler-Hülle durch Farmwelt.
 - Jail-Konsolenbefehle werden über den Global-Region-Scheduler geplant.

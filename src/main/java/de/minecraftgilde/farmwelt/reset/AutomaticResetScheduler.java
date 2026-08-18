@@ -107,13 +107,13 @@ public final class AutomaticResetScheduler {
         }
     }
 
-    private void startReset(String farmworldKey) {
+    CompletableFuture<ResetResult> startReset(String farmworldKey) {
         try {
             CompletableFuture<ResetResult> resetFuture = Objects.requireNonNull(
                     resetExecutor.reset(farmworldKey),
                     "resetExecutor.reset(...)"
             );
-            resetFuture.whenComplete((result, failure) -> handleResult(
+            return resetFuture.whenComplete((result, failure) -> handleResult(
                     farmworldKey,
                     result,
                     failure
@@ -125,6 +125,7 @@ public final class AutomaticResetScheduler {
                             + "' konnte nicht gestartet werden.",
                     exception
             );
+            return CompletableFuture.failedFuture(exception);
         }
     }
 
