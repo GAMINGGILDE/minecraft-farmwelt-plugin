@@ -6,10 +6,6 @@ import de.minecraftgilde.farmwelt.model.ResourceWorldRule;
 import de.minecraftgilde.farmwelt.model.ResourceWorldType;
 import de.minecraftgilde.farmwelt.model.ViolationAction;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
-import de.minecraftgilde.farmwelt.reset.FarmworldType;
-import de.minecraftgilde.farmwelt.reset.PostResetConfig;
-import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -33,8 +29,7 @@ public final class ConfigManager {
     private static final int DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS = 120;
 
     private final JavaPlugin plugin;
-    private final ResetIntervalParser resetIntervalParser = new ResetIntervalParser();
-    private final FarmworldPostResetConfigParser postResetConfigParser;
+    private final FarmworldResetConfigParser resetConfigParser;
     private List<FarmweltMenuItem> farmweltMenuItems = List.of();
     private List<FarmworldResetConfig> farmworldResetConfigs = List.of();
     private boolean resourceMonitorEnabled;
@@ -54,7 +49,7 @@ public final class ConfigManager {
 
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
-        this.postResetConfigParser = new FarmworldPostResetConfigParser(plugin.getLogger());
+        this.resetConfigParser = new FarmworldResetConfigParser(plugin.getLogger());
     }
 
     public void loadFarmweltMenuItems() {
@@ -87,37 +82,9 @@ public final class ConfigManager {
     }
 
     public void loadFarmworldResetConfigs() {
-        ConfigurationSection section = plugin.getConfig().getConfigurationSection("farmworlds");
-        if (section == null) {
-            farmworldResetConfigs = List.of();
-            return;
-        }
-
-        List<FarmworldResetConfig> loadedConfigs = new ArrayList<>();
-        for (String farmworldKey : section.getKeys(false)) {
-            ConfigurationSection farmworldSection = section.getConfigurationSection(farmworldKey);
-            if (farmworldSection == null) {
-                continue;
-            }
-
-            ConfigurationSection resetSection = farmworldSection.getConfigurationSection("reset");
-            if (resetSection == null) {
-                continue;
-            }
-
-            boolean enabled = farmworldSection.getBoolean("enabled", true)
-                    && resetSection.getBoolean("enabled", false);
-            FarmworldResetConfig resetConfig = loadFarmworldResetConfig(
-                    farmworldKey,
-                    resetSection,
-                    enabled
-            );
-            if (resetConfig != null) {
-                loadedConfigs.add(resetConfig);
-            }
-        }
-
-        farmworldResetConfigs = List.copyOf(loadedConfigs);
+        farmworldResetConfigs = resetConfigParser.parse(
+                plugin.getConfig().getConfigurationSection("farmworlds")
+        );
     }
 
     public List<FarmworldResetConfig> getFarmworldResetConfigs() {
@@ -319,59 +286,6 @@ public final class ConfigManager {
                 slot,
                 section.getStringList("lore"),
                 teleportAction
-        );
-    }
-
-    private FarmworldResetConfig loadFarmworldResetConfig(
-            String farmworldKey,
-            ConfigurationSection resetSection,
-            boolean enabled
-    ) {
-        String worldName = resetSection.getString("world");
-        if (worldName == null || worldName.isBlank()) {
-            plugin.getLogger().warning("Reset-Konfiguration für Farmwelt '" + farmworldKey
-                    + "' enthält keinen Bukkit-Weltnamen. Reset für diese Farmwelt wurde deaktiviert.");
-            return null;
-        }
-
-        Object intervalValue = resetSection.get("interval");
-        String intervalText = intervalValue instanceof String value ? value : null;
-        Optional<Duration> interval = resetIntervalParser.parse(intervalText);
-        if (interval.isEmpty()) {
-            plugin.getLogger().warning("Ungültiges Reset-Intervall '" + String.valueOf(intervalValue)
-                    + "' für Farmwelt '" + farmworldKey
-                    + "'. Reset für diese Farmwelt wurde deaktiviert.");
-            return null;
-        }
-
-        Optional<FarmworldType> farmworldType = FarmworldType.fromFarmworldKey(farmworldKey);
-        if (farmworldType.isEmpty()) {
-            plugin.getLogger().warning("Reset-Konfiguration für unbekannte Farmwelt-ID '"
-                    + farmworldKey + "' wurde deaktiviert.");
-            return null;
-        }
-
-        final PostResetConfig postReset;
-        try {
-            postReset = postResetConfigParser.parse(
-                    resetSection.getConfigurationSection("post-reset"),
-                    farmworldKey,
-                    farmworldType.orElseThrow()
-            );
-        } catch (IllegalArgumentException exception) {
-            plugin.getLogger().warning("Ung\u00fcltige Post-Reset-Konfiguration f\u00fcr Farmwelt '"
-                    + farmworldKey + "': " + exception.getMessage()
-                    + " Reset f\u00fcr diese Farmwelt wurde deaktiviert.");
-            return null;
-        }
-
-        return new FarmworldResetConfig(
-                farmworldKey,
-                worldName.trim(),
-                enabled,
-                interval.orElseThrow(),
-                farmworldType.orElseThrow(),
-                postReset
         );
     }
 

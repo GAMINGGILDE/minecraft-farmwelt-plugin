@@ -38,6 +38,10 @@ Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur vo
 
 Ein Reload verwendet denselben `FarmworldResetService`, dieselbe `FarmworldResetEngine` und denselben Startup-/Automatik-Lifecycle weiter. Dadurch entstehen weder eine zweite Startup-Nachholung noch doppelte periodische Scheduler-Tasks; laufende Locks und deren immutable Config-Snapshots bleiben erhalten und gespeicherte `nextReset`-Werte werden nicht neu berechnet.
 
+Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.interval` als positive Ganzzahl mit `m` für Minuten, `h` für Stunden oder `d` für Tage angegeben, zum Beispiel `interval: "30d"` und `interval: "60d"`. Andere Einheiten, Dezimalwerte, Cron- und ISO-Durationen sind ungültig. Ein Reset ist nur aktiv, wenn sowohl der Farmwelt-Eintrag als auch dessen `reset`-Bereich aktiviert sind und `world` sowie `interval` gültig gesetzt wurden.
+
+Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
+
 ## Manueller End-to-End-Reset auf Folia
 
 Den ersten echten Test ausdrücklich mit einer wegwerfbaren Testwelt durchführen, niemals direkt mit einer produktiven Farmwelt. Beispiel:

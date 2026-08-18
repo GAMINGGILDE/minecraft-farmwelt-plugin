@@ -1,3 +1,4 @@
+# reset-state.yml wird vom Plugin verwaltet und sollte im Produktivbetrieb nicht manuell geändert werden.
 farmworlds:
   overworld:
     enabled: true
@@ -9,11 +10,13 @@ farmworlds:
       - "Für Holz, Sand, Erde und weitere Ressourcen"
     reset:
       # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # Der Zeitplan ist nur aktiv, wenn auch farmworlds.overworld.enabled auf true steht.
       # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
       enabled: true
       # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "overworld" verwechseln.
       world: "farmwelt"
-      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Abstand zwischen zwei erfolgreichen Resets: positive Ganzzahl; m = Minuten, h = Stunden, d = Tage.
+      # Fehlende oder ungültige Werte deaktivieren diesen Reset-Zeitplan sicher.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
       # Wird erst nach erfolgreicher Regeneration und Validierung angewendet.

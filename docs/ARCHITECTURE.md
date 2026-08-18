@@ -136,6 +136,7 @@ Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau ein
 Wichtige Aufgaben:
 
 - Farmwelt-GUI-Einträge aus `farmworlds` lesen.
+- Reset-Einträge über den kleinen `FarmworldResetConfigParser` validieren; nur bekannte logische IDs mit gültigem Weltname, `m`-/`h`-/`d`-Intervall und gültigem `post-reset` gelangen in den Laufzeit-Snapshot.
 - Icons als Bukkit-`Material` validieren.
 - GUI-Slots validieren.
 - Teleport-Aktionen validieren.

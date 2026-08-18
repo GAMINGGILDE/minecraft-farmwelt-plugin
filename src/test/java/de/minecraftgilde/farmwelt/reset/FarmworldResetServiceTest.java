@@ -69,6 +69,23 @@ class FarmworldResetServiceTest {
     }
 
     @Test
+    void shorterIntervalDoesNotMovePersistentNextReset() {
+        Instant storedNextReset = Instant.parse("2026-10-01T00:00:00Z");
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository(Map.of(
+                "overworld",
+                new FarmworldResetState("overworld", Optional.empty(), storedNextReset)
+        ));
+        FarmworldResetService service = createService(repository);
+
+        service.reload(List.of(config(Duration.ofDays(60))));
+        service.reload(List.of(config(Duration.ofDays(30))));
+
+        assertEquals(Duration.ofDays(30), service.getConfig("overworld").orElseThrow().interval());
+        assertEquals(storedNextReset, service.getState("overworld").orElseThrow().nextReset());
+        assertEquals(0, repository.saveCount);
+    }
+
+    @Test
     void failedReloadKeepsPreviousConfigurationAndStateTogether() {
         InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
         FarmworldResetService service = createService(repository);
@@ -160,6 +177,37 @@ class FarmworldResetServiceTest {
 
         assertEquals(existingState, service.getState("overworld").orElseThrow());
         assertEquals(existingState, repository.states.get("overworld"));
+        assertEquals(0, repository.saveCount);
+    }
+
+    @Test
+    void reenabledConfigReusesOverdueState() {
+        FarmworldResetState overdueState = new FarmworldResetState(
+                "overworld",
+                Optional.of(Instant.parse("2026-07-01T00:00:00Z")),
+                NOW.minusSeconds(1)
+        );
+        InMemoryResetStateRepository repository = new InMemoryResetStateRepository(Map.of(
+                "overworld", overdueState
+        ));
+        FarmworldResetService service = createService(repository);
+        FarmworldResetConfig disabledConfig = new FarmworldResetConfig(
+                "overworld", "farmwelt", false, Duration.ofDays(30)
+        );
+
+        assertTrue(service.reload(List.of(disabledConfig)));
+        assertTrue(service.reload(List.of(config(Duration.ofDays(30)))));
+
+        FarmworldResetConfig enabledConfig = service.getConfig("overworld").orElseThrow();
+        assertEquals(overdueState, service.getState("overworld").orElseThrow());
+        assertEquals(
+                ResetDueState.DUE,
+                new ResetDueStateEvaluator().evaluate(
+                        enabledConfig,
+                        service.getState("overworld"),
+                        NOW
+                )
+        );
         assertEquals(0, repository.saveCount);
     }
 
