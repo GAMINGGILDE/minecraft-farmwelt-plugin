@@ -1,12 +1,19 @@
-# Farmwelt
+<p align="center">
+  <img src="assets/logo.png"
+       alt="Farmwelt"
+       width="360">
+</p>
+<p align="center">
+  <a href="https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/GAMINGGILDE/minecraft-farmwelt-plugin/build.yml?branch=main&amp;label=build&amp;style=flat-square&amp;logo=githubactions&amp;logoColor=white"></a>
+  <a href="https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/releases"><img alt="Release" src="https://img.shields.io/github/v/release/GAMINGGILDE/minecraft-farmwelt-plugin?label=release&amp;cacheSeconds=300&amp;style=flat-square&amp;logo=github&amp;logoColor=white"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GAMINGGILDE/minecraft-farmwelt-plugin?style=flat-square&amp;logo=opensourceinitiative&amp;logoColor=white"></a>
+  <img alt="Java 25" src="https://img.shields.io/badge/Java-25-orange?style=flat-square&amp;logo=openjdk&amp;logoColor=white">
+  <img alt="Paper 26.1.2" src="https://img.shields.io/badge/Paper-26.1.2-blue?style=flat-square">
+  <img alt="Folia supported" src="https://img.shields.io/badge/Folia-supported-brightgreen?style=flat-square">
+  <a href="https://discord.minecraft-gilde.de"><img alt="Join Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&amp;logo=discord&amp;logoColor=white"></a>
+</p>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/minecraft-gilde/farmwelt-plugin/build.yml?branch=main&label=build)](https://github.com/minecraft-gilde/farmwelt-plugin/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/minecraft-gilde/farmwelt-plugin?label=release)](https://github.com/minecraft-gilde/farmwelt-plugin/releases)
-[![License](https://img.shields.io/github/license/minecraft-gilde/farmwelt-plugin)](LICENSE)
-![Java](https://img.shields.io/badge/Java-25-orange)
-![Paper](https://img.shields.io/badge/Paper-26.1.2-blue)
-![Folia](https://img.shields.io/badge/Folia-supported-brightgreen)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.minecraft-gilde.de)
+# Farmwelt
 
 Farmwelt ist ein Paper/Folia-Plugin für Minecraft-Server. Es stellt einen zentralen `/farmwelt`-Befehl mit GUI bereit und kann Ressourcenabbau in normalen Welten erkennen, warnen und optional sichtbar blockieren.
 
