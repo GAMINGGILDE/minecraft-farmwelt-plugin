@@ -3,6 +3,7 @@ package de.minecraftgilde.farmwelt.reset;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.papermc.paper.math.Position;
@@ -68,6 +69,26 @@ class EndDragonFightRuntimeAccessTest {
         assertFalse(fight.activePortal);
         assertTrue(fight.dirty);
         assertTrue(battle.bossBarVisible.get());
+    }
+
+    @Test
+    void reportsMissingExitPortalLocationClearly() {
+        FakeDragonFight fight = new FakeDragonFight();
+        fight.portalGenerationSucceeds = false;
+        FakeDragonBattle battle = new FakeDragonBattle(fight);
+        EndDragonFightRuntimeAccess access = EndDragonFightRuntimeAccess.reflective(
+                FakeDragonBattle.class.getName(),
+                FakeDragonFight.class.getName()
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> access.suppress(battle)
+        );
+
+        assertTrue(exception.getMessage().contains(
+                "Aktives End-Ausgangsportal konnte nicht verifiziert werden"
+        ));
     }
 
     private static final class FakeDragonBattle implements DragonBattle {
@@ -179,9 +200,13 @@ class EndDragonFightRuntimeAccessTest {
         public Object respawnCrystals = new Object();
         private boolean portalPresent;
         private boolean activePortal;
+        private boolean portalGenerationSucceeds = true;
         private boolean dirty;
 
         public void spawnExitPortal(boolean active) {
+            if (!portalGenerationSucceeds) {
+                return;
+            }
             portalPresent = true;
             activePortal = active;
         }

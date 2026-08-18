@@ -93,10 +93,15 @@ interface EndDragonFightRuntimeAccess {
             if (dragonKilled.getBoolean(fight) != suppress
                     || previouslyKilled.getBoolean(fight) != suppress
                     || needsStateScanning.getBoolean(fight) == suppress
-                    || battle.getBossBar().isVisible() == suppress
-                    || battle.getEndPortalLocation() == null) {
+                    || battle.getBossBar().isVisible() == suppress) {
                 throw new IllegalStateException(
                         "Der DragonBattle-Laufzeitstatus konnte nicht verifiziert werden."
+                );
+            }
+            if (battle.getEndPortalLocation() == null) {
+                throw new IllegalStateException(
+                        "Aktives End-Ausgangsportal konnte nicht verifiziert werden: "
+                                + "DragonBattle lieferte keine Portalposition."
                 );
             }
         } catch (IllegalAccessException | InvocationTargetException exception) {

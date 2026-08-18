@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.GameRule;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.World;
@@ -36,6 +38,9 @@ public final class BukkitFarmworldPostResetInitializer
         implements FarmworldPostResetInitializer, Listener {
 
     private static final long DRAGON_REMOVAL_VERIFICATION_DELAY_TICKS = 5L;
+    private static final long DRAGON_KILL_PORTAL_REPAIR_DELAY_TICKS = 1L;
+    private static final int EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS = 4;
+    private static final int EXIT_PORTAL_VERTICAL_VERIFICATION_RADIUS = 2;
 
     private final Plugin plugin;
     private final FarmweltScheduler scheduler;
@@ -211,9 +216,11 @@ public final class BukkitFarmworldPostResetInitializer
         }
 
         DragonBattle battle = event.getDragonBattle();
-        scheduler.runRegion(world, 0, 0, () -> {
+        scheduler.runRegionDelayed(world, 0, 0, DRAGON_KILL_PORTAL_REPAIR_DELAY_TICKS, () -> {
             dragonFightRuntimeAccess.suppress(battle);
-            logger.info("Aktives End-Ausgangsportal nach dem Drachenkampf sichergestellt.");
+            verifyActiveExitPortal(world, battle);
+            logger.info("Aktives End-Ausgangsportal nach dem Drachenkampf wiederhergestellt "
+                    + "und verifiziert.");
             return null;
         }).whenComplete((ignored, failure) -> {
             if (failure != null) {
@@ -348,7 +355,9 @@ public final class BukkitFarmworldPostResetInitializer
         return scheduler.runRegion(world, 0, 0, () -> {
             DragonBattle battle = requireDragonBattle(world);
             dragonFightRuntimeAccess.suppress(battle);
-            logger.info("DragonBattle vollständig beendet und aktives End-Ausgangsportal erzeugt.");
+            verifyActiveExitPortal(world, battle);
+            logger.info("DragonBattle vollständig beendet und aktives End-Ausgangsportal "
+                    + "verifiziert.");
             return null;
         }).thenCompose(ignored -> scheduler.runGlobal(() -> inspectDragonPolicy(world)))
                 .thenCompose(snapshot -> {
@@ -363,6 +372,45 @@ public final class BukkitFarmworldPostResetInitializer
                             ))
                             .thenCompose(verification -> finishDragonPolicy(world, verification));
                 });
+    }
+
+    private void verifyActiveExitPortal(World world, DragonBattle battle) {
+        Location portalLocation = battle.getEndPortalLocation();
+        if (portalLocation == null) {
+            throw new IllegalStateException(
+                    "Aktives End-Ausgangsportal konnte nicht verifiziert werden: "
+                            + "DragonBattle lieferte keine Portalposition."
+            );
+        }
+        if (!hasActiveExitPortal(world, portalLocation)) {
+            throw new IllegalStateException(
+                    "Aktives End-Ausgangsportal konnte nicht verifiziert werden: Im Bereich "
+                            + "der DragonBattle-Portalposition wurden keine END_PORTAL-Blöcke "
+                            + "gefunden."
+            );
+        }
+    }
+
+    private boolean hasActiveExitPortal(World world, Location portalLocation) {
+        int centerX = portalLocation.getBlockX();
+        int centerY = portalLocation.getBlockY();
+        int centerZ = portalLocation.getBlockZ();
+        for (int y = centerY - EXIT_PORTAL_VERTICAL_VERIFICATION_RADIUS;
+                y <= centerY + EXIT_PORTAL_VERTICAL_VERIFICATION_RADIUS;
+                y++) {
+            for (int x = centerX - EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS;
+                    x <= centerX + EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS;
+                    x++) {
+                for (int z = centerZ - EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS;
+                        z <= centerZ + EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS;
+                        z++) {
+                    if (world.getBlockAt(x, y, z).getType() == Material.END_PORTAL) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private CompletableFuture<Void> prepareAllowedEndDragon(

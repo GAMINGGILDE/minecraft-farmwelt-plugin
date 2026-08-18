@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
@@ -119,7 +121,7 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
-    void emptyWorldSucceedsImmediatelyWithoutDelayedChecks() {
+    void emptyWorldWithActiveExitPortalSucceedsImmediatelyWithoutDelayedChecks() {
         DragonScenario scenario = dragonScenario(List.of(List.of()));
         ControllableScheduler scheduler = new ControllableScheduler();
         CompletableFuture<PostResetResult> result = applyWithConfiguredGuard(
@@ -139,6 +141,7 @@ class BukkitFarmworldPostResetInitializerTest {
         assertTrue(result.join().successful());
         assertTrue(scheduler.delays().isEmpty());
         assertEquals(1, scenario.entityLookups().get());
+        assertTrue(scenario.blockLookups().get() > 0);
     }
 
     @Test
@@ -252,6 +255,52 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
+    void knownPortalLocationWithoutActivePortalBlocksFailsPostResetPolicy() {
+        DragonScenario scenario = dragonScenario(
+                List.of(List.of()),
+                PortalState.MISSING_BLOCKS
+        );
+
+        PostResetResult result = applyWithConfiguredGuard(
+                initializer(name -> null),
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        ).join();
+
+        assertFalse(result.successful());
+        assertTrue(result.cause().orElseThrow() instanceof IllegalStateException);
+        assertTrue(result.cause().orElseThrow().getMessage().contains(
+                "Aktives End-Ausgangsportal konnte nicht verifiziert werden"
+        ));
+        assertEquals(405, scenario.blockLookups().get());
+        assertEquals(0, scenario.entityLookups().get());
+    }
+
+    @Test
+    void missingPortalLocationFailsPostResetPolicyWithoutScanningBlocks() {
+        DragonScenario scenario = dragonScenario(
+                List.of(List.of()),
+                PortalState.MISSING_LOCATION
+        );
+
+        PostResetResult result = applyWithConfiguredGuard(
+                initializer(name -> null),
+                dragonDisabledConfig(),
+                scenario.world(),
+                ResetOptions.defaults()
+        ).join();
+
+        assertFalse(result.successful());
+        assertTrue(result.cause().orElseThrow() instanceof IllegalStateException);
+        assertTrue(result.cause().orElseThrow().getMessage().contains(
+                "DragonBattle lieferte keine Portalposition"
+        ));
+        assertEquals(0, scenario.blockLookups().get());
+        assertEquals(0, scenario.entityLookups().get());
+    }
+
+    @Test
     void verifiedDragonPolicyBlocksDragonSpawnDelayedUntilAPlayerEnters() {
         DragonScenario scenario = dragonScenario(List.of(List.of()));
         ControllableScheduler scheduler = new ControllableScheduler();
@@ -285,15 +334,25 @@ class BukkitFarmworldPostResetInitializerTest {
     @Test
     void dragonKillRebuildsActiveExitPortalEvenWhenEggEventIsCancelled() {
         DragonScenario scenario = dragonScenario(List.of(List.of()));
-        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null);
+        ControllableScheduler scheduler = new ControllableScheduler();
+        BukkitFarmworldPostResetInitializer initializer = initializer(name -> null, scheduler);
         initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
         DragonEggFormEvent event = dragonEggFormEvent(scenario);
         event.setCancelled(true);
 
         initializer.ensureExitPortalAfterDragonKill(event);
 
+        assertFalse(scenario.endPortalGenerated().get());
+        assertEquals(List.of(1L), scheduler.delays());
+        scheduler.advance();
+
         assertTrue(scenario.endPortalGenerated().get());
         assertTrue(scenario.previouslyKilled().get());
+        assertTrue(scenario.blockLookups().get() > 0);
+        assertEquals(1, scheduler.regionExecutions());
+        assertEquals(scenario.world(), scheduler.regionWorld());
+        assertEquals(0, scheduler.regionChunkX());
+        assertEquals(0, scheduler.regionChunkZ());
     }
 
     @Test
@@ -570,6 +629,22 @@ class BukkitFarmworldPostResetInitializerTest {
         assertFalse(dragon.removed().get());
         assertFalse(delayedSpawn.isCancelled());
         assertTrue(config.postReset().end().orElseThrow().dragon());
+        assertEquals(0, scenario.blockLookups().get());
+    }
+
+    @Test
+    void overworldAndNetherResetsDoNotInspectAnExitPortal() {
+        for (FarmworldType type : List.of(FarmworldType.OVERWORLD, FarmworldType.NETHER)) {
+            ControllableScheduler scheduler = new ControllableScheduler();
+            PostResetResult result = initializer(name -> null, scheduler).apply(
+                    config(type, PostResetConfig.none()),
+                    world("farmwelt", null, List.of()),
+                    ResetOptions.defaults()
+            ).join();
+
+            assertTrue(result.successful());
+            assertEquals(0, scheduler.regionExecutions());
+        }
     }
 
     private static FarmworldResetConfig dragonDisabledConfig() {
@@ -803,14 +878,21 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     private static DragonScenario dragonScenario(List<List<EnderDragon>> checks) {
-        return dragonScenario(checks, true, null);
+        return dragonScenario(checks, true, null, PortalState.ACTIVE);
+    }
+
+    private static DragonScenario dragonScenario(
+            List<List<EnderDragon>> checks,
+            PortalState portalState
+    ) {
+        return dragonScenario(checks, true, null, portalState);
     }
 
     private static DragonScenario dragonScenario(
             List<List<EnderDragon>> checks,
             boolean battleStatePersists
     ) {
-        return dragonScenario(checks, battleStatePersists, null);
+        return dragonScenario(checks, battleStatePersists, null, PortalState.ACTIVE);
     }
 
     private static DragonScenario dragonScenario(
@@ -818,9 +900,19 @@ class BukkitFarmworldPostResetInitializerTest {
             boolean battleStatePersists,
             RuntimeException portalFailure
     ) {
+        return dragonScenario(checks, battleStatePersists, portalFailure, PortalState.ACTIVE);
+    }
+
+    private static DragonScenario dragonScenario(
+            List<List<EnderDragon>> checks,
+            boolean battleStatePersists,
+            RuntimeException portalFailure,
+            PortalState portalState
+    ) {
         AtomicInteger checkIndex = new AtomicInteger();
         AtomicInteger battleLookups = new AtomicInteger();
         AtomicInteger entityLookups = new AtomicInteger();
+        AtomicInteger blockLookups = new AtomicInteger();
         AtomicBoolean previouslyKilled = new AtomicBoolean();
         AtomicBoolean endPortalGenerated = new AtomicBoolean();
 
@@ -842,6 +934,9 @@ class BukkitFarmworldPostResetInitializerTest {
                         yield null;
                     }
                     case "hasBeenPreviouslyKilled" -> previouslyKilled.get();
+                    case "getEndPortalLocation" -> portalState == PortalState.MISSING_LOCATION
+                            ? null
+                            : new Location(null, 0, 64, 0);
                     case "getEnderDragon" -> {
                         List<EnderDragon> dragons = checks.get(checkIndex.get());
                         yield dragons.isEmpty() ? null : dragons.getFirst();
@@ -862,6 +957,18 @@ class BukkitFarmworldPostResetInitializerTest {
                         entityLookups.incrementAndGet();
                         yield checks.get(checkIndex.getAndIncrement());
                     }
+                    case "getBlockAt" -> {
+                        blockLookups.incrementAndGet();
+                        int x = (Integer) arguments[0];
+                        int y = (Integer) arguments[1];
+                        int z = (Integer) arguments[2];
+                        Material material = portalState == PortalState.ACTIVE
+                                && endPortalGenerated.get()
+                                && x == 2 && y == 64 && z == -1
+                                ? Material.END_PORTAL
+                                : Material.AIR;
+                        yield block(material);
+                    }
                     case "toString" -> "FakeWorld[endfarm]";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == arguments[0];
@@ -874,7 +981,19 @@ class BukkitFarmworldPostResetInitializerTest {
                 previouslyKilled,
                 endPortalGenerated,
                 battleLookups,
-                entityLookups
+                entityLookups,
+                blockLookups
+        );
+    }
+
+    private static Block block(Material material) {
+        return (Block) Proxy.newProxyInstance(
+                Block.class.getClassLoader(),
+                new Class<?>[]{Block.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getType" -> material;
+                    default -> defaultValue(method.getReturnType());
+                }
         );
     }
 
@@ -951,6 +1070,17 @@ class BukkitFarmworldPostResetInitializerTest {
         }
 
         @Override
+        public <T> CompletableFuture<T> runRegionDelayed(
+                World world,
+                int chunkX,
+                int chunkZ,
+                long ticks,
+                CheckedSupplier<T> operation
+        ) {
+            return runRegion(world, chunkX, chunkZ, operation);
+        }
+
+        @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
             return runGlobal(operation);
         }
@@ -993,6 +1123,24 @@ class BukkitFarmworldPostResetInitializerTest {
             regionChunkX = chunkX;
             regionChunkZ = chunkZ;
             return execute(operation);
+        }
+
+        @Override
+        public <T> CompletableFuture<T> runRegionDelayed(
+                World world,
+                int chunkX,
+                int chunkZ,
+                long ticks,
+                CheckedSupplier<T> operation
+        ) {
+            regionExecutions++;
+            regionWorld = world;
+            regionChunkX = chunkX;
+            regionChunkZ = chunkZ;
+            CompletableFuture<T> future = new CompletableFuture<>();
+            delays.add(ticks);
+            pending.addLast(new PendingOperation<>(operation, future));
+            return future;
         }
 
         @Override
@@ -1061,7 +1209,14 @@ class BukkitFarmworldPostResetInitializerTest {
             AtomicBoolean previouslyKilled,
             AtomicBoolean endPortalGenerated,
             AtomicInteger battleLookups,
-            AtomicInteger entityLookups
+            AtomicInteger entityLookups,
+            AtomicInteger blockLookups
     ) {
+    }
+
+    private enum PortalState {
+        ACTIVE,
+        MISSING_BLOCKS,
+        MISSING_LOCATION
     }
 }

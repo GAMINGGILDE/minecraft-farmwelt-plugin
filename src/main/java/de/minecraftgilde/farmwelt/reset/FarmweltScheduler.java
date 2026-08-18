@@ -17,6 +17,14 @@ public interface FarmweltScheduler {
             CheckedSupplier<T> operation
     );
 
+    <T> CompletableFuture<T> runRegionDelayed(
+            World world,
+            int chunkX,
+            int chunkZ,
+            long ticks,
+            CheckedSupplier<T> operation
+    );
+
     <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation);
 
     @FunctionalInterface
