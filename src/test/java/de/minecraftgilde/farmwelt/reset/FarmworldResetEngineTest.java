@@ -56,6 +56,14 @@ class FarmworldResetEngineTest {
             clock,
             quietLogger()
     );
+    private final List<String> lifecycleMessages = new ArrayList<>();
+    private final ResetNotificationService notificationService = new ResetNotificationService(
+            resetService,
+            new ResetWarningTracker(),
+            lifecycleMessages::add,
+            ZoneOffset.UTC,
+            quietLogger()
+    );
     private final FakePostResetInitializer postResetInitializer = new FakePostResetInitializer(calls);
     private final FarmworldResetEngine engine = new FarmworldResetEngine(
             resetService,
@@ -63,6 +71,7 @@ class FarmworldResetEngineTest {
             lifecycleService,
             postResetInitializer,
             new DirectScheduler(),
+            notificationService,
             quietLogger()
     );
 
@@ -75,6 +84,7 @@ class FarmworldResetEngineTest {
         postResetInitializer.receivedOptions = null;
         lifecycleService.receivedOptions = null;
         calls.clear();
+        lifecycleMessages.clear();
     }
 
     @Test
@@ -95,6 +105,10 @@ class FarmworldResetEngineTest {
         FarmworldResetState state = resetService.getState("overworld").orElseThrow();
         assertEquals(NOW, state.lastReset().orElseThrow());
         assertEquals(NOW.plus(Duration.ofDays(30)), state.nextReset());
+        assertEquals(List.of(
+                "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), lifecycleMessages);
         assertFalse(engine.isResetRunning("overworld"));
     }
 
@@ -260,7 +274,108 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.STATE_SAVE_FAILED, result.status());
         assertEquals(1, lifecycleService.invocations);
         assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertEquals(
+                List.of("&eDie &6Farmwelt&e wird jetzt zurückgesetzt."),
+                lifecycleMessages
+        );
         assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void stateSaveFailureBroadcastsEnabledFailureButNeverSuccess() {
+        resetService.reload(List.of(config(lifecycleNotifications(
+                true,
+                true,
+                true,
+                true,
+                "start {world}",
+                "success {world}",
+                "failure {world} {next-reset}"
+        ))));
+        lifecycleMessages.clear();
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        repository.failSaves = true;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.STATE_SAVE_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertEquals(List.of(
+                "start Farmwelt",
+                "failure Farmwelt 16.09.2026 07:00"
+        ), lifecycleMessages);
+    }
+
+    @Test
+    void successfulLifecycleMessageUsesNewlyPersistedNextReset() {
+        resetService.reload(List.of(config(lifecycleNotifications(
+                true,
+                true,
+                true,
+                true,
+                "start {world} {next-reset}",
+                "success {world} {next-reset}",
+                "failure {world}"
+        ))));
+        lifecycleMessages.clear();
+        clock.setInstant(NOW.plus(Duration.ofMinutes(2)));
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(
+                "start Farmwelt 16.09.2026 07:00",
+                "success Farmwelt 16.09.2026 07:02"
+        ), lifecycleMessages);
+    }
+
+    @Test
+    void audienceExceptionsDoNotChangeSuccessfulResetResult() {
+        ResetNotificationService failingNotifications = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                ignored -> {
+                    throw new IllegalStateException("broadcast failed");
+                },
+                ZoneOffset.UTC,
+                quietLogger()
+        );
+        FarmworldResetEngine notificationFailingEngine = new FarmworldResetEngine(
+                resetService,
+                worldOperations,
+                lifecycleService,
+                postResetInitializer,
+                new DirectScheduler(),
+                failingNotifications,
+                quietLogger()
+        );
+
+        ResetResult result = notificationFailingEngine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(NOW.plus(Duration.ofDays(30)),
+                resetService.getState("overworld").orElseThrow().nextReset());
+    }
+
+    @Test
+    void globallyDisabledNotificationsDoNotAffectSuccessfulReset() {
+        resetService.reload(List.of(config(lifecycleNotifications(
+                false,
+                true,
+                true,
+                true,
+                "start {world}",
+                "success {world}",
+                "failure {world}"
+        ))));
+        lifecycleMessages.clear();
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(), lifecycleMessages);
+        assertEquals(NOW.plus(Duration.ofDays(30)),
+                resetService.getState("overworld").orElseThrow().nextReset());
     }
 
     @Test
@@ -380,6 +495,10 @@ class FarmworldResetEngineTest {
                 FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT,
                 lifecycleService.receivedOptions.endDragonFightDataMode()
         );
+        assertEquals(List.of(
+                "&eDie &6Endfarm&e wird jetzt zurückgesetzt.",
+                "&aDie &6Endfarm&a wurde erfolgreich zurückgesetzt."
+        ), lifecycleMessages);
     }
 
     @Test
@@ -392,10 +511,15 @@ class FarmworldResetEngineTest {
         assertTrue(engine.isResetRunning("overworld"));
         assertFalse(engine.isFarmworldAvailable("overworld"));
         assertEquals(ResetStatus.ALREADY_RUNNING, engine.reset("overworld").join().status());
+        assertEquals(List.of("&eDie &6Farmwelt&e wird jetzt zurückgesetzt."), lifecycleMessages);
 
         pendingRegeneration.complete(regeneratedWorld);
 
         assertEquals(ResetStatus.SUCCESS, runningReset.join().status());
+        assertEquals(List.of(
+                "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), lifecycleMessages);
         assertFalse(engine.isResetRunning("overworld"));
         assertTrue(engine.isFarmworldAvailable("overworld"));
     }
@@ -412,6 +536,7 @@ class FarmworldResetEngineTest {
         )));
 
         assertEquals(ResetStatus.DISABLED, engine.reset("overworld").join().status());
+        assertEquals(List.of(), lifecycleMessages);
     }
 
     @Test
@@ -505,6 +630,38 @@ class FarmworldResetEngineTest {
         return new FarmworldResetConfig("overworld", "farmwelt", true, Duration.ofDays(30));
     }
 
+    private FarmworldResetConfig config(ResetNotificationConfig notifications) {
+        return new FarmworldResetConfig(
+                "overworld",
+                "farmwelt",
+                true,
+                Duration.ofDays(30),
+                FarmworldType.OVERWORLD,
+                PostResetConfig.none(),
+                notifications
+        );
+    }
+
+    private ResetNotificationConfig lifecycleNotifications(
+            boolean enabled,
+            boolean resetStart,
+            boolean resetSuccess,
+            boolean resetFailure,
+            String startMessage,
+            String successMessage,
+            String failureMessage
+    ) {
+        return new ResetNotificationConfig(
+                enabled,
+                List.of(),
+                "warning",
+                new ResetNotificationMessageConfig(resetStart, startMessage),
+                new ResetNotificationMessageConfig(resetSuccess, successMessage),
+                new ResetNotificationMessageConfig(resetFailure, failureMessage),
+                ResetNotificationConfig.defaults().evacuation()
+        );
+    }
+
     private FarmworldResetEngine engineWith(Logger logger) {
         return new FarmworldResetEngine(
                 resetService,
@@ -512,6 +669,7 @@ class FarmworldResetEngineTest {
                 lifecycleService,
                 postResetInitializer,
                 new DirectScheduler(),
+                notificationService,
                 logger
         );
     }

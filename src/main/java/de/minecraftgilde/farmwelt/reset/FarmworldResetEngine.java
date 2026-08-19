@@ -19,6 +19,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private final FarmworldLifecycleService lifecycleService;
     private final FarmworldPostResetInitializer postResetInitializer;
     private final FarmweltScheduler scheduler;
+    private final ResetNotificationService notificationService;
     private final Logger logger;
     private final Set<String> runningResets = ConcurrentHashMap.newKeySet();
 
@@ -28,6 +29,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             FarmworldLifecycleService lifecycleService,
             FarmworldPostResetInitializer postResetInitializer,
             FarmweltScheduler scheduler,
+            ResetNotificationService notificationService,
             Logger logger
     ) {
         this.resetService = Objects.requireNonNull(resetService, "resetService");
@@ -35,6 +37,10 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService");
         this.postResetInitializer = Objects.requireNonNull(postResetInitializer, "postResetInitializer");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.notificationService = Objects.requireNonNull(
+                notificationService,
+                "notificationService"
+        );
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
@@ -94,6 +100,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
         logger.info("Reset für Farmwelt '" + farmworldKey + "' ("
                 + resetConfig.worldName() + ") gestartet.");
+        notificationService.broadcastResetStart(resetConfig);
 
         final FarmworldPostResetInitializer.ResetScope resetScope;
         try {
@@ -103,15 +110,27 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             );
         } catch (RuntimeException exception) {
             runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(finish(resetConfig, null, exception));
+            return CompletableFuture.completedFuture(finishAndNotify(
+                    resetConfig,
+                    null,
+                    exception
+            ));
         }
 
         CompletableFuture<ResetResult> resetFuture;
         try {
             resetFuture = execute(resetConfig, options)
-                    .handle((result, failure) -> finish(resetConfig, result, failure));
+                    .handle((result, failure) -> finishAndNotify(
+                            resetConfig,
+                            result,
+                            failure
+                    ));
         } catch (RuntimeException exception) {
-            resetFuture = CompletableFuture.completedFuture(finish(resetConfig, null, exception));
+            resetFuture = CompletableFuture.completedFuture(finishAndNotify(
+                    resetConfig,
+                    null,
+                    exception
+            ));
         }
 
         return resetFuture.whenComplete((result, failure) -> {
@@ -486,6 +505,16 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                 message,
                 reportedCause
         );
+    }
+
+    private ResetResult finishAndNotify(
+            FarmworldResetConfig resetConfig,
+            ResetResult result,
+            Throwable failure
+    ) {
+        ResetResult completedResult = finish(resetConfig, result, failure);
+        notificationService.broadcastResetResult(resetConfig, completedResult);
+        return completedResult;
     }
 
     private Throwable unwrap(Throwable failure) {

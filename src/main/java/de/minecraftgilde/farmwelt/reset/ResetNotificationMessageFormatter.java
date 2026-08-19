@@ -6,9 +6,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
+import java.util.Optional;
 
-/** Formatiert die konfigurierten Countdown-Nachrichten ohne Bukkit-Abhängigkeit. */
+/** Formatiert die konfigurierten Reset-Nachrichten ohne Bukkit-Abhängigkeit. */
 public final class ResetNotificationMessageFormatter {
+
+    static final String UNKNOWN_NEXT_RESET = "unbekannt";
 
     private final GermanDurationFormatter durationFormatter = new GermanDurationFormatter();
     private final DateTimeFormatter instantFormatter;
@@ -28,9 +31,23 @@ public final class ResetNotificationMessageFormatter {
         Objects.requireNonNull(displayName, "displayName");
         Objects.requireNonNull(warning, "warning");
         Objects.requireNonNull(nextReset, "nextReset");
+        return formatLifecycle(template, displayName, Optional.of(nextReset))
+                .replace("{time}", durationFormatter.format(warning));
+    }
+
+    public String formatLifecycle(
+            String template,
+            String displayName,
+            Optional<Instant> nextReset
+    ) {
+        Objects.requireNonNull(template, "template");
+        Objects.requireNonNull(displayName, "displayName");
+        Objects.requireNonNull(nextReset, "nextReset");
+        String formattedNextReset = nextReset
+                .map(instantFormatter::format)
+                .orElse(UNKNOWN_NEXT_RESET);
         return template
                 .replace("{world}", displayName)
-                .replace("{time}", durationFormatter.format(warning))
-                .replace("{next-reset}", instantFormatter.format(nextReset));
+                .replace("{next-reset}", formattedNextReset);
     }
 }

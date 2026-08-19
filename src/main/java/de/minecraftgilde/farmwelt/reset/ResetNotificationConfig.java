@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.TreeSet;
 
-/** Immutable Konfiguration für die spätere Kommunikation rund um Farmwelt-Resets. */
+/** Immutable Konfiguration für die Kommunikation rund um Farmwelt-Resets. */
 public record ResetNotificationConfig(
         boolean enabled,
         List<Duration> warnings,

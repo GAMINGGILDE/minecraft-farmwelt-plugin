@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ResetNotificationMessageFormatterTest {
@@ -39,6 +40,30 @@ class ResetNotificationMessageFormatterTest {
                         "Farmwelt",
                         Duration.ofMinutes(5),
                         Instant.parse("2026-09-01T12:00:00Z")
+                )
+        );
+    }
+
+    @Test
+    void formatsLifecyclePlaceholdersAndUsesFallbackWithoutState() {
+        ResetNotificationMessageFormatter formatter = new ResetNotificationMessageFormatter(
+                ZoneId.of("UTC")
+        );
+
+        assertEquals(
+                "Endfarm / 01.10.2026 12:00",
+                formatter.formatLifecycle(
+                        "{world} / {next-reset}",
+                        "Endfarm",
+                        Optional.of(Instant.parse("2026-10-01T12:00:00Z"))
+                )
+        );
+        assertEquals(
+                "Farmwelt / unbekannt",
+                formatter.formatLifecycle(
+                        "{world} / {next-reset}",
+                        "Farmwelt",
+                        Optional.empty()
                 )
         );
     }

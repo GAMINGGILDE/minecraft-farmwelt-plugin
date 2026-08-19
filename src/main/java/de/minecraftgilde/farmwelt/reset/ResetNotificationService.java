@@ -12,9 +12,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-/**
- * Wertet die aktuell geladenen Notification-Snapshots aus und versendet Countdown-Warnungen.
- */
+/** Wertet Notification-Snapshots aus und versendet Reset-Nachrichten best-effort. */
 public final class ResetNotificationService {
 
     private final FarmworldResetService resetService;
@@ -71,6 +69,52 @@ public final class ResetNotificationService {
         }
     }
 
+    public void broadcastResetStart(FarmworldResetConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        broadcastLifecycleMessage(
+                configuration,
+                configuration.notifications().resetStart(),
+                "Reset-Startmeldung"
+        );
+    }
+
+    public void broadcastResetSuccess(FarmworldResetConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        broadcastLifecycleMessage(
+                configuration,
+                configuration.notifications().resetSuccess(),
+                "Reset-Erfolgsmeldung"
+        );
+    }
+
+    public void broadcastResetFailure(FarmworldResetConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        broadcastLifecycleMessage(
+                configuration,
+                configuration.notifications().resetFailure(),
+                "Reset-Fehlermeldung"
+        );
+    }
+
+    /**
+     * Ordnet nur tatsächlich gestartete Reset-Ergebnisse einer Abschlussmeldung zu.
+     * Fachlich abgewiesene Aufrufe erzeugen keine Lifecycle-Nachricht.
+     */
+    public void broadcastResetResult(
+            FarmworldResetConfig configuration,
+            ResetResult result
+    ) {
+        Objects.requireNonNull(configuration, "configuration");
+        Objects.requireNonNull(result, "result");
+        switch (result.status()) {
+            case SUCCESS -> broadcastResetSuccess(configuration);
+            case NOT_CONFIGURED, DISABLED, ALREADY_RUNNING -> {
+                // Diese Status entstehen vor dem eigentlichen Reset-Start.
+            }
+            default -> broadcastResetFailure(configuration);
+        }
+    }
+
     private void broadcastDueWarnings(FarmworldResetConfig configuration, Instant now) {
         Optional<FarmworldResetState> state = resetService.getState(
                 configuration.farmworldKey()
@@ -104,6 +148,36 @@ public final class ResetNotificationService {
                         exception
                 );
             }
+        }
+    }
+
+    private void broadcastLifecycleMessage(
+            FarmworldResetConfig configuration,
+            ResetNotificationMessageConfig messageConfig,
+            String messageType
+    ) {
+        if (!configuration.enabled()
+                || !configuration.notifications().enabled()
+                || !messageConfig.enabled()) {
+            return;
+        }
+
+        try {
+            Optional<Instant> nextReset = resetService.getState(configuration.farmworldKey())
+                    .map(FarmworldResetState::nextReset);
+            String message = messageFormatter.formatLifecycle(
+                    messageConfig.message(),
+                    configuration.displayName(),
+                    nextReset
+            );
+            audience.broadcast(message);
+        } catch (RuntimeException exception) {
+            logger.log(
+                    Level.SEVERE,
+                    messageType + " für Farmwelt '" + configuration.farmworldKey()
+                            + "' konnte nicht versendet werden.",
+                    exception
+            );
         }
     }
 

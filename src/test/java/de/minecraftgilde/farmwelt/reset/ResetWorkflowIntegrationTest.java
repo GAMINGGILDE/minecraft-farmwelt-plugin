@@ -55,6 +55,10 @@ class ResetWorkflowIntegrationTest {
         assertEquals(List.of("overworld"), harness.runtime.regenerationKeys);
         assertEquals(state("overworld", NOW), harness.resetService.getState("overworld").orElseThrow());
         assertEquals(0, repository.saveCount);
+        assertEquals(
+                List.of("&eDie &6Farmwelt&e wird jetzt zurückgesetzt."),
+                harness.notifications
+        );
 
         Instant completedAt = NOW.plus(Duration.ofMinutes(2));
         harness.clock.setInstant(completedAt);
@@ -66,6 +70,10 @@ class ResetWorkflowIntegrationTest {
         assertEquals(completedAt.plus(THIRTY_DAYS), completedState.nextReset());
         assertEquals(completedState, repository.states.get("overworld"));
         assertEquals(1, repository.saveCount);
+        assertEquals(List.of(
+                "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), harness.notifications);
 
         harness.globalScheduler.tick();
 
@@ -93,6 +101,28 @@ class ResetWorkflowIntegrationTest {
         assertEquals(futureState, harness.resetService.getState("overworld").orElseThrow());
         assertEquals(futureState, repository.states.get("overworld"));
         assertEquals(0, repository.saveCount);
+    }
+
+    @Test
+    void manualForcePathBroadcastsLifecycleWithoutCountdown() {
+        FarmworldResetState futureState = state("overworld", NOW.plus(Duration.ofDays(10)));
+        TestResetStateRepository repository = new TestResetStateRepository(Map.of(
+                "overworld", futureState
+        ));
+        WorkflowHarness harness = harness(
+                List.of(config("overworld", THIRTY_DAYS)),
+                repository
+        );
+
+        ResetResult result = harness.engine.reset("overworld", ResetOptions.defaults()).join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(
+                "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), harness.notifications);
+        assertEquals(List.of("overworld"), harness.runtime.regenerationKeys);
+        assertEquals(1, repository.saveCount);
     }
 
     @Test
@@ -163,6 +193,14 @@ class ResetWorkflowIntegrationTest {
 
         assertEquals(1, harness.globalScheduler.periodicTasks);
         assertEquals(3, repository.saveCount);
+        assertEquals(List.of(
+                "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt.",
+                "&eDie &6Netherfarm&e wird jetzt zurückgesetzt.",
+                "&aDie &6Netherfarm&a wurde erfolgreich zurückgesetzt.",
+                "&eDie &6Endfarm&e wird jetzt zurückgesetzt.",
+                "&aDie &6Endfarm&a wurde erfolgreich zurückgesetzt."
+        ), harness.notifications);
         assertEquals(Optional.of(NOW), harness.resetService.getState("overworld").orElseThrow().lastReset());
         assertEquals(Optional.of(NOW), harness.resetService.getState("nether").orElseThrow().lastReset());
         assertEquals(Optional.of(NOW), harness.resetService.getState("end").orElseThrow().lastReset());
@@ -429,6 +467,7 @@ class ResetWorkflowIntegrationTest {
         private final RecordingGlobalRegionScheduler globalScheduler;
         private final AutomaticResetScheduler automaticScheduler;
         private final StartupResetCoordinator startupCoordinator;
+        private final List<String> notifications = new ArrayList<>();
 
         private WorkflowHarness(
                 List<FarmworldResetConfig> configurations,
@@ -440,12 +479,20 @@ class ResetWorkflowIntegrationTest {
             this.resetService = new FarmworldResetService(repository, clock, logger);
             assertTrue(resetService.reload(configurations));
             this.runtime = new FakeMinecraftRuntime(configurations);
+            ResetNotificationService notificationService = new ResetNotificationService(
+                    resetService,
+                    new ResetWarningTracker(),
+                    notifications::add,
+                    ZoneOffset.UTC,
+                    logger
+            );
             this.engine = new FarmworldResetEngine(
                     resetService,
                     runtime,
                     runtime,
                     runtime,
                     new DirectScheduler(),
+                    notificationService,
                     logger
             );
             this.globalScheduler = new RecordingGlobalRegionScheduler();
@@ -455,13 +502,7 @@ class ResetWorkflowIntegrationTest {
                     globalScheduler,
                     resetService,
                     engine,
-                    new ResetNotificationService(
-                            resetService,
-                            new ResetWarningTracker(),
-                            ignored -> { },
-                            ZoneOffset.UTC,
-                            logger
-                    ),
+                    notificationService,
                     clock
             );
             this.startupCoordinator = new StartupResetCoordinator(

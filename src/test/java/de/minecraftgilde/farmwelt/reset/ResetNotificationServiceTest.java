@@ -1,6 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -209,6 +210,156 @@ class ResetNotificationServiceTest {
         assertEquals(0, repository.saveCount);
     }
 
+    @Test
+    void lifecycleMessagesUseDisplayNameAndNewPersistedSuccessSchedule() throws IOException {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<String> messages = new java.util.ArrayList<>();
+        ResetNotificationService notificationService = notificationService(
+                resetService,
+                messages::add
+        );
+        ResetNotificationConfig notifications = lifecycleNotifications(
+                true,
+                true,
+                true,
+                true
+        );
+        FarmworldResetConfig configuration = config(notifications);
+        assertTrue(resetService.reload(List.of(configuration)));
+
+        notificationService.broadcastResetStart(configuration);
+        resetService.completeReset(configuration, NOW);
+        notificationService.broadcastResetResult(configuration, result(ResetStatus.SUCCESS));
+
+        assertEquals(List.of(
+                "start Test-Farmwelt 01.09.2026 12:00",
+                "success Test-Farmwelt 18.09.2026 08:00"
+        ), messages);
+    }
+
+    @Test
+    void lifecycleMainAndMessageSwitchesRemainIndependent() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<String> messages = new java.util.ArrayList<>();
+        ResetNotificationService notificationService = notificationService(
+                resetService,
+                messages::add
+        );
+
+        FarmworldResetConfig globallyDisabled = config(lifecycleNotifications(
+                false,
+                true,
+                true,
+                true
+        ));
+        assertTrue(resetService.reload(List.of(globallyDisabled)));
+        notificationService.broadcastResetStart(globallyDisabled);
+        notificationService.broadcastResetResult(globallyDisabled, result(ResetStatus.SUCCESS));
+        notificationService.broadcastResetResult(
+                globallyDisabled,
+                result(ResetStatus.REGENERATE_FAILED)
+        );
+        assertEquals(List.of(), messages);
+
+        FarmworldResetConfig startDisabled = config(lifecycleNotifications(
+                true,
+                false,
+                true,
+                true
+        ));
+        assertTrue(resetService.reload(List.of(startDisabled)));
+        notificationService.broadcastResetStart(startDisabled);
+        notificationService.broadcastResetResult(startDisabled, result(ResetStatus.SUCCESS));
+        notificationService.broadcastResetResult(
+                startDisabled,
+                result(ResetStatus.REGENERATE_FAILED)
+        );
+        assertEquals(List.of(
+                "success Test-Farmwelt 01.09.2026 12:00",
+                "failure Test-Farmwelt 01.09.2026 12:00"
+        ), messages);
+
+        messages.clear();
+        FarmworldResetConfig completionDisabled = config(lifecycleNotifications(
+                true,
+                true,
+                false,
+                false
+        ));
+        assertTrue(resetService.reload(List.of(completionDisabled)));
+        notificationService.broadcastResetStart(completionDisabled);
+        notificationService.broadcastResetResult(completionDisabled, result(ResetStatus.SUCCESS));
+        notificationService.broadcastResetResult(
+                completionDisabled,
+                result(ResetStatus.REGENERATE_FAILED)
+        );
+        assertEquals(List.of("start Test-Farmwelt 01.09.2026 12:00"), messages);
+    }
+
+    @Test
+    void resultStatusMappingSuppressesRejectedCallsAndBroadcastsEveryActualFailure() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<String> messages = new java.util.ArrayList<>();
+        ResetNotificationService notificationService = notificationService(
+                resetService,
+                messages::add
+        );
+        FarmworldResetConfig configuration = config(lifecycleNotifications(
+                true,
+                true,
+                true,
+                true
+        ));
+        assertTrue(resetService.reload(List.of(configuration)));
+
+        for (ResetStatus status : ResetStatus.values()) {
+            messages.clear();
+            notificationService.broadcastResetResult(configuration, result(status));
+
+            if (status == ResetStatus.SUCCESS) {
+                assertEquals(List.of("success Test-Farmwelt 01.09.2026 12:00"), messages);
+            } else if (status == ResetStatus.NOT_CONFIGURED
+                    || status == ResetStatus.DISABLED
+                    || status == ResetStatus.ALREADY_RUNNING) {
+                assertEquals(List.of(), messages);
+            } else {
+                assertEquals(List.of("failure Test-Farmwelt 01.09.2026 12:00"), messages);
+            }
+        }
+    }
+
+    @Test
+    void audienceExceptionsNeverEscapeLifecycleNotifications() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        ResetNotificationService notificationService = notificationService(
+                resetService,
+                ignored -> {
+                    throw new IllegalStateException("broadcast failed");
+                }
+        );
+        FarmworldResetConfig configuration = config(lifecycleNotifications(
+                true,
+                true,
+                true,
+                true
+        ));
+        assertTrue(resetService.reload(List.of(configuration)));
+
+        assertDoesNotThrow(() -> notificationService.broadcastResetStart(configuration));
+        assertDoesNotThrow(() -> notificationService.broadcastResetResult(
+                configuration,
+                result(ResetStatus.SUCCESS)
+        ));
+        assertDoesNotThrow(() -> notificationService.broadcastResetResult(
+                configuration,
+                result(ResetStatus.STATE_SAVE_FAILED)
+        ));
+    }
+
     private FarmworldResetConfig config(ResetNotificationConfig notifications) {
         return config(true, notifications);
     }
@@ -252,6 +403,36 @@ class ResetNotificationServiceTest {
                 defaults.resetFailure(),
                 defaults.evacuation()
         );
+    }
+
+    private ResetNotificationConfig lifecycleNotifications(
+            boolean enabled,
+            boolean resetStart,
+            boolean resetSuccess,
+            boolean resetFailure
+    ) {
+        return new ResetNotificationConfig(
+                enabled,
+                List.of(),
+                "warning",
+                new ResetNotificationMessageConfig(
+                        resetStart,
+                        "start {world} {next-reset}"
+                ),
+                new ResetNotificationMessageConfig(
+                        resetSuccess,
+                        "success {world} {next-reset}"
+                ),
+                new ResetNotificationMessageConfig(
+                        resetFailure,
+                        "failure {world} {next-reset}"
+                ),
+                ResetNotificationConfig.defaults().evacuation()
+        );
+    }
+
+    private ResetResult result(ResetStatus status) {
+        return new ResetResult("overworld", "farmwelt", status, "test", null);
     }
 
     private FarmworldResetService resetService(FixedResetStateRepository repository) {

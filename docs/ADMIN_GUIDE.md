@@ -44,7 +44,7 @@ Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.inte
 
 Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
 
-### Countdown-Warnungen vor automatischen Resets (Phase 5.2)
+### Countdown- und Lifecycle-Nachrichten (Phase 5.3)
 
 Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` eigene Countdown-Schwellen erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
 
@@ -84,7 +84,15 @@ Der bestehende automatische 60-Sekunden-Check wertet die Schwellen tolerant aus;
 
 Klassische `&`-Farbcodes werden wie bei den übrigen Plugin-Nachrichten verarbeitet. `/farmwelt reload` übernimmt `enabled`, `warnings` und `warning-message` beim nächsten Check. Geänderte Warnlisten oder eine erneute Aktivierung erzeugen dabei höchstens eine sinnvolle Catch-up-Warnung und niemals eine Serie alter Meldungen. Entfernte oder deaktivierte Farmwelten werden aus dem kleinen In-Memory-Tracker entfernt.
 
-Der Warning-Zustand ist bewusst flüchtig und wird weder in `reset-state.yml` noch in einer zusätzlichen Datei gespeichert. Manuelle Force-Resets starten keinen Countdown. Die konfigurierten Texte für `reset-start`, `reset-success`, `reset-failure` und `evacuation` bleiben in Phase 5.2 weiterhin vorbereitet, werden aber noch nicht versendet.
+Der Warning-Zustand ist bewusst flüchtig und wird weder in `reset-state.yml` noch in einer zusätzlichen Datei gespeichert. Manuelle Force-Resets starten keinen Countdown.
+
+`reset-start`, `reset-success` und `reset-failure` sind in Phase 5.3 aktiv. Sie werden sowohl für fällige automatische und beim Start nachgeholte Resets als auch für `/farmwelt reset force <welt> [--dragon]` über denselben zentralen Engine-Pfad versendet. `reset-start` erscheint erst, nachdem Lock, Konfiguration und Aktivierung den Reset-Aufruf akzeptiert haben. Ein paralleler zweiter Aufruf mit `ALREADY_RUNNING` sowie `NOT_CONFIGURED` oder `DISABLED` erzeugen deshalb keine zusätzliche Lifecycle-Nachricht.
+
+`reset-success` wird ausschließlich beim vollständigen `SUCCESS` nach Regeneration, Validierung, Post-Reset-Initialisierung und erfolgreicher State-Persistenz gesendet. Alle Fehlerstatus eines tatsächlich gestarteten Resets verwenden `reset-failure`, sofern dessen Einzelschalter aktiviert ist. Dazu gehört ausdrücklich `STATE_SAVE_FAILED`: Die Welt kann dabei bereits erneuert sein, der persistente Zeitplan wurde aber nicht veröffentlicht, weshalb keine Erfolgsmeldung erscheint. Der technische Status bleibt im Serverlog und in der administrativen Command-Rückmeldung; der globale Text enthält keine internen Fehlerdetails.
+
+Lifecycle-Texte unterstützen `{world}` und `{next-reset}`. `{world}` ist immer der nutzerfreundliche `display-name`. Die Erfolgsmeldung sieht den neu gespeicherten Folgetermin; Start und Fehler verwenden den zu diesem Zeitpunkt weiterhin veröffentlichten State. Fehlt ein verwendbarer Termin, erscheint robust `unbekannt`. `{time}` ist weiterhin der Countdown-Warnung vorbehalten. `notifications.enabled` und die drei jeweiligen `enabled`-Schalter wirken unabhängig. Versandfehler werden nur geloggt und verändern weder Reset-Ablauf noch `ResetResult`.
+
+Die persönliche `evacuation`-Nachricht ist weiterhin nicht aktiv und wird insbesondere nicht global versendet. Ihre gezielte Zustellung an tatsächlich evakuierte Spieler folgt separat in Phase 5.4.
 
 ## Manueller End-to-End-Reset auf Folia
 

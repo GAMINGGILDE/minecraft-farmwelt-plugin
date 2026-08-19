@@ -102,6 +102,7 @@ public final class FarmweltPlugin extends JavaPlugin {
                 worldsLifecycleService,
                 postResetInitializer,
                 resetScheduler,
+                resetNotificationService,
                 getLogger()
         );
 
