@@ -19,6 +19,30 @@ farmworlds:
       # Fehlende oder ungültige Werte deaktivieren diesen Reset-Zeitplan sicher.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
+      # Phase 5.1 lädt diese Werte nur als Vorbereitung; Nachrichten werden noch nicht versendet.
+      notifications:
+        enabled: true
+        # Positive Ganzzahlen mit m, h oder d. Ungültige Werte werden einzeln ignoriert.
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        # Zukünftige Platzhalter: {world}, {time}, {next-reset}
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
       # Wird erst nach erfolgreicher Regeneration und Validierung angewendet.
       post-reset:
         gamerules:
@@ -47,6 +71,27 @@ farmworlds:
       # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
+      notifications:
+        enabled: true
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
       post-reset:
         gamerules:
           show_advancement_messages: false
@@ -73,6 +118,27 @@ farmworlds:
       # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "60d"
+      notifications:
+        enabled: true
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
       post-reset:
         gamerules:
           show_advancement_messages: false

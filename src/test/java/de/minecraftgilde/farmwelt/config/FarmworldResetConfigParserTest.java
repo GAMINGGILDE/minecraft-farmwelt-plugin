@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldType;
+import de.minecraftgilde.farmwelt.reset.ResetNotificationConfig;
 import java.time.Duration;
 import java.util.List;
 import java.util.logging.Level;
@@ -179,10 +180,147 @@ class FarmworldResetConfigParserTest {
         assertFalse(configs.getFirst().postReset().worldBorder().isPresent());
     }
 
+    @Test
+    void usesNotificationDefaultsWhenSectionIsMissing() throws Exception {
+        FarmworldResetConfig config = parse(singleFarmworld(
+                "world: \"farmwelt\"\n      interval: \"30d\"\n"
+        )).getFirst();
+
+        assertEquals(ResetNotificationConfig.defaults(), config.notifications());
+    }
+
+    @Test
+    void parsesDisabledNotifications() throws Exception {
+        FarmworldResetConfig config = parseNotifications("""
+                enabled: false
+                """);
+
+        assertFalse(config.notifications().enabled());
+        assertEquals(ResetNotificationConfig.defaults().warnings(), config.notifications().warnings());
+    }
+
+    @Test
+    void parsesAllSupportedNotificationWarningDurations() throws Exception {
+        FarmworldResetConfig config = parseNotifications("""
+                warnings:
+                  - 1m
+                  - 30m
+                  - 1h
+                  - 6h
+                  - 1d
+                """);
+
+        assertEquals(List.of(
+                Duration.ofDays(1),
+                Duration.ofHours(6),
+                Duration.ofHours(1),
+                Duration.ofMinutes(30),
+                Duration.ofMinutes(1)
+        ), config.notifications().warnings());
+    }
+
+    @Test
+    void ignoresInvalidNotificationWarningsWithoutDisablingReset() throws Exception {
+        FarmworldResetConfig config = parseNotifications("""
+                warnings:
+                  - 0m
+                  - -5m
+                  - abc
+                  - 10
+                  - 1w
+                """);
+
+        assertTrue(config.enabled());
+        assertEquals(Duration.ofDays(30), config.interval());
+        assertTrue(config.notifications().warnings().isEmpty());
+    }
+
+    @Test
+    void keepsValidNotificationWarningsFromMixedList() throws Exception {
+        FarmworldResetConfig config = parseNotifications("""
+                warnings:
+                  - 1h
+                  - kaputt
+                  - 5m
+                """);
+
+        assertEquals(
+                List.of(Duration.ofHours(1), Duration.ofMinutes(5)),
+                config.notifications().warnings()
+        );
+    }
+
+    @Test
+    void removesDuplicateNotificationWarningsAndSortsDescending() throws Exception {
+        FarmworldResetConfig config = parseNotifications("""
+                warnings:
+                  - 5m
+                  - 30m
+                  - 1h
+                  - 30m
+                """);
+
+        assertEquals(List.of(
+                Duration.ofHours(1),
+                Duration.ofMinutes(30),
+                Duration.ofMinutes(5)
+        ), config.notifications().warnings());
+    }
+
+    @Test
+    void fallsBackToDefaultForMissingEmptyAndNonStringMessages() throws Exception {
+        ResetNotificationConfig defaults = ResetNotificationConfig.defaults();
+        FarmworldResetConfig config = parseNotifications("""
+                warning-message: "   "
+                reset-start:
+                  enabled: false
+                  message: ""
+                reset-success:
+                  message: 42
+                reset-failure:
+                  enabled: true
+                  message:
+                """);
+
+        assertEquals(defaults.warningMessage(), config.notifications().warningMessage());
+        assertFalse(config.notifications().resetStart().enabled());
+        assertEquals(defaults.resetStart().message(), config.notifications().resetStart().message());
+        assertEquals(defaults.resetSuccess().message(), config.notifications().resetSuccess().message());
+        assertTrue(config.notifications().resetFailure().enabled());
+        assertEquals(defaults.resetFailure().message(), config.notifications().resetFailure().message());
+        assertEquals(defaults.evacuation(), config.notifications().evacuation());
+    }
+
+    @Test
+    void invalidNotificationStructureFallsBackWithoutAffectingResetConfiguration() throws Exception {
+        FarmworldResetConfig config = parse(singleFarmworld("""
+                world: "farmwelt"
+                      interval: "30d"
+                      notifications: kaputt
+                """)).getFirst();
+
+        assertTrue(config.enabled());
+        assertEquals(Duration.ofDays(30), config.interval());
+        assertEquals(ResetNotificationConfig.defaults(), config.notifications());
+    }
+
     private List<FarmworldResetConfig> parse(String content) throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(content);
         return parser.parse(yaml.getConfigurationSection("farmworlds"));
+    }
+
+    private FarmworldResetConfig parseNotifications(String notificationValues) throws Exception {
+        return parse("""
+                farmworlds:
+                  overworld:
+                    enabled: true
+                    reset:
+                      enabled: true
+                      world: "farmwelt"
+                      interval: "30d"
+                      notifications:
+                %s""".formatted(notificationValues.indent(8))).getFirst();
     }
 
     private static String singleFarmworld(String resetValues) {

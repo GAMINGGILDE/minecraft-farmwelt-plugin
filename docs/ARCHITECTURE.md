@@ -21,6 +21,8 @@ src/main/java/de/minecraftgilde/farmwelt/
 |   +-- FarmweltCommand.java
 +-- config/
 |   +-- ConfigManager.java
+|   +-- FarmworldResetConfigParser.java
+|   +-- FarmworldResetNotificationConfigParser.java
 +-- gui/
 |   +-- FarmweltMenu.java
 |   +-- FarmweltMenuHolder.java
@@ -55,6 +57,9 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- FarmworldPostResetInitializer.java
     +-- BukkitFarmworldPostResetInitializer.java
     +-- FarmworldResetService.java
+    +-- ResetNotificationConfig.java
+    +-- ResetNotificationMessageConfig.java
+    +-- ResetNotificationService.java
     +-- BukkitFarmworldWorldOperations.java
     +-- StartupResetCoordinator.java
     +-- AutomaticResetScheduler.java
@@ -112,6 +117,8 @@ StartupResetCoordinator (einmaliger Catch-up nach 60 Sekunden)
 
 Startup-Catch-up und periodischer Scheduler benutzen denselben Executor und damit dieselbe Engine wie der manuelle Force-Reset. Nur ein vollständig erfolgreicher Engine-Durchlauf verschiebt den persistenten State; Coordinator und Scheduler besitzen weder eigene Resetlogik noch einen zusätzlichen Reset-Lock.
 
+`FarmworldResetConfig` enthält zusätzlich den immutable `ResetNotificationConfig`-Snapshot mit absteigend sortierten, eindeutigen `Duration`-Schwellen und den einzelnen `ResetNotificationMessageConfig`-Werten. `ResetNotificationService` ist in Phase 5.1 lediglich der zentrale, zustandslose Zugriff auf diesen jeweils aktuell geladenen Snapshot. Die Komponente sendet keine Nachrichten, plant keine Tasks und besitzt weder einen eigenen Reset-State noch Persistenz. Beim Reload wird sie nicht neu aufgebaut; ihr Zugriff über denselben `FarmworldResetService` macht den neuen Notification-Snapshot automatisch sichtbar. Laufende Reset-Snapshots und gespeicherte `nextReset`-Werte bleiben davon unberührt.
+
 ```text
 FarmworldResetEngine
     -> FarmworldLifecycleService
@@ -151,6 +158,7 @@ Wichtige Aufgaben:
 
 - Farmwelt-GUI-Einträge aus `farmworlds` lesen.
 - Reset-Einträge über den kleinen `FarmworldResetConfigParser` validieren; nur bekannte logische IDs mit gültigem Weltname, `m`-/`h`-/`d`-Intervall und gültigem `post-reset` gelangen in den Laufzeit-Snapshot.
+- Optionale Notification-Werte tolerant über `FarmworldResetNotificationConfigParser` laden. Ungültige Warning-Einträge werden einzeln geloggt und ignoriert; sie können den Reset-Plan nicht deaktivieren. Fehlende Bereiche und Nachrichtentexte erhalten sichere Defaults.
 - Icons als Bukkit-`Material` validieren.
 - GUI-Slots validieren.
 - Teleport-Aktionen validieren.

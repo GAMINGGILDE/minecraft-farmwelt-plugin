@@ -4,6 +4,7 @@ import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldType;
 import de.minecraftgilde.farmwelt.reset.PostResetConfig;
 import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
+import de.minecraftgilde.farmwelt.reset.ResetNotificationConfig;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,10 +19,12 @@ public final class FarmworldResetConfigParser {
     private final Logger logger;
     private final ResetIntervalParser intervalParser = new ResetIntervalParser();
     private final FarmworldPostResetConfigParser postResetConfigParser;
+    private final FarmworldResetNotificationConfigParser notificationConfigParser;
 
     public FarmworldResetConfigParser(Logger logger) {
         this.logger = Objects.requireNonNull(logger, "logger");
         this.postResetConfigParser = new FarmworldPostResetConfigParser(logger);
+        this.notificationConfigParser = new FarmworldResetNotificationConfigParser(logger);
     }
 
     public List<FarmworldResetConfig> parse(ConfigurationSection farmworldsSection) {
@@ -92,13 +95,24 @@ public final class FarmworldResetConfigParser {
             return Optional.empty();
         }
 
+        ConfigurationSection notificationsSection = resetSection.getConfigurationSection("notifications");
+        if (notificationsSection == null && resetSection.contains("notifications")) {
+            logger.warning("Notification-Konfiguration für Farmwelt '" + farmworldKey
+                    + "' muss ein YAML-Bereich sein. Standardwerte werden verwendet.");
+        }
+        ResetNotificationConfig notifications = notificationConfigParser.parse(
+                notificationsSection,
+                farmworldKey
+        );
+
         return Optional.of(new FarmworldResetConfig(
                 farmworldKey,
                 worldName.trim(),
                 enabled,
                 interval.orElseThrow(),
                 farmworldType.orElseThrow(),
-                postReset
+                postReset,
+                notifications
         ));
     }
 }

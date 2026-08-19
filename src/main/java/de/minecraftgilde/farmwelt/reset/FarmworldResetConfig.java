@@ -12,7 +12,8 @@ public record FarmworldResetConfig(
         boolean enabled,
         Duration interval,
         FarmworldType farmworldType,
-        PostResetConfig postReset
+        PostResetConfig postReset,
+        ResetNotificationConfig notifications
 ) {
 
     public FarmworldResetConfig(
@@ -29,7 +30,8 @@ public record FarmworldResetConfig(
                 FarmworldType.fromFarmworldKey(farmworldKey).orElseThrow(
                         () -> new IllegalArgumentException("Unbekannter Farmwelt-Typ: " + farmworldKey)
                 ),
-                PostResetConfig.none()
+                PostResetConfig.none(),
+                ResetNotificationConfig.defaults()
         );
     }
 
@@ -40,7 +42,34 @@ public record FarmworldResetConfig(
             Duration interval,
             FarmworldType farmworldType
     ) {
-        this(farmworldKey, worldName, enabled, interval, farmworldType, PostResetConfig.none());
+        this(
+                farmworldKey,
+                worldName,
+                enabled,
+                interval,
+                farmworldType,
+                PostResetConfig.none(),
+                ResetNotificationConfig.defaults()
+        );
+    }
+
+    public FarmworldResetConfig(
+            String farmworldKey,
+            String worldName,
+            boolean enabled,
+            Duration interval,
+            FarmworldType farmworldType,
+            PostResetConfig postReset
+    ) {
+        this(
+                farmworldKey,
+                worldName,
+                enabled,
+                interval,
+                farmworldType,
+                postReset,
+                ResetNotificationConfig.defaults()
+        );
     }
 
     public FarmworldResetConfig {
@@ -54,6 +83,7 @@ public record FarmworldResetConfig(
         Objects.requireNonNull(interval, "interval");
         Objects.requireNonNull(farmworldType, "farmworldType");
         Objects.requireNonNull(postReset, "postReset");
+        Objects.requireNonNull(notifications, "notifications");
         FarmworldType.fromFarmworldKey(farmworldKey).ifPresent(expectedType -> {
             if (expectedType != farmworldType) {
                 throw new IllegalArgumentException(

@@ -14,6 +14,7 @@ import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetEngine;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FoliaFarmweltScheduler;
+import de.minecraftgilde.farmwelt.reset.ResetNotificationService;
 import de.minecraftgilde.farmwelt.reset.StartupResetCoordinator;
 import de.minecraftgilde.farmwelt.reset.WorldsFarmworldLifecycleService;
 import de.minecraftgilde.farmwelt.reset.YamlResetStateRepository;
@@ -44,6 +45,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     private JailActionService jailActionService;
     private StartupResetCoordinator startupResetCoordinator;
     private FarmworldResetService resetService;
+    private ResetNotificationService resetNotificationService;
     private FarmworldResetEngine resetEngine;
     private WorldsFarmworldLifecycleService worldsLifecycleService;
     private BukkitFarmworldPostResetInitializer postResetInitializer;
@@ -69,6 +71,7 @@ public final class FarmweltPlugin extends JavaPlugin {
         if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
             throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht geladen werden.");
         }
+        resetNotificationService = new ResetNotificationService(resetService);
         logResetStatus();
 
         BukkitFarmworldWorldOperations worldOperations = new BukkitFarmworldWorldOperations(

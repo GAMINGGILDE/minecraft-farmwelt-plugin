@@ -44,6 +44,38 @@ Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.inte
 
 Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
 
+### Vorbereitete Reset-Benachrichtigungen (Phase 5.1)
+
+Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` einen eigenen zukünftigen Nachrichtensatz erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
+
+```yaml
+notifications:
+  enabled: true
+  warnings:
+    - 1h
+    - 30m
+    - 10m
+    - 5m
+    - 1m
+  warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+  reset-start:
+    enabled: true
+    message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+  reset-success:
+    enabled: true
+    message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+  reset-failure:
+    enabled: false
+    message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+  evacuation:
+    enabled: true
+    message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
+```
+
+Warning-Zeiten verwenden wie Reset-Intervalle ausschließlich positive Ganzzahlen mit `m`, `h` oder `d`. Jeder ungültige Listeneintrag wird verständlich geloggt und einzeln ignoriert; gültige Einträge bleiben erhalten. Duplikate werden entfernt und intern von der größten zur kleinsten Dauer sortiert. Eine ausdrücklich leere Liste oder eine Liste ohne gültigen Wert ergibt keine Warning-Zeitpunkte, deaktiviert aber weder Farmwelt noch Reset-Zeitplan. Fehlende, leere oder nicht als String angegebene Nachrichtentexte fallen jeweils auf den oben gezeigten Standardtext zurück.
+
+Für spätere Ausbaustufen sind `{world}`, `{time}` und `{next-reset}` als Platzhalter vorgesehen. Phase 5.1 lädt und validiert ausschließlich die Konfiguration: Es gibt noch keine Countdown-Broadcasts, Reset-Meldungen oder Evakuierungsnachrichten. Ein Reload ersetzt den Notification-Snapshot zusammen mit der normalen Reset-Konfiguration. Es existieren dafür weder ein zweiter Scheduler noch Notification-Daten in `reset-state.yml`.
+
 ## Manueller End-to-End-Reset auf Folia
 
 Den ersten echten Test ausdrücklich mit einer wegwerfbaren Testwelt durchführen, niemals direkt mit einer produktiven Farmwelt. Beispiel:
