@@ -353,6 +353,13 @@ class StartupResetCoordinatorTest {
                 globalScheduler,
                 resetService,
                 resetExecutor,
+                new ResetNotificationService(
+                        resetService,
+                        new ResetWarningTracker(),
+                        ignored -> { },
+                        ZoneOffset.UTC,
+                        logger
+                ),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
         return new StartupResetCoordinator(

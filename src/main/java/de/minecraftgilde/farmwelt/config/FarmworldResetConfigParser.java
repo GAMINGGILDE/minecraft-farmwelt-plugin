@@ -46,7 +46,12 @@ public final class FarmworldResetConfigParser {
 
             boolean enabled = farmworldSection.getBoolean("enabled", true)
                     && resetSection.getBoolean("enabled", false);
-            parseEntry(farmworldKey, resetSection, enabled).ifPresent(loadedConfigs::add);
+            parseEntry(
+                    farmworldKey,
+                    farmworldSection.getString("display-name"),
+                    resetSection,
+                    enabled
+            ).ifPresent(loadedConfigs::add);
         }
 
         return List.copyOf(loadedConfigs);
@@ -54,6 +59,7 @@ public final class FarmworldResetConfigParser {
 
     private Optional<FarmworldResetConfig> parseEntry(
             String farmworldKey,
+            String configuredDisplayName,
             ConfigurationSection resetSection,
             boolean enabled
     ) {
@@ -108,11 +114,23 @@ public final class FarmworldResetConfigParser {
         return Optional.of(new FarmworldResetConfig(
                 farmworldKey,
                 worldName.trim(),
+                displayName(configuredDisplayName, farmworldType.orElseThrow()),
                 enabled,
                 interval.orElseThrow(),
                 farmworldType.orElseThrow(),
                 postReset,
                 notifications
         ));
+    }
+
+    private String displayName(String configuredDisplayName, FarmworldType farmworldType) {
+        if (configuredDisplayName != null && !configuredDisplayName.isBlank()) {
+            return configuredDisplayName.trim();
+        }
+        return switch (farmworldType) {
+            case OVERWORLD -> "Farmwelt";
+            case NETHER -> "Netherfarm";
+            case END -> "Endfarm";
+        };
     }
 }

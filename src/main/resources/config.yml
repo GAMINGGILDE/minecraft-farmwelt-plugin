@@ -19,7 +19,9 @@ farmworlds:
       # Fehlende oder ungültige Werte deaktivieren diesen Reset-Zeitplan sicher.
       # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
       interval: "30d"
-      # Phase 5.1 lädt diese Werte nur als Vorbereitung; Nachrichten werden noch nicht versendet.
+      # Countdown-Warnungen werden vor dem persistent geplanten automatischen Reset versendet.
+      # Pro nextReset-Termin wird jede Schwelle höchstens einmal verwendet. Nach einem Neustart
+      # wird höchstens die zeitlich nächste bereits erreichte Schwelle nachgeholt.
       notifications:
         enabled: true
         # Positive Ganzzahlen mit m, h oder d. Ungültige Werte werden einzeln ignoriert.
@@ -29,7 +31,7 @@ farmworlds:
           - 10m
           - 5m
           - 1m
-        # Zukünftige Platzhalter: {world}, {time}, {next-reset}
+        # Aktive Platzhalter: {world}, {time}, {next-reset}
         warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
         reset-start:
           enabled: true

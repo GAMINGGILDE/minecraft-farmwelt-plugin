@@ -28,6 +28,7 @@ class FarmworldResetConfigParserTest {
                 farmworlds:
                   overworld:
                     enabled: true
+                    display-name: "Test-Farmwelt"
                     reset:
                       enabled: true
                       world: "farmwelt"
@@ -38,6 +39,7 @@ class FarmworldResetConfigParserTest {
         FarmworldResetConfig config = configs.getFirst();
         assertTrue(config.enabled());
         assertEquals("farmwelt", config.worldName());
+        assertEquals("Test-Farmwelt", config.displayName());
         assertEquals(Duration.ofDays(30), config.interval());
         assertEquals(FarmworldType.OVERWORLD, config.farmworldType());
     }

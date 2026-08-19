@@ -455,6 +455,13 @@ class ResetWorkflowIntegrationTest {
                     globalScheduler,
                     resetService,
                     engine,
+                    new ResetNotificationService(
+                            resetService,
+                            new ResetWarningTracker(),
+                            ignored -> { },
+                            ZoneOffset.UTC,
+                            logger
+                    ),
                     clock
             );
             this.startupCoordinator = new StartupResetCoordinator(

@@ -333,6 +333,46 @@ class AutomaticResetSchedulerTest {
         assertTrue(logHandler.contains("Farmwelt 'end' erfolgreich abgeschlossen"));
     }
 
+    @Test
+    void notificationBroadcastFailureDoesNotPreventDueReset() {
+        RecordingLogHandler logHandler = new RecordingLogHandler();
+        Logger logger = recordingLogger(logHandler);
+        FarmworldResetService resetService = resetService(
+                List.of(config("overworld", true), config("nether", true)),
+                Map.of(
+                        "overworld", state("overworld", NOW.plus(Duration.ofMinutes(5))),
+                        "nether", state("nether", NOW)
+                )
+        );
+        RecordingResetExecutor executor = new RecordingResetExecutor(this::successfulResult);
+        RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
+        Plugin plugin = plugin(logger);
+        ResetNotificationService notificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                ignored -> {
+                    throw new IllegalStateException("Broadcast-Testfehler");
+                },
+                ZoneOffset.UTC,
+                logger
+        );
+        AutomaticResetScheduler scheduler = new AutomaticResetScheduler(
+                plugin,
+                globalScheduler,
+                resetService,
+                executor,
+                notificationService,
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+        scheduler.start();
+
+        globalScheduler.tick();
+
+        assertEquals(List.of("nether"), executor.calls);
+        assertTrue(logHandler.contains("konnte nicht versendet werden"));
+        assertTrue(logHandler.contains("Farmwelt 'nether' erfolgreich abgeschlossen"));
+    }
+
     private AutomaticResetScheduler createScheduler(
             RecordingGlobalRegionScheduler globalScheduler
     ) {
@@ -369,6 +409,13 @@ class AutomaticResetSchedulerTest {
                 globalScheduler,
                 resetService,
                 resetExecutor,
+                new ResetNotificationService(
+                        resetService,
+                        new ResetWarningTracker(),
+                        ignored -> { },
+                        ZoneOffset.UTC,
+                        logger
+                ),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }

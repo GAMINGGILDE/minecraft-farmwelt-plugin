@@ -22,6 +22,7 @@ public final class AutomaticResetScheduler {
     private final GlobalRegionScheduler globalRegionScheduler;
     private final FarmworldResetService resetService;
     private final FarmworldResetExecutor resetExecutor;
+    private final ResetNotificationService notificationService;
     private final ResetDueStateEvaluator dueStateEvaluator;
     private final Clock clock;
     private final Logger logger;
@@ -33,6 +34,7 @@ public final class AutomaticResetScheduler {
             GlobalRegionScheduler globalRegionScheduler,
             FarmworldResetService resetService,
             FarmworldResetExecutor resetExecutor,
+            ResetNotificationService notificationService,
             Clock clock
     ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -42,6 +44,10 @@ public final class AutomaticResetScheduler {
         );
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.resetExecutor = Objects.requireNonNull(resetExecutor, "resetExecutor");
+        this.notificationService = Objects.requireNonNull(
+                notificationService,
+                "notificationService"
+        );
         this.dueStateEvaluator = new ResetDueStateEvaluator();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.logger = Objects.requireNonNull(plugin.getLogger(), "plugin.getLogger()");
@@ -96,8 +102,19 @@ public final class AutomaticResetScheduler {
     }
 
     private void runScheduledCheck() {
+        Instant now = clock.instant();
         try {
-            startDueResets(clock.instant());
+            notificationService.broadcastDueWarnings(now);
+        } catch (RuntimeException exception) {
+            logger.log(
+                    Level.SEVERE,
+                    "Countdown-Warnungen konnten nicht vollständig geprüft werden.",
+                    exception
+            );
+        }
+
+        try {
+            startDueResets(now);
         } catch (RuntimeException exception) {
             logger.log(
                     Level.SEVERE,

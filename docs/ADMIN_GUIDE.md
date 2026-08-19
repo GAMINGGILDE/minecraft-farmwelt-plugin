@@ -44,9 +44,9 @@ Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.inte
 
 Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
 
-### Vorbereitete Reset-Benachrichtigungen (Phase 5.1)
+### Countdown-Warnungen vor automatischen Resets (Phase 5.2)
 
-Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` einen eigenen zukünftigen Nachrichtensatz erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
+Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` eigene Countdown-Schwellen erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
 
 ```yaml
 notifications:
@@ -72,9 +72,19 @@ notifications:
     message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
 ```
 
-Warning-Zeiten verwenden wie Reset-Intervalle ausschließlich positive Ganzzahlen mit `m`, `h` oder `d`. Jeder ungültige Listeneintrag wird verständlich geloggt und einzeln ignoriert; gültige Einträge bleiben erhalten. Duplikate werden entfernt und intern von der größten zur kleinsten Dauer sortiert. Eine ausdrücklich leere Liste oder eine Liste ohne gültigen Wert ergibt keine Warning-Zeitpunkte, deaktiviert aber weder Farmwelt noch Reset-Zeitplan. Fehlende, leere oder nicht als String angegebene Nachrichtentexte fallen jeweils auf den oben gezeigten Standardtext zurück.
+Warning-Zeiten verwenden wie Reset-Intervalle ausschließlich positive Ganzzahlen mit `m`, `h` oder `d`. Jeder ungültige Listeneintrag wird verständlich geloggt und einzeln ignoriert; gültige Einträge bleiben erhalten. Duplikate werden entfernt und intern von der größten zur kleinsten Dauer sortiert. Eine ausdrücklich leere Liste oder eine Liste ohne gültigen Wert erzeugt keine Countdown-Warnungen, deaktiviert aber weder Farmwelt noch Reset-Zeitplan. Fehlende, leere oder nicht als String angegebene Nachrichtentexte fallen jeweils auf den oben gezeigten Standardtext zurück.
 
-Für spätere Ausbaustufen sind `{world}`, `{time}` und `{next-reset}` als Platzhalter vorgesehen. Phase 5.1 lädt und validiert ausschließlich die Konfiguration: Es gibt noch keine Countdown-Broadcasts, Reset-Meldungen oder Evakuierungsnachrichten. Ein Reload ersetzt den Notification-Snapshot zusammen mit der normalen Reset-Konfiguration. Es existieren dafür weder ein zweiter Scheduler noch Notification-Daten in `reset-state.yml`.
+Der bestehende automatische 60-Sekunden-Check wertet die Schwellen tolerant aus; er muss nicht exakt in der ersten Sekunde einer Schwelle laufen. Jede konfigurierte Dauer wird für denselben persistenten `nextReset`-Termin höchstens einmal serverweit an die aktuell verbundenen Spieler gesendet. Nach einem Neustart wird beim ersten relevanten Check höchstens die zeitlich nächste bereits erreichte Schwelle nachgeholt. Ältere verpasste Warnungen werden als übersprungen markiert und nicht gesammelt versendet. Sobald ein erfolgreicher Reset einen neuen `nextReset`-Termin veröffentlicht, beginnt automatisch ein neuer Warning-Zyklus. Fällige oder überfällige Resets erhalten keine Countdown-Warnung mehr.
+
+`warning-message` unterstützt die folgenden Platzhalter:
+
+- `{world}`: `display-name` des Farmwelt-Eintrags, zum Beispiel `Farmwelt` oder `Endfarm`.
+- `{time}`: konfigurierte Warning-Dauer in deutscher Schreibweise, zum Beispiel `5 Minuten` oder `1 Stunde`. Eine leicht verspätete Prüfung ändert diesen Text nicht.
+- `{next-reset}`: konkreter Termin im Format `dd.MM.yyyy HH:mm` und in derselben lokalen Server-Zeitzone wie `/farmwelt status`.
+
+Klassische `&`-Farbcodes werden wie bei den übrigen Plugin-Nachrichten verarbeitet. `/farmwelt reload` übernimmt `enabled`, `warnings` und `warning-message` beim nächsten Check. Geänderte Warnlisten oder eine erneute Aktivierung erzeugen dabei höchstens eine sinnvolle Catch-up-Warnung und niemals eine Serie alter Meldungen. Entfernte oder deaktivierte Farmwelten werden aus dem kleinen In-Memory-Tracker entfernt.
+
+Der Warning-Zustand ist bewusst flüchtig und wird weder in `reset-state.yml` noch in einer zusätzlichen Datei gespeichert. Manuelle Force-Resets starten keinen Countdown. Die konfigurierten Texte für `reset-start`, `reset-success`, `reset-failure` und `evacuation` bleiben in Phase 5.2 weiterhin vorbereitet, werden aber noch nicht versendet.
 
 ## Manueller End-to-End-Reset auf Folia
 

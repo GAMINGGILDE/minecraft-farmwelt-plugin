@@ -8,6 +8,7 @@ import de.minecraftgilde.farmwelt.gui.FarmweltMenu;
 import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
 import de.minecraftgilde.farmwelt.listener.ResourceBreakListener;
 import de.minecraftgilde.farmwelt.reset.AutomaticResetScheduler;
+import de.minecraftgilde.farmwelt.reset.BukkitResetNotificationAudience;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldPostResetInitializer;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
@@ -15,6 +16,7 @@ import de.minecraftgilde.farmwelt.reset.FarmworldResetEngine;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FoliaFarmweltScheduler;
 import de.minecraftgilde.farmwelt.reset.ResetNotificationService;
+import de.minecraftgilde.farmwelt.reset.ResetWarningTracker;
 import de.minecraftgilde.farmwelt.reset.StartupResetCoordinator;
 import de.minecraftgilde.farmwelt.reset.WorldsFarmworldLifecycleService;
 import de.minecraftgilde.farmwelt.reset.YamlResetStateRepository;
@@ -71,7 +73,13 @@ public final class FarmweltPlugin extends JavaPlugin {
         if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
             throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht geladen werden.");
         }
-        resetNotificationService = new ResetNotificationService(resetService);
+        resetNotificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                new BukkitResetNotificationAudience(this),
+                ZoneId.systemDefault(),
+                getLogger()
+        );
         logResetStatus();
 
         BukkitFarmworldWorldOperations worldOperations = new BukkitFarmworldWorldOperations(
@@ -125,6 +133,7 @@ public final class FarmweltPlugin extends JavaPlugin {
                 getServer().getGlobalRegionScheduler(),
                 resetService,
                 resetEngine,
+                resetNotificationService,
                 Clock.systemUTC()
         );
         startupResetCoordinator = new StartupResetCoordinator(
@@ -160,6 +169,7 @@ public final class FarmweltPlugin extends JavaPlugin {
         if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
             throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
         }
+        resetNotificationService.reload();
         postResetInitializer.synchronizeDragonSpawnGuards(resetService.getConfiguredWorlds());
         logResetStatus();
         claimProtectionService.reload();

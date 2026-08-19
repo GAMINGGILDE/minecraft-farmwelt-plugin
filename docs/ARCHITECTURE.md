@@ -60,6 +60,10 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- ResetNotificationConfig.java
     +-- ResetNotificationMessageConfig.java
     +-- ResetNotificationService.java
+    +-- ResetWarningTracker.java
+    +-- ResetNotificationMessageFormatter.java
+    +-- ResetNotificationAudience.java
+    +-- BukkitResetNotificationAudience.java
     +-- BukkitFarmworldWorldOperations.java
     +-- StartupResetCoordinator.java
     +-- AutomaticResetScheduler.java
@@ -92,10 +96,11 @@ Beim Reload über `/farmwelt reload`:
 
 1. Bukkit/Paper lädt die Config neu.
 2. Farmwelt-GUI-Einträge, Reset-Konfiguration und Ressourcenmonitor-Konfiguration werden neu gelesen.
-3. Derselbe `FarmworldResetService`, dieselbe `FarmworldResetEngine` und derselbe Worlds-Adapter bleiben bestehen.
-4. Laufende Reset-Locks, Config-Snapshots und Worlds-Futures bleiben dadurch unverändert aktiv.
-5. Claim-Hook wird neu initialisiert.
-6. Violation-Schwellen und Zeitfenster werden neu geladen.
+3. Derselbe `FarmworldResetService`, dieselbe `FarmworldResetEngine`, derselbe `ResetNotificationService` und derselbe Worlds-Adapter bleiben bestehen.
+4. Der Notification-Service übernimmt den neuen Snapshot und entfernt Tracking-State deaktivierter oder entfernter Farmwelten.
+5. Laufende Reset-Locks, Config-Snapshots und Worlds-Futures bleiben dadurch unverändert aktiv.
+6. Claim-Hook wird neu initialisiert.
+7. Violation-Schwellen und Zeitfenster werden neu geladen.
 
 Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen Zeitfenster bewertet. Persistenz gibt es aktuell nicht.
 
@@ -108,6 +113,9 @@ Der vollständige automatische Steuerungs- und Persistenzpfad ist:
 ```text
 StartupResetCoordinator (einmaliger Catch-up nach 60 Sekunden)
     -> AutomaticResetScheduler (reguläre Prüfung danach)
+        -> ResetNotificationService
+            -> ResetWarningTracker
+            -> ResetNotificationAudience
         -> ResetDueStateEvaluator
             -> FarmworldResetExecutor
                 -> FarmworldResetEngine
@@ -117,7 +125,11 @@ StartupResetCoordinator (einmaliger Catch-up nach 60 Sekunden)
 
 Startup-Catch-up und periodischer Scheduler benutzen denselben Executor und damit dieselbe Engine wie der manuelle Force-Reset. Nur ein vollständig erfolgreicher Engine-Durchlauf verschiebt den persistenten State; Coordinator und Scheduler besitzen weder eigene Resetlogik noch einen zusätzlichen Reset-Lock.
 
-`FarmworldResetConfig` enthält zusätzlich den immutable `ResetNotificationConfig`-Snapshot mit absteigend sortierten, eindeutigen `Duration`-Schwellen und den einzelnen `ResetNotificationMessageConfig`-Werten. `ResetNotificationService` ist in Phase 5.1 lediglich der zentrale, zustandslose Zugriff auf diesen jeweils aktuell geladenen Snapshot. Die Komponente sendet keine Nachrichten, plant keine Tasks und besitzt weder einen eigenen Reset-State noch Persistenz. Beim Reload wird sie nicht neu aufgebaut; ihr Zugriff über denselben `FarmworldResetService` macht den neuen Notification-Snapshot automatisch sichtbar. Laufende Reset-Snapshots und gespeicherte `nextReset`-Werte bleiben davon unberührt.
+`FarmworldResetConfig` enthält zusätzlich zum technischen Bukkit-Weltnamen den nutzerfreundlichen `displayName` sowie den immutable `ResetNotificationConfig`-Snapshot mit absteigend sortierten, eindeutigen `Duration`-Schwellen und den einzelnen `ResetNotificationMessageConfig`-Werten. Der Parser übernimmt den Anzeigenamen direkt aus `farmworlds.<id>.display-name`, ohne die Reset-Logik an GUI-Klassen zu koppeln.
+
+`ResetNotificationService` liest bei jedem periodischen Check den aktuellen Config- und State-Snapshot aus demselben `FarmworldResetService`. `ResetWarningTracker` hält pro logischer Farmwelt nur den aktuellen `nextReset`, die aktuell bekannten Warnschwellen und die bereits verwendeten Dauern. Ein geänderter Termin ersetzt den alten Zyklus vollständig. Beim ersten Snapshot sowie nach einer relevanten Reload-Reinitialisierung markiert der Tracker alle bereits erreichten Schwellen als erledigt, liefert aber höchstens die dem aktuellen Zeitpunkt nächste Schwelle zurück. Danach liefert er nur neu überschrittene, noch nicht verwendete Dauern. Gleichheit mit einem exakten Tick-Zeitpunkt ist nicht erforderlich; entscheidend ist `remaining <= warning` bei weiterhin zukünftigem `nextReset`.
+
+Der Tracker ist synchronisiert, klein und ausschließlich transient. Reloads bereinigen deaktivierte oder entfernte Einträge; weder Warning-Dauern noch Versandstatus gelangen in `reset-state.yml`. `ResetNotificationMessageFormatter` ersetzt `{world}`, `{time}` und `{next-reset}` unabhängig von Bukkit. Dabei verwendet er den vorhandenen `GermanDurationFormatter` und dieselbe `ZoneId.systemDefault()`-/`dd.MM.yyyy HH:mm`-Logik wie der Statusbefehl. `BukkitResetNotificationAudience` deserialisiert etablierte `&`-Farbcodes und plant die tatsächliche Zustellung pro Online-Spieler über dessen Folia-Entity-Scheduler.
 
 ```text
 FarmworldResetEngine
@@ -148,7 +160,7 @@ Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht kei
 
 `ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Nach einer festen Startup-Sicherheitsverzögerung von 60 Sekunden ermittelt `StartupResetCoordinator` damit die überfälligen Welten in stabiler Konfigurationsreihenfolge. Die Reset-Futures werden per `thenCompose` sequenziell verkettet; vor dem Start jeder Welt wird deren aktueller State erneut mit derselben Due-Logik bewertet. Ein Fehler oder `ALREADY_RUNNING` wird verarbeitet, ohne die nächste Welt zu blockieren. Es gibt pro überfälliger Welt nur einen Versuch, nicht je verpasstem Intervall. Der Coordinator manipuliert keine States und besitzt keinen Reset-Lock.
 
-Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden die persistenten `nextReset`-Zeitpunkte gegen ein aktuelles `Instant`. Nur bei `DUE` ruft er nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` erwartungsgemäß ohne Warnung behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert.
+Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Notification-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` erwartungsgemäß ohne Warnung behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie.
 
 ## ConfigManager
 

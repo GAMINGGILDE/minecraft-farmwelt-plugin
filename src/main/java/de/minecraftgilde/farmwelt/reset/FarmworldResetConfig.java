@@ -9,6 +9,7 @@ import java.util.Objects;
 public record FarmworldResetConfig(
         String farmworldKey,
         String worldName,
+        String displayName,
         boolean enabled,
         Duration interval,
         FarmworldType farmworldType,
@@ -25,6 +26,7 @@ public record FarmworldResetConfig(
         this(
                 farmworldKey,
                 worldName,
+                defaultDisplayName(farmworldKey),
                 enabled,
                 interval,
                 FarmworldType.fromFarmworldKey(farmworldKey).orElseThrow(
@@ -45,6 +47,7 @@ public record FarmworldResetConfig(
         this(
                 farmworldKey,
                 worldName,
+                defaultDisplayName(farmworldKey),
                 enabled,
                 interval,
                 farmworldType,
@@ -64,11 +67,33 @@ public record FarmworldResetConfig(
         this(
                 farmworldKey,
                 worldName,
+                defaultDisplayName(farmworldKey),
                 enabled,
                 interval,
                 farmworldType,
                 postReset,
                 ResetNotificationConfig.defaults()
+        );
+    }
+
+    public FarmworldResetConfig(
+            String farmworldKey,
+            String worldName,
+            boolean enabled,
+            Duration interval,
+            FarmworldType farmworldType,
+            PostResetConfig postReset,
+            ResetNotificationConfig notifications
+    ) {
+        this(
+                farmworldKey,
+                worldName,
+                defaultDisplayName(farmworldKey),
+                enabled,
+                interval,
+                farmworldType,
+                postReset,
+                notifications
         );
     }
 
@@ -78,6 +103,9 @@ public record FarmworldResetConfig(
         }
         if (worldName == null || worldName.isBlank()) {
             throw new IllegalArgumentException("worldName darf nicht leer sein.");
+        }
+        if (displayName == null || displayName.isBlank()) {
+            throw new IllegalArgumentException("displayName darf nicht leer sein.");
         }
 
         Objects.requireNonNull(interval, "interval");
@@ -94,5 +122,15 @@ public record FarmworldResetConfig(
         if (interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("interval muss positiv sein.");
         }
+    }
+
+    private static String defaultDisplayName(String farmworldKey) {
+        return FarmworldType.fromFarmworldKey(farmworldKey)
+                .map(type -> switch (type) {
+                    case OVERWORLD -> "Farmwelt";
+                    case NETHER -> "Netherfarm";
+                    case END -> "Endfarm";
+                })
+                .orElse(farmworldKey);
     }
 }
