@@ -1,6 +1,6 @@
 # Release-Prozess
 
-Diese Anleitung bereitet das geplante Release `v2.0.0` vor. In Phase 6.3 wird ausdrücklich noch kein Release erzeugt, kein Tag erstellt und `feature/v2` nicht nach `main` gemergt. Diese Schritte erfolgen erst nach der finalen V2-Abnahme in Phase 6.4.
+Diese Anleitung bereitet das geplante Release `v2.0.0` vor. Vor Merge, Tag und Release müssen der technische Release-Candidate-Audit aus Phase 6.4.1 und anschließend die vollständige manuelle V2-Abnahme aus Phase 6.4.2 erfolgreich abgeschlossen sein.
 
 ## Technische Source of Truth
 
@@ -24,7 +24,7 @@ Ein Release darf erst vorbereitet werden, wenn alle folgenden Gates erfüllt sin
 5. Der separate [Folia-/Worlds-Black-Box-Workflow](../.github/workflows/blackbox.yml) ist für den Release-Commit grün.
 6. Die vollständige manuelle [V2-Abnahmematrix BB-01 bis BB-26](testing/v2-acceptance-checklist.md) ist ohne `NOT RUN`, `FAIL` oder `BLOCKED` abgeschlossen und ihre Evidenz ist gesichert.
 7. Version, Changelog/Release Notes, Dokumentation und Runtime-Abhängigkeiten sind nochmals gegengeprüft.
-8. Erst in Phase 6.4 wird `feature/v2` kontrolliert nach `main` übernommen.
+8. Erst nach erfolgreicher manueller V2-Abnahme wird `feature/v2` kontrolliert nach `main` übernommen.
 
 Der automatisierte Smoke-Test startet einen isolierten Folia-Server, installiert Worlds und die Farmwelt-JAR des aktuellen Commits, erzeugt eine Testwelt und führt einen echten Force-Reset einschließlich State-, Regenerationsmarker-, Seed-, Log- und Shutdown-Prüfung aus. Er ist ein Release-Gate, ersetzt aber nicht die manuelle V2-Abnahme.
 
@@ -77,7 +77,7 @@ Der lokale Release-Build ersetzt nicht die beiden GitHub-Workflows und nicht die
 
 Die manuelle Workflow-Ausführung ist nur zum erneuten Bauen eines bereits vorhandenen Release-Tags vorgesehen; sie ersetzt keinen neuen Tag oder Release.
 
-## Tagging und GitHub Release in Phase 6.4
+## Tagging und GitHub Release nach der manuellen V2-Abnahme
 
 Nach Merge und finaler Freigabe muss der Tag exakt auf dem abgenommenen `main`-Commit liegen. Für V2 ist vorgesehen:
 
@@ -109,9 +109,9 @@ gh workflow run release.yml -f tag=v2.0.0
 
 Der Workflow lädt das gleichnamige Asset mit `--clobber` erneut hoch. Vorher Ursache, Tag-Commit und Notwendigkeit dokumentieren; für inhaltliche Änderungen ist eine neue Version statt eines stillen Asset-Austauschs zu verwenden.
 
-## Phase-6.3-Abgrenzung
+## Abgrenzung vor der manuellen V2-Abnahme
 
-Für die aktuelle Dokumentationsphase bleiben bewusst offen:
+Bis zum erfolgreichen Abschluss der manuellen V2-Abnahme bleiben bewusst offen:
 
 - vollständige manuelle BB-01-bis-BB-26-Abnahme,
 - finale Release-Notes und Freigabeentscheidung,

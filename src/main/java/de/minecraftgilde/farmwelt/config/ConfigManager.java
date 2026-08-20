@@ -27,25 +27,15 @@ public final class ConfigManager {
     public static final int FARMWELT_MENU_CONTENT_SIZE = 27;
     public static final int FARMWELT_MENU_CONTENT_OFFSET = 9;
     private static final int DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS = 120;
+    private static final String DEFAULT_AUDIT_STAFF_MESSAGE =
+            "&e[Farmwelt-Audit] &f{player} hat &c{block} &fin &7{world} &fbei &7{x} {y} {z} &fabgebaut. Kategorie: &7{category}";
 
     private final JavaPlugin plugin;
     private final FarmworldResetConfigParser resetConfigParser;
-    private List<FarmweltMenuItem> farmweltMenuItems = List.of();
-    private List<FarmworldResetConfig> farmworldResetConfigs = List.of();
-    private boolean resourceMonitorEnabled;
-    private String resourceMonitorMode = "audit";
-    private Set<String> monitoredWorlds = Set.of();
-    private Set<String> ignoredWorlds = Set.of();
-    private String bypassPermission = "farmwelt.bypass";
-    private String notifyPermission = "farmwelt.notify";
-    private boolean auditNotifyStaff = true;
-    private boolean auditLogToConsole = true;
-    private String staffMessage = "&e[Farmwelt-Audit] &f{player} hat &c{block} &fin &7{world} &fbei &7{x} {y} {z} &fabgebaut. Kategorie: &7{category}";
-    private int auditLogCooldownSeconds = DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS;
-    private int violationWindowSeconds = 600;
-    private Map<ViolationAction, ViolationActionConfig> violationActionConfigs = Map.of();
-    private JailActionConfig jailActionConfig = createDefaultJailActionConfig();
-    private Map<String, ResourceWorldRule> resourceWorldRules = Map.of();
+    private volatile List<FarmweltMenuItem> farmweltMenuItems = List.of();
+    private volatile List<FarmworldResetConfig> farmworldResetConfigs = List.of();
+    private volatile ResourceMonitorConfig resourceMonitorConfig =
+            createDefaultResourceMonitorConfig();
 
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -94,21 +84,19 @@ public final class ConfigManager {
     public void loadResourceMonitorConfig() {
         ConfigurationSection section = plugin.getConfig().getConfigurationSection("resource-monitor");
         if (section == null) {
-            resourceMonitorEnabled = false;
-            resourceWorldRules = Map.of();
-            violationActionConfigs = createDefaultViolationActionConfigs();
-            jailActionConfig = createDefaultJailActionConfig();
+            resourceMonitorConfig = createDefaultResourceMonitorConfig();
             plugin.getLogger().warning("Config-Bereich 'resource-monitor' fehlt. Der Ressourcenmonitor bleibt deaktiviert.");
             return;
         }
 
-        resourceMonitorEnabled = section.getBoolean("enabled", false);
-        resourceMonitorMode = section.getString("mode", "audit").toLowerCase(Locale.ROOT);
-        monitoredWorlds = toStringSet(section.getStringList("monitored-worlds"));
-        ignoredWorlds = toStringSet(section.getStringList("ignored-worlds"));
-        bypassPermission = section.getString("bypass-permission", "farmwelt.bypass");
-        notifyPermission = section.getString("notify-permission", "farmwelt.notify");
-        violationWindowSeconds = Math.max(1, section.getInt("violation-window-seconds", 600));
+        String configuredMode = section.getString("mode", "audit");
+        String resourceMonitorMode = configuredMode == null
+                ? "audit"
+                : configuredMode.toLowerCase(Locale.ROOT);
+        boolean auditNotifyStaff = true;
+        boolean auditLogToConsole = true;
+        String staffMessage = DEFAULT_AUDIT_STAFF_MESSAGE;
+        int auditLogCooldownSeconds = DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS;
 
         ConfigurationSection auditSection = section.getConfigurationSection("audit");
         if (auditSection != null) {
@@ -121,77 +109,94 @@ public final class ConfigManager {
             );
         }
 
-        resourceWorldRules = loadResourceWorldRules(section.getConfigurationSection("world-rules"));
-        violationActionConfigs = loadViolationActionConfigs(section.getConfigurationSection("actions"));
-        jailActionConfig = loadJailActionConfig(section.getConfigurationSection("actions"));
+        resourceMonitorConfig = new ResourceMonitorConfig(
+                section.getBoolean("enabled", false),
+                resourceMonitorMode,
+                toStringSet(section.getStringList("monitored-worlds")),
+                toStringSet(section.getStringList("ignored-worlds")),
+                section.getString("bypass-permission", "farmwelt.bypass"),
+                section.getString("notify-permission", "farmwelt.notify"),
+                auditNotifyStaff,
+                auditLogToConsole,
+                staffMessage,
+                auditLogCooldownSeconds,
+                Math.max(1, section.getInt("violation-window-seconds", 600)),
+                loadViolationActionConfigs(section.getConfigurationSection("actions")),
+                loadJailActionConfig(section.getConfigurationSection("actions")),
+                loadResourceWorldRules(section.getConfigurationSection("world-rules"))
+        );
     }
 
     public boolean isResourceMonitorEnabled() {
-        return resourceMonitorEnabled;
+        return resourceMonitorConfig.enabled();
     }
 
     public boolean isResourceMonitorAuditMode() {
-        return "audit".equalsIgnoreCase(resourceMonitorMode);
+        return "audit".equalsIgnoreCase(resourceMonitorConfig.mode());
     }
 
     public boolean isResourceMonitorWarnMode() {
-        return "warn".equalsIgnoreCase(resourceMonitorMode);
+        return "warn".equalsIgnoreCase(resourceMonitorConfig.mode());
     }
 
     public boolean isResourceMonitorEnforceMode() {
-        return "enforce".equalsIgnoreCase(resourceMonitorMode);
+        return "enforce".equalsIgnoreCase(resourceMonitorConfig.mode());
     }
 
     public String getResourceMonitorMode() {
-        return resourceMonitorMode == null ? "" : resourceMonitorMode;
+        String mode = resourceMonitorConfig.mode();
+        return mode == null ? "" : mode;
     }
 
     public boolean isMonitoredWorld(String worldName) {
-        return monitoredWorlds.contains(worldName);
+        return resourceMonitorConfig.monitoredWorlds().contains(worldName);
     }
 
     public Set<String> getMonitoredWorlds() {
-        return monitoredWorlds;
+        return resourceMonitorConfig.monitoredWorlds();
     }
 
     public boolean isIgnoredWorld(String worldName) {
-        return ignoredWorlds.contains(worldName);
+        return resourceMonitorConfig.ignoredWorlds().contains(worldName);
     }
 
     public boolean hasResourceWorldRule(String worldName) {
-        return resourceWorldRules.containsKey(worldName);
+        return resourceMonitorConfig.resourceWorldRules().containsKey(worldName);
     }
 
     public Optional<ResourceWorldRule> getResourceWorldRule(String worldName) {
-        return Optional.ofNullable(resourceWorldRules.get(worldName));
+        return Optional.ofNullable(resourceMonitorConfig.resourceWorldRules().get(worldName));
     }
 
     public String getBypassPermission() {
-        return bypassPermission == null ? "" : bypassPermission;
+        String permission = resourceMonitorConfig.bypassPermission();
+        return permission == null ? "" : permission;
     }
 
     public String getNotifyPermission() {
-        return notifyPermission == null ? "" : notifyPermission;
+        String permission = resourceMonitorConfig.notifyPermission();
+        return permission == null ? "" : permission;
     }
 
     public boolean isAuditNotifyStaff() {
-        return auditNotifyStaff;
+        return resourceMonitorConfig.auditNotifyStaff();
     }
 
     public boolean isAuditLogToConsole() {
-        return auditLogToConsole;
+        return resourceMonitorConfig.auditLogToConsole();
     }
 
     public String getStaffMessage() {
-        return staffMessage == null ? "" : staffMessage;
+        String message = resourceMonitorConfig.staffMessage();
+        return message == null ? "" : message;
     }
 
     public int getAuditLogCooldownSeconds() {
-        return auditLogCooldownSeconds;
+        return resourceMonitorConfig.auditLogCooldownSeconds();
     }
 
     public int getViolationWindowSeconds() {
-        return violationWindowSeconds;
+        return resourceMonitorConfig.violationWindowSeconds();
     }
 
     public boolean isViolationActionEnabled(ViolationAction action) {
@@ -215,39 +220,43 @@ public final class ConfigManager {
     }
 
     public boolean isJailActionEnabled() {
-        return jailActionConfig.enabled();
+        return resourceMonitorConfig.jailActionConfig().enabled();
     }
 
     public String getJailMode() {
-        return jailActionConfig.mode() == null ? "notify-only" : jailActionConfig.mode();
+        String mode = resourceMonitorConfig.jailActionConfig().mode();
+        return mode == null ? "notify-only" : mode;
     }
 
     public int getJailAfterBlockedAttempts() {
-        return jailActionConfig.afterBlockedAttempts();
+        return resourceMonitorConfig.jailActionConfig().afterBlockedAttempts();
     }
 
     public int getJailCooldownMinutes() {
-        return jailActionConfig.cooldownMinutes();
+        return resourceMonitorConfig.jailActionConfig().cooldownMinutes();
     }
 
     public boolean isJailExecuteOncePerWindow() {
-        return jailActionConfig.executeOncePerWindow();
+        return resourceMonitorConfig.jailActionConfig().executeOncePerWindow();
     }
 
     public String getJailCommand() {
-        return jailActionConfig.command() == null ? "" : jailActionConfig.command();
+        String command = resourceMonitorConfig.jailActionConfig().command();
+        return command == null ? "" : command;
     }
 
     public boolean isJailNotifyStaff() {
-        return jailActionConfig.notifyStaff();
+        return resourceMonitorConfig.jailActionConfig().notifyStaff();
     }
 
     public String getJailStaffMessage() {
-        return jailActionConfig.staffMessage() == null ? "" : jailActionConfig.staffMessage();
+        String message = resourceMonitorConfig.jailActionConfig().staffMessage();
+        return message == null ? "" : message;
     }
 
     public String getJailPlayerMessage() {
-        return jailActionConfig.playerMessage() == null ? "" : jailActionConfig.playerMessage();
+        String message = resourceMonitorConfig.jailActionConfig().playerMessage();
+        return message == null ? "" : message;
     }
 
     private FarmweltMenuItem loadFarmweltMenuItem(String key, ConfigurationSection section) {
@@ -498,8 +507,29 @@ public final class ConfigManager {
         );
     }
 
+    private ResourceMonitorConfig createDefaultResourceMonitorConfig() {
+        return new ResourceMonitorConfig(
+                false,
+                "audit",
+                Set.of(),
+                Set.of(),
+                "farmwelt.bypass",
+                "farmwelt.notify",
+                true,
+                true,
+                DEFAULT_AUDIT_STAFF_MESSAGE,
+                DEFAULT_AUDIT_LOG_COOLDOWN_SECONDS,
+                600,
+                createDefaultViolationActionConfigs(),
+                createDefaultJailActionConfig(),
+                Map.of()
+        );
+    }
+
     private ViolationActionConfig getViolationActionConfig(ViolationAction action) {
-        ViolationActionConfig config = violationActionConfigs.get(action);
+        ViolationActionConfig config = resourceMonitorConfig
+                .violationActionConfigs()
+                .get(action);
         if (config != null) {
             return config;
         }
@@ -611,6 +641,24 @@ public final class ConfigManager {
             int cooldownSeconds,
             String content,
             String actionbarContent
+    ) {
+    }
+
+    private record ResourceMonitorConfig(
+            boolean enabled,
+            String mode,
+            Set<String> monitoredWorlds,
+            Set<String> ignoredWorlds,
+            String bypassPermission,
+            String notifyPermission,
+            boolean auditNotifyStaff,
+            boolean auditLogToConsole,
+            String staffMessage,
+            int auditLogCooldownSeconds,
+            int violationWindowSeconds,
+            Map<ViolationAction, ViolationActionConfig> violationActionConfigs,
+            JailActionConfig jailActionConfig,
+            Map<String, ResourceWorldRule> resourceWorldRules
     ) {
     }
 

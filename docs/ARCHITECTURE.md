@@ -95,17 +95,18 @@ Beim Start:
 
 Beim Stoppen bricht `FarmweltPlugin` über den Coordinator den noch wartenden Startup-Task oder den periodischen Task gezielt ab. Ein bereits laufender Reset wird nicht künstlich beendet; insbesondere verwendet Farmwelt für bereits an Worlds beziehungsweise die Reset-Pipeline übergebene Lifecycle-Operationen weder `Future.cancel(...)` noch Thread-Interrupts. Ein halbfertig abgebrochener Welt-Lifecycle wäre unsicherer als die kontrollierte Fortsetzung bis zum Prozessende. Nach dem Stop startet die Catch-up-Kette aber weder eine weitere Welt noch den periodischen Scheduler. Lifecycle-Generationen im Coordinator und im periodischen Scheduler schützen dabei auch gegen verspätete Future-Abschlüsse beziehungsweise Task-Callbacks. Ein Config-Reload startet weder eine zweite Startup-Sequenz noch einen weiteren periodischen Task; die bestehende Komponente liest bei jeder Prüfung den aktuellen Snapshot des `FarmworldResetService`.
 
-Beim Reload über `/farmwelt reload`:
+Beim Reload über `/farmwelt reload` verhindert ein nicht blockierender Guard parallele Reload-Läufe aus verschiedenen Folia-Regionen. Ein weiterer Aufruf wird abgewiesen, solange der erste Lauf noch aktiv ist. Danach gilt:
 
 1. Bukkit/Paper lädt die Config neu.
-2. Farmwelt-GUI-Einträge, Reset-Konfiguration und Ressourcenmonitor-Konfiguration werden neu gelesen.
-3. Derselbe `FarmworldResetService`, dieselbe `FarmworldResetEngine`, derselbe `ResetNotificationService` und derselbe Worlds-Adapter bleiben bestehen.
-4. Der Notification-Service übernimmt den neuen Snapshot und entfernt Tracking-State deaktivierter oder entfernter Farmwelten.
-5. Laufende Reset-Locks, Config-Snapshots und Worlds-Futures bleiben dadurch unverändert aktiv.
-6. Claim-Hook wird neu initialisiert.
-7. Violation-Schwellen und Zeitfenster werden neu geladen.
+2. Die Reset-Konfiguration wird zuerst gelesen und gemeinsam mit `reset-state.yml` übernommen. Schlägt dieser sicherheitskritische Schritt fehl, bleiben die zuvor veröffentlichten GUI- und Ressourcenmonitor-Snapshots erhalten.
+3. Farmwelt-GUI-Einträge und Ressourcenmonitor-Konfiguration werden neu gelesen.
+4. Derselbe `FarmworldResetService`, dieselbe `FarmworldResetEngine`, derselbe `ResetNotificationService` und derselbe Worlds-Adapter bleiben bestehen.
+5. Der Notification-Service übernimmt den neuen Snapshot und entfernt Tracking-State deaktivierter oder entfernter Farmwelten.
+6. Laufende Reset-Locks, Config-Snapshots und Worlds-Futures bleiben dadurch unverändert aktiv.
+7. Claim-Hook wird neu initialisiert.
+8. Violation-Schwellen und Zeitfenster werden neu geladen.
 
-Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen Zeitfenster bewertet. Persistenz gibt es aktuell nicht.
+Die Reload-Werte des Ressourcenmonitors, des Claim-Hooks und der Violation-Auswertung werden jeweils als vollständige immutable Laufzeit-Snapshots veröffentlicht. Jeder Zugriff aus einer parallelen Folia-Region sieht dadurch einen vollständig aufgebauten alten oder neuen Snapshot statt stückweise aktualisierter Felder. Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen Zeitfenster bewertet. Persistenz gibt es aktuell nicht.
 
 ## Reset-Architektur und Worlds
 
@@ -206,6 +207,7 @@ Wichtige Aufgaben:
 - Jail-Konfiguration lesen.
 - Weltregeln vorbereiten.
 - Materialnamen beim Laden in `EnumSet<Material>` übersetzen.
+- Den vollständigen Ressourcenmonitor-Stand nach erfolgreichem Parsen atomar als immutable Snapshot veröffentlichen.
 
 Die Materiallisten werden dadurch nicht bei jedem Blockabbau aus der Config gelesen. Ungültige Materialien werden beim Laden geloggt und ignoriert.
 
@@ -286,7 +288,8 @@ Folia-relevanter Ablauf:
 2. Der Service plant die Befehlsausführung über `player.getScheduler().execute(...)`.
 3. Im Spieler-Kontext wird das Inventory geschlossen.
 4. Platzhalter werden ersetzt.
-5. Der Befehl wird ohne führenden Slash ausgeführt.
+5. Ein Spielerbefehl wird ohne führenden Slash unmittelbar in diesem Entity-Kontext ausgeführt.
+6. Ein Konsolenbefehl wird zur Ausführung an den `GlobalRegionScheduler` übergeben. Eine Fehlermeldung an den Spieler kehrt über dessen Entity-Scheduler zurück.
 
 Unterstützte Platzhalter:
 
@@ -437,7 +440,7 @@ Aufgaben:
 - Jail-Meldungen senden.
 - Platzhalter ersetzen.
 
-Nachrichten verwenden aktuell Legacy-Farbcodes mit `&` und werden über Adventure-Komponenten ausgegeben.
+Nachrichten verwenden aktuell Legacy-Farbcodes mit `&` und werden über Adventure-Komponenten ausgegeben. Globale Staff-Meldungen werden für jeden Empfänger einzeln auf dessen Entity-Scheduler geplant; erst dort erfolgen Permission-Prüfung und Versand.
 
 Wichtige Platzhalter:
 
@@ -491,7 +494,7 @@ Unterstützte Jail-Modi:
 
 Folia-relevanter Ablauf bei `execute-command`:
 
-1. Staff-Meldung wird direkt über den MessageService gesendet.
+1. Staff-Meldungen werden über den MessageService pro Empfänger im jeweiligen Entity-Kontext geplant.
 2. Der Konsolenbefehl wird über `getGlobalRegionScheduler().execute(...)` geplant.
 3. Die optionale Spielernachricht nach erfolgreichem Befehl wird über `player.getScheduler().execute(...)` geplant.
 
@@ -534,7 +537,7 @@ Das Plugin ist in `paper-plugin.yml` mit `folia-supported: true` markiert.
 
 Aktuelle Folia-relevante Punkte:
 
-- Teleportbefehle aus der GUI werden über den Entity-Scheduler des Spielers geplant.
+- Teleportbefehle aus der GUI beginnen im Entity-Scheduler des Spielers. Konsolenbefehle wechseln zur Ausführung auf den Global-Region-Scheduler.
 - Spieler-Evakuierungen verwenden den Entity-Scheduler und `teleportAsync`.
 - Kurze eigene Bukkit-Weltprüfungen laufen über den Global-Region-Scheduler.
 - Startup-Delay und periodische Fälligkeitsprüfung laufen über den Global-Region-Scheduler. Die Startup-Kette wartet ausschließlich nicht-blockierend über `CompletableFuture` auf Reset-Abschlüsse; der periodische Task wartet nicht auf Reset-Futures. Die angestoßene Pipeline verwendet jeweils ihre bestehenden Folia-Kontexte.
@@ -542,7 +545,8 @@ Aktuelle Folia-relevante Punkte:
 - Der Aufruf `WorldsAccess.regenerate(...)` erhält keine zusätzliche Scheduler-Hülle durch Farmwelt.
 - Jail-Konsolenbefehle werden über den Global-Region-Scheduler geplant.
 - Spielernachrichten nach Jail-Befehl werden wieder über den Entity-Scheduler geplant.
-- Violation-Daten liegen in thread-sicheren Strukturen.
+- Staff-Broadcasts prüfen Permissions und senden Nachrichten im Entity-Kontext des jeweiligen Empfängers.
+- Violation-Daten liegen in thread-sicheren Strukturen; Reload-Konfigurationen werden als zusammengehörige immutable Snapshots veröffentlicht.
 - Der Ressourcenmonitor arbeitet eventgetrieben und speichert nur kleine In-Memory-Datensätze.
 
 Bei neuen Features sollten Welt-, Block- oder Spielerzugriffe weiterhin im passenden Kontext passieren. Besonders kritisch sind zeitversetzte Aktionen, Teleports, Inventarzugriffe und direkte Weltmanipulationen.

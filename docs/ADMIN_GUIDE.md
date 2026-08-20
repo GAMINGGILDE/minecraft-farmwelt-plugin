@@ -169,7 +169,7 @@ Pfad: `farmworlds.<id>.teleport`
 
 Teleport-Platzhalter sind `{player}`, `{id}`, `{world}` und `{display-name}`. `{id}` ist die Config-ID; `{world}` und `{display-name}` sind beide der GUI-Anzeigename. Einen technischen Zielweltnamen deshalb direkt in den Befehl schreiben. Farmwelt implementiert keine eigene Random-Teleport-Logik.
 
-Vor der Planung und nochmals im Entity-Kontext des Spielers wird geprüft, ob die logische Farmwelt gerade zurückgesetzt wird. Während des Locks wird kein Teleportbefehl ausgeführt.
+Vor der Planung und nochmals im Entity-Kontext des Spielers wird geprüft, ob die logische Farmwelt gerade zurückgesetzt wird. Während des Locks wird kein Teleportbefehl ausgeführt. Befehle mit `sender: console` werden zur eigentlichen Ausführung Folia-sicher auf den Global-Region-Scheduler übergeben.
 
 ### Ressourcenmonitor
 

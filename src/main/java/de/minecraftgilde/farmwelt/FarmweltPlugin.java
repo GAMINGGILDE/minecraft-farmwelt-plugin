@@ -30,6 +30,7 @@ import de.minecraftgilde.farmwelt.service.ViolationService;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -38,6 +39,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FarmweltPlugin extends JavaPlugin {
 
+    private final AtomicBoolean configurationReloadInProgress = new AtomicBoolean();
     private ConfigManager configManager;
     private FarmweltMenu farmweltMenu;
     private FarmweltTeleportService teleportService;
@@ -162,21 +164,28 @@ public final class FarmweltPlugin extends JavaPlugin {
     }
 
     public void reloadFarmweltConfiguration() throws IOException, InvalidConfigurationException {
-        // Validate first: JavaPlugin#reloadConfig logs malformed YAML without reporting it to the command caller.
-        YamlConfiguration validation = new YamlConfiguration();
-        validation.load(getDataFolder().toPath().resolve("config.yml").toFile());
-        reloadConfig();
-        configManager.loadFarmweltMenuItems();
-        configManager.loadFarmworldResetConfigs();
-        configManager.loadResourceMonitorConfig();
-        if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
-            throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
+        if (!configurationReloadInProgress.compareAndSet(false, true)) {
+            throw new IllegalStateException("Ein Config-Reload läuft bereits.");
         }
-        resetNotificationService.reload();
-        postResetInitializer.synchronizeDragonSpawnGuards(resetService.getConfiguredWorlds());
-        logResetStatus();
-        claimProtectionService.reload();
-        violationService.reload(configManager);
+        try {
+            // JavaPlugin#reloadConfig meldet ungültiges YAML nicht zuverlässig an den Command-Aufrufer.
+            YamlConfiguration validation = new YamlConfiguration();
+            validation.load(getDataFolder().toPath().resolve("config.yml").toFile());
+            reloadConfig();
+            configManager.loadFarmworldResetConfigs();
+            if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
+                throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
+            }
+            configManager.loadFarmweltMenuItems();
+            configManager.loadResourceMonitorConfig();
+            resetNotificationService.reload();
+            postResetInitializer.synchronizeDragonSpawnGuards(resetService.getConfiguredWorlds());
+            logResetStatus();
+            claimProtectionService.reload();
+            violationService.reload(configManager);
+        } finally {
+            configurationReloadInProgress.set(false);
+        }
     }
 
     public FarmworldResetEngine getResetEngine() {
