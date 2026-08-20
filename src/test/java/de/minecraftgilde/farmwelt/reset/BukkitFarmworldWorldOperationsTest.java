@@ -185,9 +185,6 @@ class BukkitFarmworldWorldOperationsTest {
 
     private static final class TestPlayer {
 
-        private final String name;
-        private final boolean teleportSuccessful;
-        private final boolean runImmediately;
         private final Player player;
         private World currentWorld;
         private Runnable scheduledTask;
@@ -200,10 +197,7 @@ class BukkitFarmworldWorldOperationsTest {
                 boolean teleportSuccessful,
                 boolean runImmediately
         ) {
-            this.name = name;
             this.currentWorld = currentWorld;
-            this.teleportSuccessful = teleportSuccessful;
-            this.runImmediately = runImmediately;
             EntityScheduler scheduler = (EntityScheduler) Proxy.newProxyInstance(
                     EntityScheduler.class.getClassLoader(),
                     new Class<?>[]{EntityScheduler.class},

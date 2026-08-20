@@ -203,6 +203,8 @@ class EndDragonFightRuntimeAccessTest {
         private boolean portalGenerationSucceeds = true;
         private boolean dirty;
 
+        // Diese Methoden werden vom Runtime-Adapter anhand ihres Namens reflektiv aufgerufen.
+        @SuppressWarnings("unused")
         public void spawnExitPortal(boolean active) {
             if (!portalGenerationSucceeds) {
                 return;
@@ -211,6 +213,7 @@ class EndDragonFightRuntimeAccessTest {
             activePortal = active;
         }
 
+        @SuppressWarnings("unused")
         public void setDirty() {
             dirty = true;
         }

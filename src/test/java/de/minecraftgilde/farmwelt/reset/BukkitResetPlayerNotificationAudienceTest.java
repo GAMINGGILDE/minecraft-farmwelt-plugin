@@ -111,14 +111,12 @@ class BukkitResetPlayerNotificationAudienceTest {
     private static final class TestPlayer {
 
         private final Player player;
-        private final boolean online;
         private boolean schedulerAccepts = true;
         private Runnable scheduledTask;
         private Runnable retiredTask;
         private int messages;
 
         private TestPlayer(boolean online) {
-            this.online = online;
             EntityScheduler scheduler = (EntityScheduler) Proxy.newProxyInstance(
                     EntityScheduler.class.getClassLoader(),
                     new Class<?>[]{EntityScheduler.class},
