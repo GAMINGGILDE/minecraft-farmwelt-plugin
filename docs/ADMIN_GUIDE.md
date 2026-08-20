@@ -1,351 +1,389 @@
 # Farmwelt Admin Guide
 
-Diese Anleitung richtet sich an Serveradministratoren, die Farmwelt installieren, konfigurieren, testen und im Livebetrieb einsetzen.
+Diese Anleitung ist das vollständige Betriebs- und Konfigurationshandbuch für Farmwelt V2. Die technische Implementierung und ihre Threading-Verträge stehen getrennt in der [Architekturdokumentation](ARCHITECTURE.md); reale Abnahmeszenarien stehen in der [Black-Box-Teststrategie](testing/black-box-testing.md).
 
-## Empfohlene Einrichtung
+## Begriffe
 
-1. Worlds 4.4.0 installieren und den Server einmal damit starten.
-2. Farmwelt-Plugin-JAR in den `plugins`-Ordner legen.
-3. Server starten, damit die Standardconfig erzeugt wird.
-4. Im Startlog die erfolgreiche Worlds-Integration prüfen.
-5. `plugins/Farmwelt/config.yml` öffnen.
-6. Unter `farmworlds` die sichtbaren GUI-Einträge und Reset-Weltnamen prüfen.
-7. BetterRTP-Befehle prüfen, zum Beispiel `betterrtp:rtp world Farmwelt`.
-8. BetterRTP-Weltnamen, Permissions und Cooldowns prüfen.
-9. Falls Claims ausgenommen werden sollen: GriefPrevention installieren und aktivieren.
-10. `resource-monitor.claim-protection` prüfen.
-11. Server neu starten oder `/farmwelt reload` ausführen.
-12. `/farmwelt info` ausführen und Hook-/Modus-Status prüfen.
-13. `/farmwelt debug claim` in und außerhalb eines Claims testen.
-14. `/farmwelt debug monitor` aktivieren und relevante Blöcke per Rechtsklick prüfen.
-15. Zuerst mit `mode: audit` starten.
-16. Danach bei passenden Regeln auf `mode: warn` wechseln.
-17. Erst nach erfolgreichen Tests `mode: enforce` aktivieren.
+Farmwelt verwendet drei Werte, die nicht verwechselt werden dürfen:
 
-## Administrative Reset-Befehle
-
-| Befehl | Beschreibung | Permission |
+| Begriff | Beispiel | Verwendung |
 | --- | --- | --- |
-| `/farmwelt status` | Kompakter Status aller konfigurierten Reset-Farmwelten. | `farmwelt.admin.status` |
-| `/farmwelt status <welt>` | Details inklusive Weltname, Typ, Intervall, letztem/nächstem Reset und Restzeit. | `farmwelt.admin.status` |
-| `/farmwelt reload` | Lädt GUI-, Reset- und Ressourcenmonitor-Konfiguration neu. | `farmwelt.admin.reload` |
-| `/farmwelt reset force <welt>` | Startet sofort die vollständige Reset-Pipeline. | `farmwelt.admin.reset` |
-| `/farmwelt reset force end --dragon` | Initialisiert einmalig einen frischen Vanilla-Drachenkampf. | `farmwelt.admin.reset` |
+| Logische Farmwelt-ID | `overworld`, `nether`, `end` | Config-Pfad, Status- und Reset-Commands, Reset-Lock |
+| Display-Name | `Farmwelt`, `Netherfarm`, `Endfarm` | GUI und nutzersichtbare Reset-Nachrichten |
+| Bukkit-Weltname | `farmwelt`, `netherfarm`, `endfarm` | Geladene Weltinstanz und Worlds-Regeneration |
 
-Als `<welt>` wird ausschließlich die logische ID `overworld`, `nether` oder `end` verwendet. Der tatsächliche Bukkit-Weltname wird nur aus `farmworlds.<id>.reset.world` gelesen. Alle administrativen Permissions sind standardmäßig nur für Operatoren aktiv.
+Bei `/farmwelt status <welt>` und `/farmwelt reset force <welt>` ist `<welt>` immer die logische Farmwelt-ID. Der Bukkit-Weltname wird ausschließlich aus `farmworlds.<id>.reset.world` gelesen.
 
-Die Statuszeile verwendet `Geplant` für einen aktiven zukünftigen Termin, `Überfällig` für einen exakt erreichten oder vergangenen Termin, `Läuft` für eine aktive Reset-Pipeline, `Deaktiviert` für einen ausgeschalteten Reset-Plan und `Kein Zeitplan` für einen aktivierten Plan ohne nutzbaren State. Ein laufender Reset hat Vorrang vor seiner zeitlichen Fälligkeit. Deaktivierte Pläne und fehlende States zeigen bei `Verbleibend` nur `-`; der Statusbefehl verändert oder repariert den State nicht.
+## Voraussetzungen und Installation
 
-Der Force-Command führt sofort einen vollständigen Reset aus und sollte nur von Administratoren verwendet werden. `force` ignoriert nur den gespeicherten zukünftigen `nextReset`-Termin. Der Command umgeht weder eine deaktivierte Konfiguration noch Reset-Lock, API-basierten Hauptweltschutz, Spielerevakuierung, Worlds-Regeneration oder andere Sicherheitsprüfungen. `--dragon` ist nur für `end` zulässig. Es ersetzt alte DragonBattle-Daten durch den Zustand eines frischen Erstkampfs. Bei konfiguriertem `dragon: false` bleibt die einmalige Ausnahme auch nach Abschluss der Reset-Pipeline aktiv, bis Minecraft den Drachen tatsächlich erzeugt hat; die Config selbst wird nicht verändert. Ein normaler Reset mit `dragon: false` beendet dagegen auch einen zuvor geladenen Erstkampf, entfernt dessen Bossbar und aktiviert das End-Ausgangsportal. Nach dem Tod eines freigegebenen Drachen stellt das Plugin das aktive Ausgangsportal erneut auf der End-Ursprungregion sicher.
+- Java 25.
+- Minecraft/Paper/Folia 26.1.2; der Build verwendet aktuell `paper-api:26.1.2.build.74-stable`.
+- Worlds 4.4.0 als harte Runtime-Abhängigkeit.
+- Optional BetterRTP für die ausgelieferten Teleportbefehle.
+- Optional GriefPrevention für Claim-Ausnahmen.
 
-Ein Reload verwendet denselben `FarmworldResetService`, dieselbe `FarmworldResetEngine` und denselben Startup-/Automatik-Lifecycle weiter. Dadurch entstehen weder eine zweite Startup-Nachholung noch doppelte periodische Scheduler-Tasks; laufende Locks und deren immutable Config-Snapshots bleiben erhalten und gespeicherte `nextReset`-Werte werden nicht neu berechnet.
+Installation:
 
-Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.interval` als positive Ganzzahl mit `m` für Minuten, `h` für Stunden oder `d` für Tage angegeben, zum Beispiel `interval: "30d"` und `interval: "60d"`. Andere Einheiten, Dezimalwerte, Cron- und ISO-Durationen sind ungültig. Ein Reset ist nur aktiv, wenn sowohl der Farmwelt-Eintrag als auch dessen `reset`-Bereich aktiviert sind und `world` sowie `interval` gültig gesetzt wurden.
+1. Worlds und dessen Servervoraussetzungen installieren.
+2. Farmwelt-JAR in `plugins/` ablegen und den Server starten.
+3. `plugins/Farmwelt/config.yml` an Server-Weltnamen und Teleportziele anpassen.
+4. Falls Claim-Ausnahmen genutzt werden, GriefPrevention und `resource-monitor.claim-protection` prüfen.
+5. Server neu starten oder `/farmwelt reload` ausführen.
+6. `/farmwelt info`, `/farmwelt status`, `/farmwelt debug claim` und `/farmwelt debug monitor` prüfen.
+7. Ressourcenmonitor zunächst mit `mode: audit` betreiben.
 
-Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
+Ohne nutzbare Worlds-API deaktiviert sich Farmwelt. Farmwelt entlädt, löscht oder erzeugt Welten nicht selbst über Bukkit.
 
-### Countdown-, Lifecycle- und Evakuierungsnachrichten (Phase 5.4)
+## Commands
 
-Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` eigene Countdown-Schwellen erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
+| Befehl | Beschreibung | Permission | Sender |
+| --- | --- | --- | --- |
+| `/farmwelt` | Öffnet das 45-Slot-Farmwelt-Menü. | `farmwelt.use` | Spieler |
+| `/farmwelt status` | Zeigt den Reset-Status aller konfigurierten Reset-Farmwelten. | `farmwelt.admin.status` | Spieler, Konsole |
+| `/farmwelt status <welt>` | Zeigt Weltname, Typ, Intervall, letzten/nächsten Reset und Restzeit. | `farmwelt.admin.status` | Spieler, Konsole |
+| `/farmwelt info` | Zeigt Plugin-Version, Menüeinträge, Monitor, Hooks, BetterRTP, GriefPrevention und Jail-Modus. | `farmwelt.admin` | Spieler, Konsole |
+| `/farmwelt reload` | Validiert YAML und lädt die Farmwelt-Konfiguration neu. | `farmwelt.admin.reload` | Spieler, Konsole |
+| `/farmwelt reset force <welt>` | Startet sofort die vollständige Reset-Pipeline. | `farmwelt.admin.reset` | Spieler, Konsole |
+| `/farmwelt reset force end --dragon` | Erzwingt nur für diesen End-Reset einen frischen Vanilla-Erstkampf. | `farmwelt.admin.reset` | Spieler, Konsole |
+| `/farmwelt debug claim` | Zeigt Claim-Provider, Hook-Status und Claim-Status der Spielerposition. | `farmwelt.admin` | Spieler |
+| `/farmwelt debug monitor` | Schaltet einen Rechtsklick-Debugmodus für Ressourcenentscheidungen um. | `farmwelt.admin` | Spieler |
+| `/farmwelt debug violations [spieler]` | Zeigt Violation-, Blockier-, Schwellen- und Jail-Status; Zielspieler muss online sein. | `farmwelt.admin` | Spieler |
+
+Tab-Completion bietet nur Commands an, für die der Sender die jeweilige Permission besitzt. Async-Abschlussmeldungen eines Resets werden auch bei Commands aus der Konsole im passenden Folia-Kontext zugestellt.
+
+## Permissions
+
+Die folgende Tabelle ist gegen [`paper-plugin.yml`](../src/main/resources/paper-plugin.yml) abgeglichen:
+
+| Permission | Eingebauter Default | Bedeutung |
+| --- | --- | --- |
+| `farmwelt.use` | `true` | Darf das Farmwelt-Menü öffnen. |
+| `farmwelt.bypass` | `op` | Wird vom Ressourcenmonitor ignoriert. |
+| `farmwelt.notify` | `op` | Erhält Audit- und schwellenbasierte Staff-Meldungen. |
+| `farmwelt.admin` | `op` | Darf `info` und Debug-Befehle verwenden; besitzt als Children außerdem die drei getrennten Admin-Permissions. |
+| `farmwelt.admin.status` | `op` | Darf Reset-Status anzeigen. |
+| `farmwelt.admin.reload` | `op` | Darf die Konfiguration neu laden. |
+| `farmwelt.admin.reset` | `op` | Darf sofortige manuelle Resets starten. |
+
+`resource-monitor.bypass-permission` und `resource-monitor.notify-permission` können die beiden Monitor-Permissionnamen ändern. Die Admin-Permissions sind nicht konfigurierbar.
+
+## Config-Referenz
+
+Die kommentierte [Default-Config](../src/main/resources/config.yml) ist die vollständige Source of Truth für die ausgelieferten Materiallisten und Nachrichtentexte. Die folgenden Tabellen beschreiben die tatsächlich gelesenen V2-Schlüssel. „Auslieferung“ bezeichnet die mit einer neuen Installation erzeugte Config; ein Parser-Fallback greift nur, wenn ein Schlüssel fehlt.
+
+### Farmwelt-Menü
+
+Pfad: `farmworlds.<id>`
+
+| Schlüssel | Auslieferung | Vertrag |
+| --- | --- | --- |
+| `enabled` | `true` | Schaltet den GUI-Eintrag ein. Fehlt der Schlüssel, gilt ebenfalls `true`. |
+| `display-name` | je ID gesetzt | Erforderlicher Anzeigename des GUI-Eintrags; wird auch für Reset-Nachrichten verwendet. |
+| `icon` | je ID gesetzt | Bukkit-`Material`, das ein Item sein muss. |
+| `slot` | `11`, `13`, `15` | Inhalts-Slot `0` bis `26`; das Menü selbst hat 45 Slots. |
+| `lore` | je ID gesetzt | Optionale String-Liste unter dem Icon. |
+| `reset` | je ID gesetzt | Reset-Plan; siehe nächster Abschnitt. |
+| `teleport` | je ID gesetzt | Befehlsbasierte Teleportaktion. |
+
+Ein aktivierter GUI-Eintrag ohne gültigen Anzeigenamen, Item-Icon, Inhalts-Slot oder Teleportbefehl wird beim Laden übersprungen. GUI-Einträge dürfen eigene IDs haben; Reset-Pläne werden dagegen nur für `overworld`, `nether` und `end` geladen.
+
+### Reset-Plan
+
+Pfad: `farmworlds.<id>.reset`
+
+| Schlüssel | Auslieferung | Vertrag |
+| --- | --- | --- |
+| `enabled` | `true` | Wirksam nur zusammen mit `farmworlds.<id>.enabled: true`; Parser-Fallback ist `false`. |
+| `world` | `farmwelt`, `netherfarm`, `endfarm` | Erforderlicher tatsächlicher Bukkit-Weltname. |
+| `interval` | `30d`, `30d`, `60d` | Positive Ganzzahl mit `m`, `h` oder `d`; keine Dezimal-, Cron- oder ISO-Duration. |
+| `notifications` | vorhanden | Countdown-, Lifecycle- und Evakuierungsmeldungen. |
+| `post-reset` | vorhanden | Optionale Gamerules, WorldBorder und End-Policy. Fehlt der Bereich, verändert Farmwelt diese Werte nicht. |
+
+Ein Reset-Plan ohne gültige ID, Weltname, Intervall oder Post-Reset-Konfiguration wird sicher nicht in den Laufzeit-Snapshot übernommen. `force` kann einen solchen oder deaktivierten Plan nicht umgehen.
+
+### Reset-Notifications
+
+Pfad: `farmworlds.<id>.reset.notifications`
+
+| Schlüssel | Auslieferung und Parser-Default | Wirkung |
+| --- | --- | --- |
+| `enabled` | `true` | Hauptschalter für sämtliche Reset-Nachrichten dieser Farmwelt. |
+| `warnings` | `1h`, `30m`, `10m`, `5m`, `1m` | Countdown-Schwellen automatischer Resets. Eine leere Liste deaktiviert nur Countdowns. |
+| `warning-message` | siehe Default-Config | Globaler Countdown-Text. |
+| `reset-start.enabled` | `true` | Globale Meldung nach akzeptiertem Pipeline-Start. |
+| `reset-start.message` | siehe Default-Config | Text der Startmeldung. |
+| `reset-success.enabled` | `true` | Globale Meldung ausschließlich nach vollständigem `SUCCESS`. |
+| `reset-success.message` | siehe Default-Config | Text der Erfolgsmeldung. |
+| `reset-failure.enabled` | `false` | Optionale globale Meldung für einen tatsächlich gestarteten, fehlgeschlagenen Reset. |
+| `reset-failure.message` | siehe Default-Config | Bewusst allgemeiner Fehlertext ohne technische Details. |
+| `evacuation.enabled` | `true` | Persönliche Meldung nach bestätigtem erfolgreichem Evakuierungsteleport. |
+| `evacuation.message` | siehe Default-Config | Text der persönlichen Evakuierungsmeldung. |
+
+Warning-Dauern verwenden dieselbe `m`-/`h`-/`d`-Syntax wie Reset-Intervalle. Ungültige Listeneinträge werden einzeln ignoriert, Duplikate entfernt und gültige Schwellen absteigend sortiert. Fehlende oder ungültige Nachrichtentexte fallen auf die ausgelieferten Standardtexte zurück.
+
+Reset-Notifications kennen ausschließlich diese Platzhalter:
+
+| Platzhalter | Verwendbar in | Wert |
+| --- | --- | --- |
+| `{world}` | alle Reset-Nachrichten | `display-name`, nicht Farmwelt-ID oder Bukkit-Weltname |
+| `{time}` | `warning-message` | konfigurierte Countdown-Dauer in deutscher Schreibweise |
+| `{next-reset}` | alle Reset-Nachrichten | veröffentlichter Termin im lokalen Format `dd.MM.yyyy HH:mm`; sonst `unbekannt` |
+
+Klassische `&`-Farbcodes werden unterstützt. Countdown-Warnungen gelten nur für automatische Pläne, nicht für Force-Resets. Jede Schwelle wird pro `nextReset`-Termin höchstens einmal verwendet; nach einem Neustart oder einer relevanten Reload-Änderung wird höchstens die zeitlich nächste bereits erreichte Schwelle nachgeholt, niemals eine Serie alter Meldungen.
+
+Start-, Erfolgs-, Fehler- und Evakuierungsmeldungen laufen bei automatischen, beim Start nachgeholten und manuellen Resets über denselben Engine-Pfad. Abgewiesene Aufrufe wie `DISABLED` oder `ALREADY_RUNNING` erzeugen keine Lifecycle-Meldung. Die Erfolgsmeldung erscheint erst nach erfolgreicher State-Persistenz; `STATE_SAVE_FAILED` erzeugt bei aktivem Einzelschalter eine Fehler-, aber keine Erfolgsmeldung. Die Evakuierungsmeldung ist kein Broadcast und geht pro Reset genau einmal an jeden Spieler, dessen Teleport aus der Zielwelt bestätigt wurde; ein Disconnect kann ihre Zustellung entfallen lassen.
+
+Alle Notification-Typen sind Best-Effort: Formatter-, Scheduler- oder Versandfehler werden geloggt, dürfen aber Evakuierung und sicheren Reset weder abbrechen noch in einen anderen `ResetResult` umwandeln.
+
+### Post-Reset
+
+Pfad: `farmworlds.<id>.reset.post-reset`
 
 ```yaml
-notifications:
-  enabled: true
-  warnings:
-    - 1h
-    - 30m
-    - 10m
-    - 5m
-    - 1m
-  warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
-  reset-start:
-    enabled: true
-    message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
-  reset-success:
-    enabled: true
-    message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
-  reset-failure:
-    enabled: false
-    message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
-  evacuation:
-    enabled: true
-    message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
+post-reset:
+  gamerules:
+    players_sleeping_percentage: 50
+    show_advancement_messages: false
+  world-border:
+    size: 20000
+  end:
+    dragon: false
 ```
 
-Warning-Zeiten verwenden wie Reset-Intervalle ausschließlich positive Ganzzahlen mit `m`, `h` oder `d`. Jeder ungültige Listeneintrag wird verständlich geloggt und einzeln ignoriert; gültige Einträge bleiben erhalten. Duplikate werden entfernt und intern von der größten zur kleinsten Dauer sortiert. Eine ausdrücklich leere Liste oder eine Liste ohne gültigen Wert erzeugt keine Countdown-Warnungen, deaktiviert aber weder Farmwelt noch Reset-Zeitplan. Fehlende, leere oder nicht als String angegebene Nachrichtentexte fallen jeweils auf den oben gezeigten Standardtext zurück.
+- `gamerules` nimmt skalare Werte entgegen. Namen werden über die Bukkit-Registry aufgelöst und Werte passend zum tatsächlichen Boolean- oder Integer-Typ gesetzt. Unbekannte Regeln und unpassende Werte lassen die Post-Reset-Initialisierung fehlschlagen.
+- `world-border.size` muss eine endliche Zahl von mindestens `1` sein.
+- `end.dragon` ist ein Boolean und wird nur für die logische End-Farmwelt berücksichtigt.
+- Fehlende Unterbereiche verändern die jeweilige Einstellung nicht.
 
-Der bestehende automatische 60-Sekunden-Check wertet die Schwellen tolerant aus; er muss nicht exakt in der ersten Sekunde einer Schwelle laufen. Jede konfigurierte Dauer wird für denselben persistenten `nextReset`-Termin höchstens einmal serverweit an die aktuell verbundenen Spieler gesendet. Nach einem Neustart wird beim ersten relevanten Check höchstens die zeitlich nächste bereits erreichte Schwelle nachgeholt. Ältere verpasste Warnungen werden als übersprungen markiert und nicht gesammelt versendet. Sobald ein erfolgreicher Reset einen neuen `nextReset`-Termin veröffentlicht, beginnt automatisch ein neuer Warning-Zyklus. Fällige oder überfällige Resets erhalten keine Countdown-Warnung mehr.
+Die ausgelieferte Config setzt `show_advancement_messages: false` in allen drei Farmwelten, zusätzlich `players_sleeping_percentage: 50` in der Overworld, eine Border-Größe von `20000` und für die Endfarm `dragon: false`.
 
-`warning-message` unterstützt die folgenden Platzhalter:
+### Teleport
 
-- `{world}`: `display-name` des Farmwelt-Eintrags, zum Beispiel `Farmwelt` oder `Endfarm`.
-- `{time}`: konfigurierte Warning-Dauer in deutscher Schreibweise, zum Beispiel `5 Minuten` oder `1 Stunde`. Eine leicht verspätete Prüfung ändert diesen Text nicht.
-- `{next-reset}`: konkreter Termin im Format `dd.MM.yyyy HH:mm` und in derselben lokalen Server-Zeitzone wie `/farmwelt status`.
+Pfad: `farmworlds.<id>.teleport`
 
-Klassische `&`-Farbcodes werden wie bei den übrigen Plugin-Nachrichten verarbeitet. `/farmwelt reload` übernimmt `enabled`, `warnings` und `warning-message` beim nächsten Check. Geänderte Warnlisten oder eine erneute Aktivierung erzeugen dabei höchstens eine sinnvolle Catch-up-Warnung und niemals eine Serie alter Meldungen. Entfernte oder deaktivierte Farmwelten werden aus dem kleinen In-Memory-Tracker entfernt.
+| Schlüssel | Vertrag |
+| --- | --- |
+| `type` | Nur `command` wird unterstützt. |
+| `sender` | `player` oder `console`; Fallback ist `player`. |
+| `command` | Erforderlicher Befehl; ein führender Slash wird entfernt. |
 
-Der Warning-Zustand ist bewusst flüchtig und wird weder in `reset-state.yml` noch in einer zusätzlichen Datei gespeichert. Manuelle Force-Resets starten keinen Countdown.
+Teleport-Platzhalter sind `{player}`, `{id}`, `{world}` und `{display-name}`. `{id}` ist die Config-ID; `{world}` und `{display-name}` sind beide der GUI-Anzeigename. Einen technischen Zielweltnamen deshalb direkt in den Befehl schreiben. Farmwelt implementiert keine eigene Random-Teleport-Logik.
 
-`reset-start`, `reset-success` und `reset-failure` sind in Phase 5.3 aktiv. Sie werden sowohl für fällige automatische und beim Start nachgeholte Resets als auch für `/farmwelt reset force <welt> [--dragon]` über denselben zentralen Engine-Pfad versendet. `reset-start` erscheint erst, nachdem Lock, Konfiguration und Aktivierung den Reset-Aufruf akzeptiert haben. Ein paralleler zweiter Aufruf mit `ALREADY_RUNNING` sowie `NOT_CONFIGURED` oder `DISABLED` erzeugen deshalb keine zusätzliche Lifecycle-Nachricht.
+Vor der Planung und nochmals im Entity-Kontext des Spielers wird geprüft, ob die logische Farmwelt gerade zurückgesetzt wird. Während des Locks wird kein Teleportbefehl ausgeführt.
 
-`reset-success` wird ausschließlich beim vollständigen `SUCCESS` nach Regeneration, Validierung, Post-Reset-Initialisierung und erfolgreicher State-Persistenz gesendet. Alle Fehlerstatus eines tatsächlich gestarteten Resets verwenden `reset-failure`, sofern dessen Einzelschalter aktiviert ist. Dazu gehört ausdrücklich `STATE_SAVE_FAILED`: Die Welt kann dabei bereits erneuert sein, der persistente Zeitplan wurde aber nicht veröffentlicht, weshalb keine Erfolgsmeldung erscheint. Der technische Status bleibt im Serverlog und in der administrativen Command-Rückmeldung; der globale Text enthält keine internen Fehlerdetails.
+### Ressourcenmonitor
 
-Lifecycle-Texte unterstützen `{world}` und `{next-reset}`. `{world}` ist immer der nutzerfreundliche `display-name`. Die Erfolgsmeldung sieht den neu gespeicherten Folgetermin; Start und Fehler verwenden den zu diesem Zeitpunkt weiterhin veröffentlichten State. Fehlt ein verwendbarer Termin, erscheint robust `unbekannt`. `{time}` ist weiterhin der Countdown-Warnung vorbehalten. `notifications.enabled` und die drei jeweiligen `enabled`-Schalter wirken unabhängig. Versandfehler werden nur geloggt und verändern weder Reset-Ablauf noch `ResetResult`.
+Pfad: `resource-monitor`
 
-`evacuation` ist eine persönliche Nachricht und wird niemals global ausgegeben. Sie geht pro Reset genau einmal an jeden Spieler, den dieser Reset tatsächlich erfolgreich aus der betroffenen Farmwelt teleportiert hat. Spieler in anderen Welten sowie Spieler, die die Farmwelt zwischen Erfassung und Evakuierungsoperation selbst verlassen, erhalten sie nicht. Der Versand beginnt erst nach dem bestätigten Teleporterfolg und noch vor der weiterhin maßgeblichen Leerstandsprüfung. Scheitert ein anderer Spieler, die spätere Regeneration oder nur die Nachrichtenzustellung, bleibt eine bereits erfolgte Evakuierung fachlich unverändert.
+| Schlüssel | Auslieferung | Vertrag |
+| --- | --- | --- |
+| `enabled` | `true` | Hauptschalter; Parser-Fallback ohne Schlüssel ist `false`. |
+| `mode` | `audit` | Gültig sind `audit`, `warn`, `enforce`. |
+| `monitored-worlds` | `world`, `world_nether`, `world_the_end` | Nur diese Bukkit-Weltnamen werden geprüft. |
+| `ignored-worlds` | `farmwelt`, `netherfarm`, `endfarm` | Diese Welten bleiben auch bei Überschneidung ausgenommen. |
+| `bypass-permission` | `farmwelt.bypass` | Permission für vollständigen Monitor-Bypass. |
+| `notify-permission` | `farmwelt.notify` | Empfänger der Staff-Meldungen. |
+| `violation-window-seconds` | `600` | Fenster des normalen Verstoßzählers; mindestens eine Sekunde. |
 
-Der Hauptschalter `notifications.enabled` und `evacuation.enabled` müssen beide aktiv sein. Das Abschalten eines Schalters unterdrückt ausschließlich die Nachricht; Evakuierung, Leerstandsprüfung und Reset laufen normal weiter. Der Text unterstützt `{world}` mit dem nutzerfreundlichen `display-name` und wie die zentrale Lifecycle-Formatierung optional `{next-reset}`. Die Zustellung wird über den Entity-Scheduler des jeweiligen Spielers geplant. Ein Disconnect darf die Nachricht entfallen lassen; Scheduler-, Formatter- und Versandfehler werden best-effort geloggt und beeinflussen weder Teleporterfolg noch Reset-Ergebnis. Automatische Resets, Startup-Catch-up und `/farmwelt reset force <welt> [--dragon]` verwenden dafür denselben Engine-Pfad.
+Modi:
 
-## Manueller End-to-End-Reset auf Folia
+- `audit` beobachtet, loggt und kann Staff mit eigenem Cooldown informieren. Es warnt oder blockiert Spieler nicht.
+- `warn` zählt Verstöße und führt `actions.warning` sowie `actions.notify-staff` ab Schwelle und Cooldown aus.
+- `enforce` ergänzt den sichtbaren Blockabbruch ab `cancel-break.after-blocks`, schützt konfigurierte Item-Frame-Loots und entfernt erkannte Ressourcen aus Explosions-Blocklisten. Die Explosion selbst wird nicht abgebrochen.
 
-Den ersten echten Test ausdrücklich mit einer wegwerfbaren Testwelt durchführen, niemals direkt mit einer produktiven Farmwelt. Beispiel:
+`resource-monitor.audit` enthält `notify-staff: true`, `log-to-console: true`, `staff-message` und `log-cooldown-seconds: 120`. Audit-Notify und `actions.notify-staff` sind getrennte Mechanismen.
+
+Unter `resource-monitor.actions` werden ausgeliefert:
+
+| Bereich | `enabled` | Schwelle | Cooldown | Inhalt |
+| --- | --- | --- | --- | --- |
+| `warning` | `true` | `after-blocks: 5` | `cooldown-seconds: 60` | `message` an Spieler |
+| `notify-staff` | `true` | `after-blocks: 10` | `cooldown-seconds: 60` | `message` an Notify-Permission |
+| `cancel-break` | `true` | `after-blocks: 15` | `cooldown-seconds: 10` | `message` und `actionbar-message` |
+
+Der Cooldown von `cancel-break` begrenzt nur die Meldung. Nach erreichter Schwelle bleibt jeder relevante Versuch im Modus `enforce` blockiert.
+
+`resource-monitor.actions.jail` ist standardmäßig deaktiviert:
+
+| Schlüssel | Auslieferung | Wirkung |
+| --- | --- | --- |
+| `enabled` | `false` | Hauptschalter der Jail-Eskalation. |
+| `mode` | `notify-only` | `disabled`, `notify-only` oder `execute-command`. |
+| `after-blocked-attempts` | `20` | Schwelle des getrennten `blockedCount`. |
+| `cooldown-minutes` | `20` | Mindestabstand zwischen Jail-Aktionen desselben Spielers. |
+| `execute-once-per-window` | `true` | Höchstens eine Jail-Aktion je Violation-Fenster. |
+| `command` | `jail {player} mgpd 30min` | Konsolenbefehl für `execute-command`, ohne führenden Slash. |
+| `notify-staff` | `true` | Sendet bei Auslösung eine Staff-Meldung. |
+| `staff-message` | siehe Default-Config | Text für `notify-only` und `execute-command`. |
+| `player-message` | siehe Default-Config | Text nach erfolgreich ausgeführtem Konsolenbefehl. |
+
+Werden `cooldown-minutes` oder `command` entfernt, lauten die internen Parser-Fallbacks abweichend `60` beziehungsweise `jail {player} farmwelt`; für reproduzierbaren Betrieb sollten beide Schlüssel deshalb explizit gesetzt bleiben.
+
+Jail basiert ausschließlich auf `blockedCount`, also tatsächlich durch `enforce` abgebrochenen Versuchen. Warning, Staff-Notify und Blockierschwelle basieren auf dem normalen Verstoßzähler. Es gibt keinen Kick-Mechanismus. Bei `execute-command` läuft der Befehl als Konsole; die anschließende Spielernachricht wird im Entity-Kontext zugestellt.
+
+Nachrichten des Ressourcenmonitors und der Jail-Stufe unterstützen die in der Default-Config verwendeten Platzhalter `{player}`, `{uuid}`, `{world}`, `{x}`, `{y}`, `{z}`, `{block}`, `{category}`, `{count}`, `{blocked-count}` und `{window-seconds}`.
+
+### Weltregeln und Claims
+
+Pfad: `resource-monitor.world-rules.<Bukkit-Weltname>`
+
+| Schlüssel | Vertrag |
+| --- | --- |
+| `type` | `overworld`, `nether` oder `end` |
+| `resources` | Liste gültiger Block-`Material`-Namen; nur diese Blöcke werden erkannt. |
+| `protected-items` | Optionale Item-`Material`-Liste, standardmäßig `ELYTRA` für Item Frames im End. |
+
+Es gibt bewusst keine Höhenprüfung. Die Default-Config enthält breite, versionssensitive Ressourcenlisten; ihre vollständige Liste wird hier nicht dupliziert. Die alten Overworld-Schlüssel `surface-resources` und `underground-resources` werden nur noch als Kompatibilitätsfallback zu einer gemeinsamen Ressourcenliste zusammengeführt; neue Konfigurationen sollen `resources` verwenden.
+
+Pfad: `resource-monitor.claim-protection`
+
+| Schlüssel | Auslieferung | Vertrag |
+| --- | --- | --- |
+| `enabled` | `true` | Aktiviert die Claim-Prüfung. |
+| `provider` | `GriefPrevention` | Einziger unterstützter Provider. |
+| `skip-inside-claims` | `true` | Ignoriert Ressourcen-, Item-Frame- und Explosionsfälle im Claim. |
+| `fail-mode` | `disable-monitor` | Deaktiviert den Ressourcenmonitor sicher bei fehlendem/unbrauchbarem Provider. |
+| `ignore-height` | `true` | Wird an die GriefPrevention-Abfrage weitergegeben. |
+
+Bei Events zählt die Position des betroffenen Blocks oder Entities, nicht die Spielerposition. Nur `/farmwelt debug claim` prüft absichtlich die aktuelle Spielerposition.
+
+## Reset-Betrieb
+
+### Statuswerte
+
+Der Statusbefehl zeigt ausschließlich tatsächlich implementierte Zustände:
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| `Geplant` | Aktiver State mit zukünftigem `nextReset`. |
+| `Überfällig` | `nextReset` ist erreicht oder liegt in der Vergangenheit. |
+| `Läuft` | Für diese logische Farmwelt ist bereits eine Reset-Pipeline aktiv; dieser Status hat Vorrang. |
+| `Deaktiviert` | Der konfigurierte Reset-Plan ist ausgeschaltet. |
+| `Kein Zeitplan` | Aktivierter Plan ohne nutzbaren State. |
+
+Bei deaktivierten Plänen oder fehlendem State zeigt `Verbleibend` `-`. Der Statusbefehl verändert den State nicht.
+
+### Manueller Force-Reset
+
+`/farmwelt reset force <welt>` überspringt ausschließlich einen zukünftigen Termin. Folgende Verträge bleiben aktiv:
+
+- Farmwelt- und Reset-Schalter müssen aktiviert sein.
+- Weltname, Dimension, geladene Instanz und Hauptweltschutz werden geprüft.
+- Pro logischer Farmwelt läuft höchstens ein Reset gleichzeitig.
+- Spieler werden in eine sichere Overworld evakuiert; anschließend muss die Zielwelt leer sein.
+- Teleports in die gelockte Farmwelt bleiben bis zum Abschluss blockiert.
+- Worlds regeneriert die Welt; anschließend werden neue Bukkit-Weltinstanz und Post-Reset-Zustand geprüft.
+- Erst nach erfolgreicher State-Persistenz lautet das Ergebnis `SUCCESS`.
+
+`--dragon` ist ausschließlich für die logische ID `end` zulässig und ändert `config.yml` nicht. Der Override gilt nur für diesen Reset.
+
+### Automatischer Scheduler
+
+Farmwelt verwendet den persistenten `nextReset`-Termin. Nach abgeschlossenem Startup-Catch-up prüft ein globaler Folia-Task alle 60 Sekunden zuerst Countdown-Warnungen und danach die Fälligkeit:
+
+- Vor `nextReset` startet kein automatischer Reset.
+- Bei `now >= nextReset` wird die normale Pipeline ohne Dragon-Override angestoßen.
+- Der Scheduler blockiert nicht auf Reset-Futures und besitzt keinen zweiten Lock.
+- Ein fehlgeschlagener Reset bleibt fällig; der bestehende State wird nicht verschoben und ein späterer regulärer Tick kann erneut versuchen.
+- Ein neuer `lastReset`/`nextReset` wird nur nach Regeneration, Validierung, Post-Reset und erfolgreichem Speichern veröffentlicht.
+
+### Startup-Catch-up
+
+Nach dem vollständigen Pluginstart wartet Farmwelt einmalig 60 Sekunden. Danach werden aktuell fällige Welten in stabiler Config-Reihenfolge vollständig nacheinander verarbeitet. Vor jeder Welt wird erneut geprüft, ob sie noch fällig ist. Ein Fehler oder ein zwischenzeitlich laufender Reset blockiert die folgenden Farmwelten nicht.
+
+Ein sehr alter Termin erzeugt keinen Reset pro verpasstem Intervall. Es gibt während des Startup-Catch-up höchstens einen Versuch je gefundener fälliger Farmwelt. Nach der Sequenz übernimmt genau ein regulärer 60-Sekunden-Scheduler.
+
+### Reload
+
+`/farmwelt reload` validiert die YAML-Datei zuerst und lädt anschließend GUI, Reset-Konfiguration, Notifications, Post-Reset-/Dragon-Guards, Ressourcenmonitor, Claim-Hook und Violation-Schwellen neu.
+
+- Ein vorhandener `nextReset` bleibt unverändert.
+- Eine Intervalländerung verschiebt den bestehenden Termin nicht rückwirkend.
+- Das neue Intervall gilt für den Folgetermin nach dem nächsten erfolgreichen Reset.
+- Ein laufender Reset behält seinen beim Start erfassten unveränderlichen Config-Snapshot, einschließlich Intervall, Notifications und Post-Reset-Policy.
+- Laufende Locks und Worlds-Futures bleiben erhalten; die Pipeline wird nicht per Cancel oder Interrupt abgebrochen.
+- Zukünftige Scheduler- und Command-Entscheidungen verwenden die neue Config.
+- Reload startet keine zweite Startup-Nachholung und keinen zweiten periodischen Scheduler.
+
+## `reset-state.yml`
+
+`plugins/Farmwelt/reset-state.yml` ist Runtime-State und kein zweiter Config-Bereich. Das Plugin verwaltet dort den persistenten Zeitplan in ISO-8601-Instants:
 
 ```yaml
-farmworlds:
+version: 1
+worlds:
   overworld:
-    enabled: true
-    display-name: "Test-Farmwelt"
-    icon: GRASS_BLOCK
-    slot: 11
-
-    reset:
-      enabled: true
-      world: "worlds_farmwelt"
-      interval: "30d"
-      post-reset:
-        gamerules:
-          players_sleeping_percentage: 50
-          show_advancement_messages: false
-        world-border:
-          size: 20000
-
-    teleport:
-      type: command
-      sender: player
-      command: "betterrtp:rtp world worlds_farmwelt"
+    last-reset: "2026-08-20T12:00:00Z"
+    next-reset: "2026-09-19T12:00:00Z"
 ```
 
-Nach dem Reload zuerst ausführen:
+Bei einem noch nie erfolgreich zurückgesetzten Plan kann `last-reset` fehlen. Intern heißen die Werte `lastReset` und `nextReset`; in YAML heißen sie `last-reset` und `next-reset`.
 
-```text
-/farmwelt status overworld
-/farmwelt reset force overworld
-```
+- Ein bestehender `nextReset` überlebt Serverneustart und Reload.
+- Eine Intervalländerung berechnet den aktuellen Termin nicht neu.
+- Nach vollständigem Erfolg werden `last-reset` und der neue `next-reset` anhand des Config-Snapshots dieses Resets gemeinsam gespeichert.
+- Bei jedem Resetfehler bleibt der bestehende veröffentlichte State erhalten.
+- Bei `STATE_SAVE_FAILED` ist die Welt bereits regeneriert und initialisiert, aber es gibt kein `SUCCESS`; der bisherige In-Memory- und Datei-State bleibt veröffentlicht.
+- Fehlende States aktivierter, gültiger Pläne werden beim Laden mit `now + interval` initialisiert.
 
-Vor dem Reset in `worlds_farmwelt` eine kleine, eindeutig erkennbare Teststruktur platzieren. Danach kontrollieren:
+Die Datei niemals während eines laufenden Servers manuell bearbeiten. Für isolierte Tests nur bei vollständig gestopptem Server, nach Backup und ausschließlich am gezielt benötigten Weltabschnitt arbeiten. Die Datei nicht pauschal löschen: Dadurch gingen die persistenten Termine aller Farmwelten verloren und würden neu initialisiert.
 
-1. Der Command meldet den Start sofort.
-2. Spieler werden aus `worlds_farmwelt` evakuiert.
-3. Teleports zurück in die Welt werden während des Resets blockiert.
-4. Es tritt keine `UnsupportedOperationException` aus `Server#unloadWorld` mehr auf.
-5. Worlds regeneriert die Welt live und lädt sie erneut.
-6. Der Weltname bleibt `worlds_farmwelt`.
-7. Die neue Welt besitzt wieder den Typ `NORMAL`.
-8. Die vorher platzierte Teststruktur ist verschwunden.
-9. `/farmwelt` beziehungsweise BetterRTP kann wieder nach `worlds_farmwelt` teleportieren.
-10. Die konfigurierten Gamerules und die WorldBorder sind über die Bukkit-API gesetzt.
-11. `reset-state.yml` enthält erst nach erfolgreicher Regeneration und Post-Reset-Initialisierung den neuen UTC-Zeitpunkt.
-12. `/farmwelt status overworld` zeigt einen neuen `lastReset`.
-13. `nextReset` entspricht erfolgreichem Abschluss plus konfiguriertem Intervall.
-14. Ein weiterer Force-Reset ist möglich; der vorherige Lock ist also freigegeben.
+## Endfarm-Sonderlogik
 
-Den gleichen Test für `nether` und `end` erst nach einem erfolgreichen Overworld-Test durchführen. Für `end` zusätzlich einen normalen Reset mit `dragon: false` und danach `/farmwelt reset force end --dragon` testen. Auf Folia außerdem das Serverlog gezielt auf Thread-/Region-Fehler prüfen. Nach 60 Sekunden Startup-Verzögerung werden bereits überfällige Resets sequenziell über dieselbe Pipeline nachgeholt; erst danach startet der reguläre 60-Sekunden-Scheduler. Countdown/Broadcasts und Retry-Backoff sind noch nicht enthalten. Die Startup-Policy ist in Version 2 fest und nicht konfigurierbar.
+Die Endfarm-Policy ist versionssensitiv und wird nach der Worlds-Regeneration angewendet.
 
-## Automatischer 1-Minuten-Test
+### `dragon: false`
 
-Nur auf einem wegwerfbaren Testserver testen. Für die Zielwelt `reset.enabled: true` und `reset.interval: "1m"` setzen. Ein vorhandener `next-reset` wird durch Reload oder Intervalländerung absichtlich nicht neu berechnet. Den Server deshalb stoppen, `plugins/Farmwelt/reset-state.yml` sichern und ausschließlich den Abschnitt `worlds.<logische-id>` der Testwelt aus der Arbeitskopie entfernen. Beim nächsten Start initialisiert Farmwelt diesen fehlenden State mit dem neuen Intervall; die States anderer Welten bleiben erhalten.
+- Direkt nach dem Reset existiert kein Enderdrache.
+- Es bleibt keine aktive Bossbar.
+- Das Exit-Portal ist aktiv und benutzbar; der Fight-State gilt als abgeschlossen.
+- Verzögerte Vanilla-Erstspawns werden unterdrückt.
+- Ein echter Vanilla-Respawn mit vier Endkristallen bleibt möglich und zählt als Wiederbeschwörung, nicht als Erstkampf.
+- Nach dem Tod dieses Respawn-Drachens stellt Farmwelt das aktive Portal in der End-Ursprungsregion erneut sicher.
 
-Nach dem Start `/farmwelt status <logische-id>` prüfen. Liegt `nextReset` nach Ablauf der 60-sekündigen Startup-Verzögerung bereits in der Vergangenheit, muss genau ein Catch-up-Reset starten. Andernfalls beginnt danach der reguläre Scheduler und prüft im 60-Sekunden-Takt. Erst nach Erfolg dürfen `last-reset` und `next-reset` in `reset-state.yml` aktualisiert sein; der neue `next-reset` liegt eine Minute nach dem tatsächlichen Abschluss. Bei einem Fehler bleibt der alte fällige Termin stehen. Nach dem Test den Server stoppen und Testconfig beziehungsweise gesicherte State-Datei kontrolliert wiederherstellen.
+### `dragon: true` oder `--dragon`
 
-## Empfohlene Startwerte
+- Ein frischer Vanilla-Erstkampf wird vorbereitet.
+- Bossbar und Drache erscheinen wie beim Erstkampf.
+- Das Exit-Portal ist zunächst inaktiv und nach dem Kampf aktiv.
+- Das Drachenei-Erstkampfverhalten bleibt erhalten.
+- `--dragon` verändert `dragon: false` in der Config nicht dauerhaft.
+- Bei konfiguriertem `dragon: false` bleibt die einmalige Spawn-Freigabe nur bis zum tatsächlichen Vanilla-Spawn bestehen; danach greift wieder die konfigurierte Suppression.
 
-Konservative Startwerte:
+Nach jedem Minecraft-/Folia-Upgrade müssen beide Varianten einschließlich Bossbar, Portal, Kristall-Respawn und Drachenei auf einem isolierten Testserver abgenommen werden.
 
-```yaml
-resource-monitor:
-  enabled: true
-  mode: audit
-  violation-window-seconds: 600
+## Betrieb des Ressourcenmonitors
 
-  audit:
-    log-cooldown-seconds: 120
+Empfohlene Einführung:
 
-  actions:
-    warning:
-      enabled: true
-      after-blocks: 5
-      cooldown-seconds: 60
+1. Mit `audit` echte Welt-, Material- und Claim-Fälle beobachten.
+2. Breite Standardlisten an die Serverregeln anpassen und False Positives beseitigen.
+3. Auf `warn` wechseln und Warning-/Staff-Schwellen beobachten.
+4. Erst danach `enforce` einschließlich Item-Frame- und Explosionsschutz testen.
+5. Jail bis zu einer eigenen Abnahme deaktiviert lassen.
 
-    notify-staff:
-      enabled: true
-      after-blocks: 10
-      cooldown-seconds: 60
+Violation-, `blockedCount`-, Audit-Cooldown- und Monitor-Debug-Daten sind flüchtig und werden nicht in `reset-state.yml` oder einer Datenbank gespeichert.
 
-    cancel-break:
-      enabled: true
-      after-blocks: 15
-      cooldown-seconds: 10
+## Diagnose und Wartung
 
-    jail:
-      enabled: false
-      mode: notify-only
-```
-
-Diese Werte sind bewusst vorsichtig. Auf Servern mit viel legitimer Bautätigkeit in Hauptwelten können höhere Schwellen sinnvoll sein. Auf Servern mit klar getrennten Bau- und Farmwelten können niedrigere Schwellen reichen, sollten aber erst nach Audit-Logs gesetzt werden.
-
-## Testplan
-
-### Test A: GUI
-
-1. Als Spieler mit `farmwelt.use` einloggen.
-2. `/farmwelt` ausführen.
-3. Prüfen, ob die GUI geöffnet wird.
-4. Farmwelt anklicken.
-5. Prüfen, ob der konfigurierte BetterRTP-Befehl ausgeführt wird.
-
-Erwartung: Die GUI öffnet sich, der Spieler erhält die Teleportmeldung und BetterRTP übernimmt den Teleport.
-
-### Test B: Claim-Hook
-
-1. In einen GriefPrevention-Claim stellen.
-2. `/farmwelt debug claim` ausführen.
-3. Danach außerhalb eines Claims erneut ausführen.
-
-Erwartung: Im Claim meldet der Befehl `Position liegt in Claim: ja`, außerhalb `nein`. Außerdem sollte `/farmwelt info` `Claim-Hook aktiv: ja` melden.
-
-### Test C: Overworld-Ressourcen
-
-1. In einer überwachten Overworld stehen, zum Beispiel `world`.
-2. Einen Block aus `world-rules.<welt>.resources` prüfen.
-3. `/farmwelt debug monitor` aktivieren.
-4. Block rechtsklicken.
-5. Audit, Warn oder Enforce je nach Modus prüfen.
-
-Erwartung: Kategorie ist `overworld`; der Block würde vom Monitor geprüft, sofern kein Claim oder Bypass greift.
-
-### Test D: Overworld-Höhencheck
-
-1. Einen Ressourcenblock auf unterschiedlichen Y-Höhen testen.
-2. Zum Beispiel ein Erz in einem Berg oder einen Oberflächenblock unterhalb von Y 63 prüfen.
-3. `/farmwelt debug monitor` verwenden.
-4. Danach im passenden Modus abbauen.
-
-Erwartung: Die Höhe entscheidet nicht über die Erkennung. Nur die `resources`-Liste, Welt, Claim und Bypass sind relevant.
-
-### Test E: Nether
-
-1. In einer überwachten Nether-Welt testen, zum Beispiel `world_nether`.
-2. Einen Block aus `world-rules.<welt>.resources` prüfen.
-3. Keine Seehöhe erwarten.
-
-Erwartung: Kategorie ist `nether`; nur die `resources`-Liste entscheidet.
-
-### Test F: End
-
-1. In einer überwachten End-Welt testen, zum Beispiel `world_the_end`.
-2. Einen Block aus der End-`resources`-Liste prüfen.
-3. Keine Seehöhe erwarten.
-
-Erwartung: Kategorie ist `end`; nur die `resources`-Liste entscheidet.
-
-### Test F2: End-Loot / Elytra
-
-1. In einer überwachten End-Welt testen, zum Beispiel `world_the_end`.
-2. Sicherstellen, dass `world-rules.world_the_end.protected-items` `ELYTRA` enthält.
-3. Im `audit`- oder `warn`-Modus ein End-City-Item-Frame mit Elytra anschlagen.
-4. Im `enforce`-Modus denselben Versuch wiederholen.
-
-Erwartung: In `audit`/`warn` wird der Versuch als Kategorie `end-loot` erkannt. In `enforce` wird die Elytra-Entnahme sofort blockiert, sofern `actions.cancel-break.enabled` aktiv ist.
-
-### Test G: Claim-Ausnahme
-
-1. Einen Claim in einer überwachten Welt nutzen.
-2. Einen grundsätzlich relevanten Ressourcenblock im Claim platzieren oder vorhandenen Block prüfen.
-3. Block abbauen.
-
-Erwartung: Keine Warnung, keine Staff-Violation und kein Blockieren, wenn `skip-inside-claims: true` aktiv ist.
-
-### Test H: Bypass
-
-1. Einem Testspieler `farmwelt.bypass` geben.
-2. Relevante Ressourcen in überwachten Welten abbauen.
-3. `/farmwelt debug monitor` kann zusätzlich zeigen, dass der Spieler Bypass hat.
-
-Erwartung: Keine Warnung, keine Staff-Violation und kein Blockieren für diesen Spieler.
-
-### Test I: Explosionsschutz
-
-1. In einer überwachten Welt einen Ressourcenblock und einen nicht relevanten Block platzieren.
-2. `mode: enforce` und `actions.cancel-break.enabled: true` setzen.
-3. Eine Explosion auslösen, zum Beispiel TNT in sicherer Testumgebung.
-4. Prüfen, welche Blöcke zerstört wurden.
-
-Erwartung: Der Ressourcenblock bleibt stehen, weil er aus der Explosionsliste entfernt wurde. Andere Blöcke können weiterhin durch die Explosion zerstört werden. In `audit` und `warn` verändert der Explosionsschutz keine Blöcke.
-
-## Rollout-Strategie für den Live-Server
-
-### Phase 1: Audit
-
-`mode: audit` einige Tage laufen lassen. Console-Logs und Staff-Meldungen beobachten. In dieser Phase sollen False Positives gefunden werden: falsche Weltregeln, fehlende Claim-Erkennung oder zu breite Materiallisten.
-
-Empfohlen:
-
-- `audit.log-to-console: true`
-- `audit.notify-staff: true`
-- `audit.log-cooldown-seconds` nicht zu niedrig setzen; `120` Sekunden ist ein sinnvoller Startwert für Live-Audit
-- `actions.jail.enabled: false`
-- Die breiten 26.1.2-Standardlisten bewusst prüfen und Materialien entfernen, die in der Hauptwelt erlaubt bleiben sollen.
-
-### Phase 2: Warn
-
-Auf `mode: warn` wechseln, sobald die Erkennung plausibel ist. Spieler erhalten ab `actions.warning.after-blocks` Hinweise auf `/farmwelt`. Moderatoren beobachten Staff-Meldungen, ohne dass der Abbau blockiert wird.
-
-Empfohlen:
-
-- Warnschwelle nicht unter 5 setzen.
-- Staff-Schwelle höher als Warnschwelle setzen.
-- Cooldowns aktiv lassen.
-- Spielerhinweise klar und kurz formulieren.
-
-### Phase 3: Enforce
-
-Erst nach Audit und Warn auf `mode: enforce` wechseln. `actions.cancel-break.after-blocks` sollte höher als Warn- und Staff-Schwelle liegen. Blockieren sollte zunächst mit Teammitgliedern und typischen Spielerfällen getestet werden.
-
-Empfohlen:
-
-- `cancel-break.enabled: true`
-- `cancel-break.after-blocks` nicht zu niedrig setzen.
-- Explosionsschutz mit TNT oder anderer kontrollierter Explosion testen.
-- Staff-Meldungen weiter beobachten.
-- Jail oder andere harte Sanktionen deaktiviert lassen, bis der Serverbetrieb stabil ist.
-
-## Moderationshinweise
-
-Staff-Meldungen sind Hinweise, keine automatische Schuldzuweisung. Ein Treffer bedeutet nur, dass ein Spieler einen konfigurierten Ressourcenblock in einer überwachten Welt abgebaut hat.
-
-Claims sind bewusst ausgenommen. Wenn Spieler in Claims bauen oder abbauen, soll Farmwelt nicht eingreifen. Bei Meldungen außerhalb von Claims sollten Moderatoren zunächst auf `/farmwelt` und die Farmwelt-Regeln hinweisen.
-
-Automatische harte Sanktionen sollten vorsichtig verwendet werden. Die vorhandene Jail-Stufe zählt nur blockierte Abbauversuche nach aktivem Enforce-Blockieren und ist standardmäßig deaktiviert. Für den normalen Betrieb reicht meist Warnen, Staff informieren und Blockieren.
-
-## Wartung
-
-- Config nach Änderungen mit `/farmwelt reload` neu laden.
-- Danach `/farmwelt info` ausführen.
-- Bei Config-Fehlern das Serverlog prüfen.
-- Nach Minecraft-, Paper- oder Folia-Updates die GUI, den Ressourcenmonitor und Enforce erneut testen.
-- Nach BetterRTP-Updates die Teleportbefehle testen.
-- Nach GriefPrevention-Updates `/farmwelt debug claim` in und außerhalb eines Claims testen.
-- Nach Änderungen an Welt-Namen sowohl `monitored-worlds`/`ignored-worlds` als auch `world-rules` prüfen.
-- Nach Änderungen an Permission-Gruppen `farmwelt.use`, `farmwelt.admin`, `farmwelt.bypass` und `farmwelt.notify` prüfen.
-
-## Schnellcheck nach Reload
+Nach Installation oder Reload:
 
 1. `/farmwelt info`
-2. `/farmwelt`
-3. Farmwelt anklicken
-4. `/farmwelt debug claim`
-5. `/farmwelt debug monitor`
-6. Relevanten Block rechtsklicken
-7. Im passenden Modus echten Abbau testen
+2. `/farmwelt status`
+3. Als Spieler `/farmwelt` und einen Teleport testen.
+4. `/farmwelt debug claim` innerhalb und außerhalb eines Claims testen.
+5. `/farmwelt debug monitor` aktivieren und konfigurierte Ressourcen per Rechtsklick prüfen.
+6. Serverlog auf Config-, Worlds-, Folia- und Claim-Hook-Fehler prüfen.
 
-Wenn einer dieser Schritte unerwartet ausfällt, zuerst Serverlog, Weltname, Permission und Claim-Hook prüfen.
+Typische Ursachen:
+
+- Fehlender GUI-Eintrag: `enabled`, `display-name`, `icon`, Inhalts-`slot` und `teleport` prüfen.
+- Reset-ID fehlt im Status: Nur `overworld`, `nether` und `end` sind Reset-IDs; `world`, `interval` und `post-reset` müssen valide sein.
+- Teleport funktioniert nicht: Sender, Befehl, BetterRTP-Installation und Zielweltnamen prüfen.
+- Monitor ist trotz `enabled: true` aus: Modus und `claim-protection.fail-mode` sowie GriefPrevention-Hook prüfen.
+- Reset bleibt `Überfällig`: `ResetResult` und Serverlog prüfen. Fehler verschieben den Termin nicht und können beim nächsten Tick erneut ausgelöst werden.
+- `STATE_SAVE_FAILED`: Welt und Post-Reset-Zustand sind möglicherweise bereits erneuert. Schreibrechte und Log prüfen, bevor ein weiterer Reset zugelassen wird; `reset-state.yml` nicht blind ersetzen oder löschen.
+
+## Tests und Freigabe
+
+Vor produktiver Aktivierung mindestens Gradle-Tests und Build ausführen. Der echte automatisierte Folia-/Worlds-Smoke-Test ist unter [`testing/blackbox/`](../testing/blackbox/README.md) dokumentiert und läuft in einem eigenen GitHub-Actions-Workflow. Er prüft eine reale Worlds-Regeneration, ersetzt aber nicht die vollständige manuelle [V2-Abnahme](testing/black-box-testing.md) mit der [BB-01-bis-BB-26-Matrix](testing/v2-acceptance-checklist.md).

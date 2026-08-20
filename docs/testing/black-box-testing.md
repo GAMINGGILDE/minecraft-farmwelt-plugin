@@ -6,7 +6,7 @@ fachlichen PASS-Kriterien; die Matrix dokumentiert das Ergebnis des konkreten Te
 
 ## Zweck und Testumgebung
 
-Die Black-Box-Abnahme prüft die reale Integration von Folia, Minecraft, Worlds, der gebauten Plugin-JAR und dem vollständigen Reset-Lifecycle. Sie ergänzt die deterministischen Gradle-Tests, ersetzt sie aber nicht. Der reguläre Build-Workflow startet bewusst keinen Minecraft-Server, solange dafür kein stabiles Server-, EULA-, Console- und Welt-Harness vorhanden ist.
+Die Black-Box-Abnahme prüft die reale Integration von Folia, Minecraft, Worlds, der gebauten Plugin-JAR und dem vollständigen Reset-Lifecycle. Sie ergänzt die deterministischen Gradle-Tests und den vorhandenen [automatisierten Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md), ersetzt aber keinen davon. Der allgemeine Build-Workflow startet bewusst keinen Minecraft-Server; der echte Server-Smoke-Test läuft getrennt in `.github/workflows/blackbox.yml`.
 
 Alle Szenarien werden ausschließlich auf einem isolierten, wegwerfbaren Testserver mit Backup und separaten Testwelten ausgeführt. Produktive Welten und produktive State-Dateien dürfen nicht verwendet werden. Vor jedem Lauf sind Plugin-JAR, Folia-, Minecraft- und Worlds-Version sowie die Ausgangswerte aus `config.yml` und `reset-state.yml` zu protokollieren. `reset-state.yml` nur bei gestopptem Server und nur für den gezielt getesteten Weltabschnitt bearbeiten oder entfernen. Die komplette Datei niemals als Kurztest-Anweisung auf einem produktiven Server löschen. Automatische Kurzintervalle wie `1m` sind ausschließlich für diesen isolierten Abnahmetest zulässig.
 
@@ -130,7 +130,7 @@ Der verpflichtende Reload-Smoke-Test während einer offenen Reset-Pipeline ist z
 - Ein Persistenzfehler nach Regeneration erzeugt `STATE_SAVE_FAILED`; der vorherige veröffentlichte und persistierte State bleibt bestehen.
 - Ein Fehler einer Welt beendet weder den regulären Scheduler noch die Verarbeitung anderer fälliger Welten.
 
-## Test H – Phase-5-Notifications
+## Test H – Reset-Notifications
 
 Für die Nachrichtentests eindeutige Texte konfigurieren, die Szenario, `{world}`, `{time}` und `{next-reset}` sichtbar voneinander unterscheiden. `{time}` ist nur für `warning-message` vorgesehen; Lifecycle- und Evakuierungstexte verwenden die bereits unterstützten Platzhalter `{world}` und `{next-reset}`. Keine zusätzlichen Placeholder voraussetzen.
 
@@ -169,7 +169,7 @@ Für die Meldungstexte Marker wie `W={world}; T={time}; N={next-reset}` verwende
 - `{time}` entspricht in der Countdown-Warnung der konfigurierten Schwelle, nicht einer zufällig später gemessenen Restzeit.
 - `{next-reset}` entspricht dem konkreten, lokal formatierten Termin des maßgeblichen veröffentlichten States. Bei der Erfolgsmeldung ist dies der neu persistierte Folgetermin.
 
-## Test I – Phase-6.1-Hardening
+## Test I – Lifecycle-Hardening
 
 Diese Tests sind kritische Integration-Smoke-Tests; die detaillierten Unit-Tests werden nicht manuell nachgestellt.
 
@@ -228,14 +228,17 @@ Das branch-unabhängige Harness unter [`testing/blackbox/`](../../testing/blackb
 
 ### Automatisiert
 
-- isolierter Folia-Serverstart mit gepinnten und hashgeprüften Binaries,
+- isolierter Folia-Serverstart mit gepinnten und hashgeprüften Binaries sowie der Farmwelt-JAR des aktuellen Commits,
 - Startup und Aktivierung von Worlds sowie Farmwelt ohne relevante Exceptions,
 - automatisches Erzeugen und Laden genau einer separaten Overworld-Testfarmwelt durch Worlds,
 - ein vollständiger Reset über `farmwelt reset force overworld` und die reale Worlds-Integration,
-- `SUCCESS`, genau eine Regeneration, Neuerzeugung der Region-Daten und Seed-Protokollierung,
-- Fortschreiben und Konsistenz von `reset-state.yml`,
-- grundlegendes Folia-/Thread-/Scheduler-/Worlds-Lifecycle-Log-Gate,
-- sauberer Konsolen-Shutdown mit Timeout und Fehlerartefakten.
+- `SUCCESS`, genau ein Farmwelt-Regenerationsaufruf und genau ein Worlds-Erfolg,
+- Nachweis der echten Neuerzeugung durch das Verschwinden eines Markers im alten `region`-Bereich,
+- Vorhandensein und Vergleich von altem und neuem Seed; ein theoretisch identischer Zufallsseed bleibt wegen des unabhängigen Markers zulässig,
+- Fortschreiben und Konsistenz von `reset-state.yml` anhand gesicherter Vorher-/Nachher-Dateien,
+- vollständiges Folia-/Thread-/Scheduler-/Worlds-Lifecycle-Log-Gate einschließlich der eng begrenzten bekannten CI-Watchdog-Ausnahme,
+- sauberer Konsolen-Shutdown mit Timeout,
+- Upload von Harness-Ausgabe, Serverlogs, Findings, bekannten Watchdog-Blöcken, Config, State und Worlds-Laufzeitdaten als Testartefakte.
 
 ### Weiterhin manuell
 

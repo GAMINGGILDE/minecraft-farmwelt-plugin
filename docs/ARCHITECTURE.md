@@ -1,6 +1,6 @@
 # Farmwelt Architektur
 
-Diese Datei beschreibt den aktuellen technischen Aufbau des Farmwelt-Plugins. Sie ersetzt die frühere Entwicklungsspezifikation und soll bei Wartung, Debugging und Erweiterungen als Orientierung dienen.
+Diese Datei beschreibt den aktuellen technischen Aufbau und die Lifecycle-Verträge von Farmwelt V2. Benutzer- und Betriebsanweisungen stehen im [Admin Guide](ADMIN_GUIDE.md); reale Integrationstests stehen unter [`docs/testing/`](testing/black-box-testing.md).
 
 ## Überblick
 
@@ -109,7 +109,7 @@ Bestehende Violation-Datensätze bleiben im Speicher, werden aber nach dem neuen
 
 ## Reset-Architektur und Worlds
 
-Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Post-Reset-Initialisierung, Logging sowie `lastReset` und `nextReset`. Worlds besitzt den technischen, versionsspezifischen Welt-Lifecycle.
+Farmwelt besitzt die fachliche Reset-Orchestrierung: Konfiguration, Reset-Lock, Status, Teleport-Sperre, API-basierter Hauptweltschutz, Spieler-Evakuierung, Ergebnisvalidierung, Post-Reset-Initialisierung, Logging sowie `lastReset` und `nextReset`. Worlds ist eine harte Runtime-Abhängigkeit und besitzt allein den technischen, versionsspezifischen dynamischen Welt-Lifecycle. Es gibt keinen Bukkit-Fallback; Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse.
 
 Der vollständige automatische Steuerungs- und Persistenzpfad ist:
 
@@ -133,7 +133,7 @@ Startup-Catch-up und periodischer Scheduler benutzen denselben Executor und dami
 
 `FarmworldResetConfig` enthält zusätzlich zum technischen Bukkit-Weltnamen den nutzerfreundlichen `displayName` sowie den immutable `ResetNotificationConfig`-Snapshot mit absteigend sortierten, eindeutigen `Duration`-Schwellen und den einzelnen `ResetNotificationMessageConfig`-Werten. Der Parser übernimmt den Anzeigenamen direkt aus `farmworlds.<id>.display-name`, ohne die Reset-Logik an GUI-Klassen zu koppeln.
 
-`ResetNotificationService` liest für Countdown-Prüfungen den aktuellen Config- und State-Snapshot aus demselben `FarmworldResetService`. Für Lifecycle-Nachrichten übergibt die Engine ihren beim Start erfassten immutable Config-Snapshot. Nach akzeptiertem Lock sowie gültiger und aktivierter Konfiguration sendet die Engine genau eine Startmeldung; `NOT_CONFIGURED`, `DISABLED` und `ALREADY_RUNNING` erreichen diesen Punkt nicht. Das abschließende fachliche `ResetResult` erzeugt nur bei `SUCCESS` eine Erfolgsmeldung. Alle anderen Status eines tatsächlich gestarteten Resets, einschließlich `STATE_SAVE_FAILED`, werden auf die optional aktivierte Fehlermeldung abgebildet. Die Erfolgsmeldung liest erst nach erfolgreicher State-Persistenz den neu veröffentlichten `nextReset`; sonst bleibt der bestehende Termin sichtbar oder der Formatter verwendet `unbekannt`.
+`ResetNotificationService` liest für Countdown-Prüfungen den aktuellen Config- und State-Snapshot aus demselben `FarmworldResetService`. Für Lifecycle-Nachrichten übergibt die Engine ihren beim Start erfassten immutable Config-Snapshot. Nach akzeptiertem Lock sowie gültiger und aktivierter Konfiguration sendet die Engine genau eine Startmeldung; `NOT_CONFIGURED`, `DISABLED` und `ALREADY_RUNNING` erreichen diesen Punkt nicht. Das abschließende fachliche `ResetResult` erzeugt nur bei `SUCCESS` eine Erfolgsmeldung. Alle anderen Status eines tatsächlich gestarteten Resets, einschließlich `STATE_SAVE_FAILED`, werden auf die optional aktivierte Fehlermeldung abgebildet. Die Erfolgsmeldung liest erst nach erfolgreicher State-Persistenz den neu veröffentlichten `nextReset`; sonst bleibt der bestehende Termin sichtbar oder der Formatter verwendet `unbekannt`. Notifications sind Best-Effort und nicht sicherheitskritisch: Ein Fehler beim Formatieren, Scheduling oder Versenden darf weder die Reset-Pipeline beschädigen noch ihren fachlichen Status verändern.
 
 `ResetWarningTracker` hält pro logischer Farmwelt nur den aktuellen `nextReset`, die aktuell bekannten Warnschwellen und die bereits verwendeten Dauern. Ein geänderter Termin ersetzt den alten Zyklus vollständig. Beim ersten Snapshot sowie nach einer relevanten Reload-Reinitialisierung markiert der Tracker alle bereits erreichten Schwellen als erledigt, liefert aber höchstens die dem aktuellen Zeitpunkt nächste Schwelle zurück. Danach liefert er nur neu überschrittene, noch nicht verwendete Dauern. Gleichheit mit einem exakten Tick-Zeitpunkt ist nicht erforderlich; entscheidend ist `remaining <= warning` bei weiterhin zukünftigem `nextReset`.
 
@@ -154,24 +154,37 @@ FarmworldResetEngine
 Die produktive Pipeline lautet:
 
 ```text
-Config-Snapshot und Lock
-    -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz prüfen
+Config-Snapshot / Dragon-Scope und Reset-Lock
+    -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz validieren
     -> Spieler evakuieren und erfolgreiche Einzelteleports persönlich benachrichtigen
-    -> leere Welt bestätigen
+    -> Welt erneut auf Leerstand prüfen
     -> WorldsAccess.regenerate(world)
-    -> neue Weltinstanz über Bukkit prüfen
+    -> neue Bukkit-Weltinstanz, Name, Dimension und Hauptweltschutz validieren
     -> Gamerules, WorldBorder und Enderdragon-Policy anwenden
-    -> Reset-State speichern
-    -> Lock freigeben
+    -> Reset-State persistieren und veröffentlichen
+    -> SUCCESS
+    -> Lock auf jedem Exit-Pfad freigeben
 ```
 
-Farmwelt ruft weder `Server#unloadWorld` noch `WorldCreator` auf und löscht keine Weltverzeichnisse. Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration, Validierung und Post-Reset-Initialisierung geschrieben. Scheitert die Initialisierung, lautet das Ergebnis `POST_RESET_FAILED`, der State bleibt unverändert und der Lock wird freigegeben. Schlägt anschließend nur `reset-state.yml` fehl, lautet das Ergebnis `STATE_SAVE_FAILED`; die Welt ist dann trotzdem bereits regeneriert und initialisiert.
+Der `runningResets`-Lock erlaubt maximal einen Reset pro logischer Farmwelt. Derselbe Lock steuert die Teleport-Verfügbarkeit; `FarmweltTeleportService` prüft ihn vor dem Scheduling und erneut im Entity-Kontext. Die Engine entfernt ihn in allen synchronen und asynchronen Erfolgs- und Fehlerpfaden. Scheduler und Startup-Coordinator besitzen bewusst keinen zweiten Reset-Lock.
+
+Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration, Validierung und Post-Reset-Initialisierung als Kandidat berechnet. `FarmworldResetService` speichert zuerst die vollständige Kandidaten-Map und veröffentlicht sie erst nach erfolgreichem Repository-Save als neuen In-Memory-State. Scheitert die Initialisierung, lautet das Ergebnis `POST_RESET_FAILED`; scheitert nur das Speichern, lautet es `STATE_SAVE_FAILED`. Im zweiten Fall ist die Welt bereits regeneriert und initialisiert, es gibt aber kein `SUCCESS` und der zuvor veröffentlichte State bleibt unverändert. Damit gilt die Invariante: `nextReset` wird nur nach einer vollständig erfolgreichen Pipeline fortgeschrieben.
 
 `WorldsAccess.regenerate(...)` wird nicht in `FoliaFarmweltScheduler.runGlobal(...)` verpackt, da Worlds sein Global-/Folia-Scheduling selbst kapselt. Eigene kurze Bukkit-Prüfungen und asynchrone State-I/O verwenden weiterhin den Farmwelt-Scheduler. Fehler der Worlds-Future werden als `REGENERATE_FAILED` mit unveränderter Ursache abgebildet. Die interne `WorldOperationException.Reason`-API von Worlds wird bewusst nicht in Commands oder Business-Logik übernommen.
 
 `ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Nach einer festen Startup-Sicherheitsverzögerung von 60 Sekunden ermittelt `StartupResetCoordinator` damit die überfälligen Welten in stabiler Konfigurationsreihenfolge. Die Reset-Futures werden per `thenCompose` sequenziell verkettet; vor dem Start jeder Welt wird deren aktueller State erneut mit derselben Due-Logik bewertet. Ein Fehler oder `ALREADY_RUNNING` wird verarbeitet, ohne die nächste Welt zu blockieren. Es gibt pro überfälliger Welt nur einen Versuch, nicht je verpasstem Intervall. Der Coordinator manipuliert keine States und besitzt keinen Reset-Lock.
 
 Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Countdown-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` ohne zusätzlichen Lifecycle-Broadcast behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie, erhalten über dieselbe Engine aber dieselben Start-/Erfolgs-/Fehlermeldungen wie automatische und Startup-Resets.
+
+## Endfarm- und DragonBattle-Vertrag
+
+Die Endfarm verwendet bewusst versionsgebundene Bukkit-/CraftBukkit-/Minecraft-Zugriffe. `EndDragonFightCompatibility` begrenzt die freigegebene Serverversion, `EndDragonFightRuntimeAccess` kapselt DragonBattle-Zustand und Bossbar, und `EndDragonFightDataStore` staged die betroffenen Saved-Data-Änderungen mit Commit/Rollback. `BukkitFarmworldPostResetInitializer` koordiniert außerdem Spawn-Guard, Portal-Erzeugung und spätere Portal-Verifikation in der zuständigen Region.
+
+Für `post-reset.end.dragon: false` setzt die Initialisierung den Fight-State auf abgeschlossen, entfernt einen vorhandenen Drachen, unterdrückt die Bossbar und stellt ein aktives Exit-Portal her. Der Spawn-Guard verhindert verzögerte Erstspawns. Eine echte Vanilla-Wiederbeschwörung mit vier Endkristallen bleibt erlaubt; sie zählt nicht als Erstkampf. Nach dem Tod dieses Respawn-Drachens wird das aktive Portal in der End-Ursprungsregion erneut hergestellt und verifiziert.
+
+Für `dragon: true` oder den einmaligen Command-Override `--dragon` wird ein frischer Vanilla-Erstkampf mit aktiver Bossbar vorbereitet. Der Drache darf erscheinen, das Portal ist zunächst inaktiv und wird nach dem Kampf aktiv; das Drachenei-Erstkampfverhalten bleibt erhalten. `--dragon` verändert den Config-Snapshot für zukünftige Resets nicht. Wenn die dauerhafte Config `dragon: false` enthält, existiert die einmalige Spawn-Freigabe nur bis zum tatsächlichen Vanilla-Spawn; anschließend greift wieder die konfigurierte Suppression.
+
+Diese Logik darf bei Minecraft-/Folia-Upgrades nicht als gewöhnliches Entity-Cleanup behandelt werden. Datenlayout, reflektierte Felder und Methoden, Saved-Data-Staging, Portal, Kristall-Respawn, Bossbar und Drachenei benötigen eine bewusste Kompatibilitätsprüfung.
 
 ## ConfigManager
 
@@ -611,6 +624,11 @@ Leitlinien:
 
 ## Dokumentationsstruktur
 
-- `README.md`: Überblick, Installation, Commands, Permissions und Betriebsgrundlagen.
-- `docs/ADMIN_GUIDE.md`: Einrichtung, Testplan, Rollout und Wartung.
-- `docs/ARCHITECTURE.md`: Technischer Aufbau und Wartungshinweise für Entwickler.
+- [`README.md`](../README.md): kompakter Projekteinstieg, Kernfeatures, Voraussetzungen, Installation und wichtigste Commands.
+- [`docs/ADMIN_GUIDE.md`](ADMIN_GUIDE.md): vollständige Admin-, Config- und Betriebsreferenz.
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md): technische Architektur und Lifecycle-Verträge.
+- [`docs/RELEASE.md`](RELEASE.md): Build-, Versions- und Releaseprozess.
+- [`docs/testing/black-box-testing.md`](testing/black-box-testing.md): vollständige manuelle Black-Box-Teststrategie.
+- [`docs/testing/v2-acceptance-checklist.md`](testing/v2-acceptance-checklist.md): V2-Abnahmematrix.
+- [`testing/blackbox/README.md`](../testing/blackbox/README.md): automatisiertes Folia-/Worlds-Smoke-Harness.
+- [`AGENTS.md`](../AGENTS.md): Entwicklungsregeln und technische Verträge für zukünftige Änderungen.

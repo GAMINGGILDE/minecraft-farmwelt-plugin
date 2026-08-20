@@ -1,6 +1,6 @@
 # V2-Abnahmematrix
 
-Diese Matrix protokolliert die reale V2-Integration von Farmwelt, Folia, Minecraft und Worlds. Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Vor einem Testlauf diese Datei oder zumindest die Matrix und die Protokollvorlage kopieren; die Vorlage im Repository bleibt im Ausgangszustand `NOT RUN`.
+Diese Matrix protokolliert die vollständige manuelle V2-Integration von Farmwelt, Folia, Minecraft und Worlds. Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Der separate [automatisierte Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md) deckt einen echten Overworld-Reset ab, setzt die manuellen BB-01-bis-BB-26-Statuswerte aber nicht automatisch auf `PASS`. Vor einem Testlauf diese Datei oder zumindest die Matrix und die Protokollvorlage kopieren; die Vorlage im Repository bleibt im Ausgangszustand `NOT RUN`.
 
 Die Statuswerte bedeuten:
 
