@@ -5,3 +5,5 @@ out/
 .idea/
 bin/
 .vscode/
+__pycache__/
+*.pyc

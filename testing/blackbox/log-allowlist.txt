@@ -1,0 +1,4 @@
+# Erwartete Warnung der bewusst isolierten Offline-Testumgebung.
+SERVER IS RUNNING IN OFFLINE/INSECURE MODE
+# Paper kann bei einem sauberen Stop das normale Deaktivieren eines Plugins protokollieren.
+Disabling (Farmwelt|Worlds)

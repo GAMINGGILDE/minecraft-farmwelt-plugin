@@ -220,7 +220,33 @@ Für jeden Lauf festhalten:
 
 Bei Fehlern Server- und Pluginlogs sowie die verwendeten Config- und State-Dateien sichern. Die Vorlage in [`v2-acceptance-checklist.md`](v2-acceptance-checklist.md) ist pro Testlauf zu kopieren und auszufüllen.
 
-## CI- und spätere Automatisierungsstrategie
+## Automatisierter Smoke-Test
+
+Das branch-unabhängige Harness unter [`testing/blackbox/`](../../testing/blackbox/README.md) ergänzt die manuelle Abnahme um einen kleinen echten End-to-End-Smoke-Test. Der separate Workflow `.github/workflows/blackbox.yml` verwendet dieselbe lokale Einstiegsschnittstelle `bash ./testing/blackbox/run-blackbox.sh` und läuft bei Pull Requests sowie manuell. Wegen der Kosten eines realen Minecraft-Serverstarts und des bereits auf jedem Push laufenden normalen Builds wird nicht zusätzlich jeder Push automatisch getestet.
+
+### Automatisiert
+
+- isolierter Folia-Serverstart mit gepinnten und hashgeprüften Binaries,
+- Startup und Aktivierung von Worlds sowie Farmwelt ohne relevante Exceptions,
+- automatisches Erzeugen und Laden genau einer separaten Overworld-Testfarmwelt durch Worlds,
+- ein vollständiger Reset über `farmwelt reset force overworld` und die reale Worlds-Integration,
+- `SUCCESS`, genau eine Regeneration, Neuerzeugung der Region-Daten und Seed-Protokollierung,
+- Fortschreiben und Konsistenz von `reset-state.yml`,
+- grundlegendes Folia-/Thread-/Scheduler-/Worlds-Lifecycle-Log-Gate,
+- sauberer Konsolen-Shutdown mit Timeout und Fehlerartefakten.
+
+### Weiterhin manuell
+
+- Spieler-Evakuierung und persönliche Meldungen,
+- GUI, Teleports, BetterRTP und GriefPrevention,
+- DragonBattle, `--dragon`, Kristall-Respawn und visuelle Portalprüfung,
+- Restart-Catch-up, mehrere fällige oder parallele Farmwelten,
+- Notification-Schwellen und persistente Langzeit-Scheduler-Tests,
+- die vollständige Abnahme aller Szenarien BB-01 bis BB-26.
+
+Der Smoke-Test ist damit eine zusätzliche mittlere Ebene zwischen Unit-/Integrationstests und manueller V2-Abnahme. Ein erfolgreicher Smoke-Lauf erteilt keine vollständige V2-Freigabe.
+
+## CI- und Build-Strategie
 
 Der allgemeine Build-Workflow `.github/workflows/build.yml` führt `./gradlew build` mit Java 25 aus; der Gradle-Lifecycle führt dabei die Tests aus. Der Release-Workflow baut ebenfalls mit `clean build`. Vor der V2-Abnahme werden lokal zusätzlich die explizit geforderten Befehle ausgeführt:
 
@@ -229,6 +255,4 @@ Der allgemeine Build-Workflow `.github/workflows/build.yml` führt `./gradlew bu
 ./gradlew build
 ```
 
-GitHub Actions startet bewusst keinen echten Folia-Server. Dafür fehlt derzeit ein belastbares, reproduzierbares Harness für Server-Binary, EULA, Plugin-Installation, Worlds, Console- oder RCON-Steuerung, Weltvorbereitung, erwartbare Shutdowns, Log-Auswertung, Test-State und Isolation. Die manuelle Black-Box-Abnahme ist deshalb ein zusätzliches Release-Gate und ersetzt weder Unit-Tests noch Build.
-
-Eine spätere Automatisierung muss diese Voraussetzungen vollständig lösen, allgemein für zukünftige Branches funktionieren und Logs, Config sowie State mit eindeutiger Szenario- und Run-ID als Artefakte sichern. Es wird keine Sonderlösung nur für `feature/v2` vorgesehen.
+Der separate Black-Box-Workflow führt zuerst `./gradlew clean test` und `./gradlew build` aus. Nur danach installiert er genau die dabei erzeugte Farmwelt-JAR. Das normale Build-Gate bleibt unverändert; die manuelle Black-Box-Abnahme bleibt ein zusätzliches Release-Gate und ersetzt weder Unit-Tests noch automatisierten Smoke-Test.
