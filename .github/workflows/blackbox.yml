@@ -1,6 +1,7 @@
 name: Folia Worlds Black-Box Smoke Test
 
 on:
+  push:
   pull_request:
   workflow_dispatch:
 
