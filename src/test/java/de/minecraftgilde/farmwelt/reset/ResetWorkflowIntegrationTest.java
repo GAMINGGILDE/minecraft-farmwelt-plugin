@@ -29,6 +29,7 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.World;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +46,8 @@ class ResetWorkflowIntegrationTest {
                 List.of(config("overworld", THIRTY_DAYS)),
                 repository
         );
+        Player evacuated = player("Alex");
+        harness.runtime.evacuationPlayers = List.of(evacuated);
         CompletableFuture<World> pendingRegeneration = harness.runtime.defer("overworld");
 
         harness.automaticScheduler.start();
@@ -59,6 +62,10 @@ class ResetWorkflowIntegrationTest {
                 List.of("&eDie &6Farmwelt&e wird jetzt zurückgesetzt."),
                 harness.notifications
         );
+        assertEquals(List.of(
+                "global:&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "player:&eDu wurdest aus der &6Farmwelt&e teleportiert, da sie gerade zurückgesetzt wird."
+        ), harness.notificationEvents);
 
         Instant completedAt = NOW.plus(Duration.ofMinutes(2));
         harness.clock.setInstant(completedAt);
@@ -74,11 +81,48 @@ class ResetWorkflowIntegrationTest {
                 "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
                 "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
         ), harness.notifications);
+        assertEquals(List.of(evacuated), harness.playerNotifications.stream()
+                .map(PlayerMessage::player)
+                .toList());
 
         harness.globalScheduler.tick();
 
         assertEquals(List.of("overworld"), harness.runtime.regenerationKeys);
         assertEquals(1, repository.saveCount);
+    }
+
+    @Test
+    void automaticPathKeepsCountdownLifecycleAndPersonalEvacuationOrder() {
+        Instant nextReset = NOW.plus(Duration.ofMinutes(5));
+        TestResetStateRepository repository = new TestResetStateRepository(Map.of(
+                "overworld",
+                state("overworld", nextReset)
+        ));
+        WorkflowHarness harness = harness(
+                List.of(config("overworld", THIRTY_DAYS)),
+                repository
+        );
+        Player evacuated = player("Alex");
+        harness.runtime.evacuationPlayers = List.of(evacuated);
+
+        harness.automaticScheduler.start();
+        harness.globalScheduler.tick();
+        harness.clock.setInstant(nextReset);
+        harness.globalScheduler.tick();
+
+        assertEquals(List.of(
+                "global:&eDie &6Farmwelt&e wird in &65 Minuten&e zurückgesetzt.",
+                "global:&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "player:&eDu wurdest aus der &6Farmwelt&e teleportiert, da sie gerade zurückgesetzt wird.",
+                "global:&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), harness.notificationEvents);
+        assertEquals(List.of(evacuated), harness.playerNotifications.stream()
+                .map(PlayerMessage::player)
+                .toList());
+        assertEquals(List.of("overworld"), harness.runtime.regenerationKeys);
+        assertEquals(Optional.of(nextReset), harness.resetService.getState("overworld")
+                .orElseThrow()
+                .lastReset());
     }
 
     @Test
@@ -113,6 +157,8 @@ class ResetWorkflowIntegrationTest {
                 List.of(config("overworld", THIRTY_DAYS)),
                 repository
         );
+        Player evacuated = player("Alex");
+        harness.runtime.evacuationPlayers = List.of(evacuated);
 
         ResetResult result = harness.engine.reset("overworld", ResetOptions.defaults()).join();
 
@@ -121,6 +167,14 @@ class ResetWorkflowIntegrationTest {
                 "&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
                 "&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
         ), harness.notifications);
+        assertEquals(List.of(
+                "global:&eDie &6Farmwelt&e wird jetzt zurückgesetzt.",
+                "player:&eDu wurdest aus der &6Farmwelt&e teleportiert, da sie gerade zurückgesetzt wird.",
+                "global:&aDie &6Farmwelt&a wurde erfolgreich zurückgesetzt."
+        ), harness.notificationEvents);
+        assertEquals(List.of(evacuated), harness.playerNotifications.stream()
+                .map(PlayerMessage::player)
+                .toList());
         assertEquals(List.of("overworld"), harness.runtime.regenerationKeys);
         assertEquals(1, repository.saveCount);
     }
@@ -400,6 +454,20 @@ class ResetWorkflowIntegrationTest {
         );
     }
 
+    private static Player player(String name) {
+        return (Player) Proxy.newProxyInstance(
+                Player.class.getClassLoader(),
+                new Class<?>[]{Player.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getName" -> name;
+                    case "toString" -> "FakePlayer[" + name + "]";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> defaultValue(method.getReturnType());
+                }
+        );
+    }
+
     private static World world(
             String name,
             FarmworldType type,
@@ -468,6 +536,8 @@ class ResetWorkflowIntegrationTest {
         private final AutomaticResetScheduler automaticScheduler;
         private final StartupResetCoordinator startupCoordinator;
         private final List<String> notifications = new ArrayList<>();
+        private final List<PlayerMessage> playerNotifications = new ArrayList<>();
+        private final List<String> notificationEvents = new ArrayList<>();
 
         private WorkflowHarness(
                 List<FarmworldResetConfig> configurations,
@@ -482,7 +552,15 @@ class ResetWorkflowIntegrationTest {
             ResetNotificationService notificationService = new ResetNotificationService(
                     resetService,
                     new ResetWarningTracker(),
-                    notifications::add,
+                    message -> {
+                        notifications.add(message);
+                        notificationEvents.add("global:" + message);
+                    },
+                    (player, message) -> {
+                        playerNotifications.add(new PlayerMessage(player, message));
+                        notificationEvents.add("player:" + message);
+                        return CompletableFuture.completedFuture(null);
+                    },
                     ZoneOffset.UTC,
                     logger
             );
@@ -535,6 +613,7 @@ class ResetWorkflowIntegrationTest {
         private final List<String> regenerationKeys = new ArrayList<>();
         private final List<RegenerationCall> regenerationCalls = new ArrayList<>();
         private final List<ResetOptions> postResetOptions = new ArrayList<>();
+        private List<Player> evacuationPlayers = List.of();
 
         private FakeMinecraftRuntime(List<FarmworldResetConfig> configurations) {
             for (FarmworldResetConfig configuration : configurations) {
@@ -578,8 +657,10 @@ class ResetWorkflowIntegrationTest {
         }
 
         @Override
-        public CompletableFuture<Boolean> evacuatePlayers(World resetWorld) {
-            return CompletableFuture.completedFuture(true);
+        public CompletableFuture<FarmworldEvacuationResult> evacuatePlayers(World resetWorld) {
+            return CompletableFuture.completedFuture(
+                    FarmworldEvacuationResult.completed(evacuationPlayers)
+            );
         }
 
         @Override
@@ -632,6 +713,9 @@ class ResetWorkflowIntegrationTest {
                     generation + 1L
             );
         }
+    }
+
+    private record PlayerMessage(Player player, String message) {
     }
 
     private static final class DirectScheduler implements FarmweltScheduler {

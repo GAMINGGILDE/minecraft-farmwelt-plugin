@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -12,7 +14,7 @@ import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.Plugin;
 
 public final class BukkitFarmworldWorldOperations implements FarmworldWorldOperations {
 
@@ -22,15 +24,15 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
             NamespacedKey.minecraft("the_end")
     );
 
-    private final JavaPlugin plugin;
+    private final Plugin plugin;
     private final Supplier<Set<String>> resetWorldNames;
 
-    public BukkitFarmworldWorldOperations(JavaPlugin plugin) {
+    public BukkitFarmworldWorldOperations(Plugin plugin) {
         this(plugin, Set::of);
     }
 
     public BukkitFarmworldWorldOperations(
-            JavaPlugin plugin,
+            Plugin plugin,
             Supplier<Set<String>> resetWorldNames
     ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -52,24 +54,28 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
     }
 
     @Override
-    public CompletableFuture<Boolean> evacuatePlayers(World resetWorld) {
+    public CompletableFuture<FarmworldEvacuationResult> evacuatePlayers(World resetWorld) {
         if (resetWorld.getPlayers().isEmpty()) {
-            return CompletableFuture.completedFuture(true);
+            return CompletableFuture.completedFuture(
+                    FarmworldEvacuationResult.completed(List.of())
+            );
         }
 
         World safeWorld = findSafeWorld(plugin.getServer(), resetWorld);
         if (safeWorld == null) {
-            return CompletableFuture.completedFuture(false);
+            return CompletableFuture.completedFuture(
+                    FarmworldEvacuationResult.failed(List.of(), null)
+            );
         }
 
         Location safeSpawn = safeWorld.getSpawnLocation();
-        List<CompletableFuture<Boolean>> teleports = new ArrayList<>();
+        List<CompletableFuture<PlayerEvacuationAttempt>> teleports = new ArrayList<>();
         for (Player player : List.copyOf(resetWorld.getPlayers())) {
             teleports.add(evacuatePlayer(player, resetWorld, safeSpawn));
         }
 
         return CompletableFuture.allOf(teleports.toArray(CompletableFuture[]::new))
-                .thenApply(ignored -> teleports.stream().allMatch(this::completedSuccessfully));
+                .handle((ignored, aggregateFailure) -> aggregate(teleports));
     }
 
     @Override
@@ -77,40 +83,70 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
         return !world.getPlayers().isEmpty();
     }
 
-    private CompletableFuture<Boolean> evacuatePlayer(
+    private CompletableFuture<PlayerEvacuationAttempt> evacuatePlayer(
             Player player,
             World resetWorld,
             Location safeSpawn
     ) {
-        CompletableFuture<Boolean> result = new CompletableFuture<>();
-        boolean scheduled = player.getScheduler().execute(
-                plugin,
-                () -> {
-                    if (player.getWorld() != resetWorld) {
-                        result.complete(true);
-                        return;
-                    }
+        CompletableFuture<PlayerEvacuationAttempt> result = new CompletableFuture<>();
+        try {
+            boolean scheduled = player.getScheduler().execute(
+                    plugin,
+                    () -> {
+                        if (player.getWorld() != resetWorld) {
+                            result.complete(PlayerEvacuationAttempt.notRequired());
+                            return;
+                        }
 
-                    player.teleportAsync(safeSpawn.clone(), TeleportCause.PLUGIN)
-                            .whenComplete((teleported, failure) -> {
-                                if (failure != null) {
-                                    result.completeExceptionally(failure);
-                                } else {
-                                    result.complete(Boolean.TRUE.equals(teleported));
-                                }
-                            });
-                },
-                () -> result.complete(false),
-                1L
-        );
-        if (!scheduled) {
-            result.complete(false);
+                        player.teleportAsync(safeSpawn.clone(), TeleportCause.PLUGIN)
+                                .whenComplete((teleported, failure) -> {
+                                    if (failure != null) {
+                                        result.completeExceptionally(failure);
+                                    } else if (Boolean.TRUE.equals(teleported)) {
+                                        result.complete(PlayerEvacuationAttempt.evacuated(player));
+                                    } else {
+                                        result.complete(PlayerEvacuationAttempt.failed());
+                                    }
+                                });
+                    },
+                    () -> result.complete(PlayerEvacuationAttempt.failed()),
+                    1L
+            );
+            if (!scheduled) {
+                result.complete(PlayerEvacuationAttempt.failed());
+            }
+        } catch (RuntimeException exception) {
+            result.completeExceptionally(exception);
         }
         return result;
     }
 
-    private boolean completedSuccessfully(CompletableFuture<Boolean> future) {
-        return !future.isCompletedExceptionally() && Boolean.TRUE.equals(future.getNow(false));
+    private FarmworldEvacuationResult aggregate(
+            List<CompletableFuture<PlayerEvacuationAttempt>> teleports
+    ) {
+        List<Player> evacuatedPlayers = new ArrayList<>();
+        Throwable firstFailure = null;
+        boolean successful = true;
+        for (CompletableFuture<PlayerEvacuationAttempt> teleport : teleports) {
+            try {
+                PlayerEvacuationAttempt attempt = teleport.join();
+                successful &= attempt.successful();
+                if (attempt.evacuatedPlayer() != null) {
+                    evacuatedPlayers.add(attempt.evacuatedPlayer());
+                }
+            } catch (CompletionException | CancellationException exception) {
+                successful = false;
+                if (firstFailure == null) {
+                    firstFailure = exception instanceof CompletionException
+                            && exception.getCause() != null
+                            ? exception.getCause()
+                            : exception;
+                }
+            }
+        }
+        return successful
+                ? FarmworldEvacuationResult.completed(evacuatedPlayers)
+                : FarmworldEvacuationResult.failed(evacuatedPlayers, firstFailure);
     }
 
     private World findSafeWorld(Server server, World resetWorld) {
@@ -156,5 +192,20 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
                     "Benutzerdefinierte Dimensionen werden nicht als Farmwelt unterstützt."
             );
         };
+    }
+
+    private record PlayerEvacuationAttempt(boolean successful, Player evacuatedPlayer) {
+
+        private static PlayerEvacuationAttempt notRequired() {
+            return new PlayerEvacuationAttempt(true, null);
+        }
+
+        private static PlayerEvacuationAttempt evacuated(Player player) {
+            return new PlayerEvacuationAttempt(true, player);
+        }
+
+        private static PlayerEvacuationAttempt failed() {
+            return new PlayerEvacuationAttempt(false, null);
+        }
     }
 }

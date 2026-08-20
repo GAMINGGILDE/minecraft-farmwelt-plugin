@@ -64,6 +64,9 @@ src/main/java/de/minecraftgilde/farmwelt/
     +-- ResetNotificationMessageFormatter.java
     +-- ResetNotificationAudience.java
     +-- BukkitResetNotificationAudience.java
+    +-- ResetPlayerNotificationAudience.java
+    +-- BukkitResetPlayerNotificationAudience.java
+    +-- FarmworldEvacuationResult.java
     +-- BukkitFarmworldWorldOperations.java
     +-- StartupResetCoordinator.java
     +-- AutomaticResetScheduler.java
@@ -119,8 +122,9 @@ StartupResetCoordinator (einmaliger Catch-up nach 60 Sekunden)
         -> ResetDueStateEvaluator
             -> FarmworldResetExecutor
                 -> FarmworldResetEngine
-                    -> ResetNotificationService (Start und fachliches Ergebnis)
-                        -> ResetNotificationAudience
+                    -> ResetNotificationService (Start, Evakuierung und fachliches Ergebnis)
+                        -> ResetNotificationAudience (globale Lifecycle-Nachrichten)
+                        -> ResetPlayerNotificationAudience (persönliche Evakuierungsnachricht)
                     -> FarmworldResetService
                         -> ResetStateRepository (reset-state.yml)
 ```
@@ -133,7 +137,9 @@ Startup-Catch-up und periodischer Scheduler benutzen denselben Executor und dami
 
 `ResetWarningTracker` hält pro logischer Farmwelt nur den aktuellen `nextReset`, die aktuell bekannten Warnschwellen und die bereits verwendeten Dauern. Ein geänderter Termin ersetzt den alten Zyklus vollständig. Beim ersten Snapshot sowie nach einer relevanten Reload-Reinitialisierung markiert der Tracker alle bereits erreichten Schwellen als erledigt, liefert aber höchstens die dem aktuellen Zeitpunkt nächste Schwelle zurück. Danach liefert er nur neu überschrittene, noch nicht verwendete Dauern. Gleichheit mit einem exakten Tick-Zeitpunkt ist nicht erforderlich; entscheidend ist `remaining <= warning` bei weiterhin zukünftigem `nextReset`.
 
-Der Tracker ist synchronisiert, klein und ausschließlich transient. Reloads bereinigen deaktivierte oder entfernte Einträge; weder Warning-Dauern noch Versandstatus gelangen in `reset-state.yml`. `ResetNotificationMessageFormatter` ersetzt `{world}`, `{time}` und `{next-reset}` unabhängig von Bukkit; Lifecycle-Texte verwenden davon `{world}` und `{next-reset}`. Dabei nutzt er den vorhandenen `GermanDurationFormatter` und dieselbe `ZoneId.systemDefault()`-/`dd.MM.yyyy HH:mm`-Logik wie der Statusbefehl. `BukkitResetNotificationAudience` deserialisiert etablierte `&`-Farbcodes und plant die tatsächliche Zustellung pro Online-Spieler über dessen Folia-Entity-Scheduler. Sämtliche Formatter-/Audience-Ausnahmen werden im Notification-Service abgefangen und können den Reset-Status nicht verändern. Die konfigurierte `evacuation`-Nachricht bleibt in Phase 5.3 ungenutzt und wird insbesondere nicht global gesendet.
+Der Tracker ist synchronisiert, klein und ausschließlich transient. Reloads bereinigen deaktivierte oder entfernte Einträge; weder Warning-Dauern noch Versandstatus gelangen in `reset-state.yml`. `ResetNotificationMessageFormatter` ersetzt `{world}`, `{time}` und `{next-reset}` unabhängig von Bukkit; Lifecycle- und Evakuierungstexte verwenden davon `{world}` und `{next-reset}`. Dabei nutzt er den vorhandenen `GermanDurationFormatter` und dieselbe `ZoneId.systemDefault()`-/`dd.MM.yyyy HH:mm`-Logik wie der Statusbefehl. `BukkitResetNotificationAudience` deserialisiert etablierte `&`-Farbcodes und plant globale Nachrichten pro Online-Spieler über dessen Folia-Entity-Scheduler. Die getrennte `BukkitResetPlayerNotificationAudience` plant die persönliche Evakuierungsnachricht ausschließlich für den betroffenen Spieler in demselben sicheren Entity-Kontext. Sämtliche Formatter-/Audience-Ausnahmen werden im Notification-Service abgefangen und können den Reset-Status nicht verändern.
+
+`BukkitFarmworldWorldOperations` unterscheidet pro Spieler zwischen erfolgreichem Reset-Teleport, fehlgeschlagenem Versuch und einer vor dem Entity-Task bereits selbst verlassenen Farmwelt. `FarmworldEvacuationResult` enthält dedupliziert nur die Spieler mit bestätigtem erfolgreichem Teleport. Die Engine übergibt genau diese Spieler unmittelbar nach Abschluss der Evakuierungsoperation an den Notification-Service und prüft danach weiterhin separat den Welt-Leerstand. Teilweise erfolgreiche Evakuierungen dürfen deshalb korrekt benachrichtigt werden, auch wenn der Reset wegen eines anderen Spielers oder erst in einer späteren Pipeline-Stufe fehlschlägt. Disconnects zwischen Teleport und Nachricht führen lediglich zum Auslassen der Nachricht; es gibt bewusst keinen Retry und keine persistente Historie. Automatische, beim Start nachgeholte und manuelle Force-Resets gelangen ausnahmslos über diesen gemeinsamen Engine-Pfad.
 
 ```text
 FarmworldResetEngine
@@ -150,7 +156,8 @@ Die produktive Pipeline lautet:
 ```text
 Config-Snapshot und Lock
     -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz prüfen
-    -> Spieler evakuieren und leere Welt bestätigen
+    -> Spieler evakuieren und erfolgreiche Einzelteleports persönlich benachrichtigen
+    -> leere Welt bestätigen
     -> WorldsAccess.regenerate(world)
     -> neue Weltinstanz über Bukkit prüfen
     -> Gamerules, WorldBorder und Enderdragon-Policy anwenden

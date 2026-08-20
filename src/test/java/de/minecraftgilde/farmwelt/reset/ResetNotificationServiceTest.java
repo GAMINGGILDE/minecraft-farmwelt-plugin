@@ -2,9 +2,11 @@ package de.minecraftgilde.farmwelt.reset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,8 +15,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Handler;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
 class ResetNotificationServiceTest {
@@ -41,6 +47,7 @@ class ResetNotificationServiceTest {
                 resetService,
                 new ResetWarningTracker(),
                 ignored -> { },
+                ResetPlayerNotificationAudience.noop(),
                 ZoneOffset.UTC,
                 quietLogger()
         );
@@ -332,6 +339,108 @@ class ResetNotificationServiceTest {
     }
 
     @Test
+    void sendsFormattedEvacuationMessageOnlyToSpecifiedPlayer() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<PlayerMessage> messages = new java.util.ArrayList<>();
+        ResetNotificationService notificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                ignored -> { },
+                (player, message) -> {
+                    messages.add(new PlayerMessage(player, message));
+                    return CompletableFuture.completedFuture(null);
+                },
+                ZoneOffset.UTC,
+                quietLogger()
+        );
+        FarmworldResetConfig configuration = config(evacuationNotifications(
+                true,
+                true,
+                "evacuation {world} {next-reset}"
+        ));
+        assertTrue(resetService.reload(List.of(configuration)));
+        Player evacuated = player("Alex");
+        Player uninvolved = player("Steve");
+
+        notificationService.sendEvacuationMessage(configuration, evacuated);
+
+        assertEquals(List.of(new PlayerMessage(
+                evacuated,
+                "evacuation Test-Farmwelt 01.09.2026 12:00"
+        )), messages);
+        assertFalse(messages.stream().anyMatch(message -> message.player() == uninvolved));
+    }
+
+    @Test
+    void evacuationMainAndMessageSwitchesSuppressOnlyTheMessage() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<PlayerMessage> messages = new java.util.ArrayList<>();
+        ResetNotificationService notificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                ignored -> { },
+                (player, message) -> {
+                    messages.add(new PlayerMessage(player, message));
+                    return CompletableFuture.completedFuture(null);
+                },
+                ZoneOffset.UTC,
+                quietLogger()
+        );
+        Player player = player("Alex");
+        FarmworldResetConfig globallyDisabled = config(evacuationNotifications(
+                false,
+                true,
+                "global aus"
+        ));
+        FarmworldResetConfig evacuationDisabled = config(evacuationNotifications(
+                true,
+                false,
+                "evacuation aus"
+        ));
+
+        notificationService.sendEvacuationMessage(globallyDisabled, player);
+        notificationService.sendEvacuationMessage(evacuationDisabled, player);
+
+        assertEquals(List.of(), messages);
+    }
+
+    @Test
+    void asynchronousPlayerAudienceFailureIsLoggedAndNeverEscapes() {
+        FixedResetStateRepository repository = repository(state(NEXT_RESET));
+        FarmworldResetService resetService = resetService(repository);
+        List<LogRecord> logRecords = new java.util.ArrayList<>();
+        Logger logger = recordingLogger(logRecords);
+        ResetNotificationService notificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                ignored -> { },
+                (player, message) -> CompletableFuture.failedFuture(
+                        new IllegalStateException("delivery failed")
+                ),
+                ZoneOffset.UTC,
+                logger
+        );
+        FarmworldResetConfig configuration = config(evacuationNotifications(
+                true,
+                true,
+                "evacuation {world}"
+        ));
+
+        assertDoesNotThrow(() -> notificationService.sendEvacuationMessage(
+                configuration,
+                player("Alex")
+        ));
+
+        assertTrue(logRecords.stream().anyMatch(record ->
+                record.getLevel() == Level.SEVERE
+                        && record.getMessage().contains("Evakuierungsnachricht")
+                        && record.getThrown() instanceof IllegalStateException
+        ));
+    }
+
+    @Test
     void audienceExceptionsNeverEscapeLifecycleNotifications() {
         FixedResetStateRepository repository = repository(state(NEXT_RESET));
         FarmworldResetService resetService = resetService(repository);
@@ -431,6 +540,23 @@ class ResetNotificationServiceTest {
         );
     }
 
+    private ResetNotificationConfig evacuationNotifications(
+            boolean enabled,
+            boolean evacuationEnabled,
+            String evacuationMessage
+    ) {
+        ResetNotificationConfig defaults = ResetNotificationConfig.defaults();
+        return new ResetNotificationConfig(
+                enabled,
+                defaults.warnings(),
+                defaults.warningMessage(),
+                defaults.resetStart(),
+                defaults.resetSuccess(),
+                defaults.resetFailure(),
+                new ResetNotificationMessageConfig(evacuationEnabled, evacuationMessage)
+        );
+    }
+
     private ResetResult result(ResetStatus status) {
         return new ResetResult("overworld", "farmwelt", status, "test", null);
     }
@@ -451,6 +577,7 @@ class ResetNotificationServiceTest {
                 resetService,
                 new ResetWarningTracker(),
                 audience,
+                ResetPlayerNotificationAudience.noop(),
                 ZoneOffset.UTC,
                 quietLogger()
         );
@@ -468,6 +595,46 @@ class ResetNotificationServiceTest {
         Logger logger = Logger.getLogger("ResetNotificationServiceTest-" + System.nanoTime());
         logger.setLevel(Level.OFF);
         return logger;
+    }
+
+    private static Logger recordingLogger(List<LogRecord> logRecords) {
+        Logger logger = Logger.getLogger("ResetNotificationServiceTest-" + System.nanoTime());
+        logger.setUseParentHandlers(false);
+        logger.setLevel(Level.ALL);
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logRecords.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        handler.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        return logger;
+    }
+
+    private static Player player(String name) {
+        return (Player) Proxy.newProxyInstance(
+                Player.class.getClassLoader(),
+                new Class<?>[]{Player.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getName" -> name;
+                    case "toString" -> "FakePlayer[" + name + "]";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> null;
+                }
+        );
+    }
+
+    private record PlayerMessage(Player player, String message) {
     }
 
     private static final class FixedResetStateRepository implements ResetStateRepository {

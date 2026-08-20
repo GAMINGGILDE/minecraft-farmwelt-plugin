@@ -24,6 +24,7 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.bukkit.World;
+import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -57,10 +58,15 @@ class FarmworldResetEngineTest {
             quietLogger()
     );
     private final List<String> lifecycleMessages = new ArrayList<>();
+    private final List<PlayerMessage> evacuationMessages = new ArrayList<>();
     private final ResetNotificationService notificationService = new ResetNotificationService(
             resetService,
             new ResetWarningTracker(),
             lifecycleMessages::add,
+            (player, message) -> {
+                evacuationMessages.add(new PlayerMessage(player, message));
+                return CompletableFuture.completedFuture(null);
+            },
             ZoneOffset.UTC,
             quietLogger()
     );
@@ -85,6 +91,7 @@ class FarmworldResetEngineTest {
         lifecycleService.receivedOptions = null;
         calls.clear();
         lifecycleMessages.clear();
+        evacuationMessages.clear();
     }
 
     @Test
@@ -172,7 +179,9 @@ class FarmworldResetEngineTest {
 
     @Test
     void evacuationFailureNeverInvokesWorldsAndReleasesLock() {
-        worldOperations.evacuationResult = CompletableFuture.completedFuture(false);
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.failed(List.of(), null)
+        );
 
         ResetResult result = engine.reset("overworld").join();
 
@@ -180,6 +189,180 @@ class FarmworldResetEngineTest {
         assertEquals(0, lifecycleService.invocations);
         assertFalse(calls.contains("state"));
         assertFalse(engine.isResetRunning("overworld"));
+        assertEquals(List.of(), evacuationMessages);
+    }
+
+    @Test
+    void sendsOnePersonalMessageToOneSuccessfullyEvacuatedPlayer() {
+        Player player = player("Alex");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(player))
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(new PlayerMessage(
+                player,
+                "&eDu wurdest aus der &6Farmwelt&e teleportiert, da sie gerade zurückgesetzt wird."
+        )), evacuationMessages);
+    }
+
+    @Test
+    void sendsEachEvacuatedPlayerExactlyOnceAndNoMessageToOtherPlayers() {
+        Player first = player("Alex");
+        Player second = player("Steve");
+        Player third = player("Sam");
+        Player otherWorld = player("Robin");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(first, second, third, first))
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(first, second, third), evacuationMessages.stream()
+                .map(PlayerMessage::player)
+                .toList());
+        assertFalse(evacuationMessages.stream().anyMatch(message ->
+                message.player() == otherWorld
+        ));
+    }
+
+    @Test
+    void notifiesSuccessfulPlayersEvenWhenAnotherEvacuationFails() {
+        Player evacuated = player("Alex");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.failed(List.of(evacuated), null)
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.EVACUATION_FAILED, result.status());
+        assertEquals(List.of(evacuated), evacuationMessages.stream()
+                .map(PlayerMessage::player)
+                .toList());
+        assertEquals(0, lifecycleService.invocations);
+    }
+
+    @Test
+    void evacuationMessageRemainsCorrectWhenRegenerationLaterFails() {
+        Player evacuated = player("Alex");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(evacuated))
+        );
+        lifecycleService.result = CompletableFuture.failedFuture(
+                new IllegalStateException("regenerate failed")
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
+        assertEquals(List.of(evacuated), evacuationMessages.stream()
+                .map(PlayerMessage::player)
+                .toList());
+    }
+
+    @Test
+    void evacuationMessageSwitchDoesNotChangeEvacuationOrReset() {
+        ResetNotificationConfig defaults = ResetNotificationConfig.defaults();
+        resetService.reload(List.of(config(new ResetNotificationConfig(
+                true,
+                defaults.warnings(),
+                defaults.warningMessage(),
+                defaults.resetStart(),
+                defaults.resetSuccess(),
+                defaults.resetFailure(),
+                new ResetNotificationMessageConfig(false, "nicht senden")
+        ))));
+        Player evacuated = player("Alex");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(evacuated))
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(), evacuationMessages);
+        assertTrue(calls.contains("evacuate"));
+    }
+
+    @Test
+    void globallyDisabledNotificationsSuppressPersonalMessageWithoutChangingReset() {
+        ResetNotificationConfig defaults = ResetNotificationConfig.defaults();
+        resetService.reload(List.of(config(new ResetNotificationConfig(
+                false,
+                defaults.warnings(),
+                defaults.warningMessage(),
+                defaults.resetStart(),
+                defaults.resetSuccess(),
+                defaults.resetFailure(),
+                defaults.evacuation()
+        ))));
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(player("Alex")))
+        );
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertEquals(List.of(), evacuationMessages);
+        assertTrue(calls.contains("evacuate"));
+    }
+
+    @Test
+    void playerAudienceExceptionIsLoggedAndDoesNotChangeSuccessfulReset() {
+        List<LogRecord> logRecords = new ArrayList<>();
+        Logger logger = recordingLogger(logRecords);
+        ResetNotificationService failingNotifications = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                lifecycleMessages::add,
+                (player, message) -> {
+                    throw new IllegalStateException("send failed");
+                },
+                ZoneOffset.UTC,
+                logger
+        );
+        FarmworldResetEngine notificationFailingEngine = new FarmworldResetEngine(
+                resetService,
+                worldOperations,
+                lifecycleService,
+                postResetInitializer,
+                new DirectScheduler(),
+                failingNotifications,
+                logger
+        );
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(player("Alex")))
+        );
+
+        ResetResult result = notificationFailingEngine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertTrue(logRecords.stream().anyMatch(record ->
+                record.getLevel() == Level.SEVERE
+                        && record.getMessage().contains("Evakuierungsnachricht")
+        ));
+    }
+
+    @Test
+    void alreadyRunningCallDoesNotRepeatStartOrEvacuationMessage() {
+        Player evacuated = player("Alex");
+        worldOperations.evacuationResult = CompletableFuture.completedFuture(
+                FarmworldEvacuationResult.completed(List.of(evacuated))
+        );
+        CompletableFuture<World> pendingRegeneration = new CompletableFuture<>();
+        lifecycleService.result = pendingRegeneration;
+
+        CompletableFuture<ResetResult> runningReset = engine.reset("overworld");
+        assertEquals(ResetStatus.ALREADY_RUNNING, engine.reset("overworld").join().status());
+
+        assertEquals(1, lifecycleMessages.size());
+        assertEquals(1, evacuationMessages.size());
+        pendingRegeneration.complete(regeneratedWorld);
+        assertEquals(ResetStatus.SUCCESS, runningReset.join().status());
+        assertEquals(1, evacuationMessages.size());
     }
 
     @Test
@@ -337,6 +520,7 @@ class FarmworldResetEngineTest {
                 ignored -> {
                     throw new IllegalStateException("broadcast failed");
                 },
+                ResetPlayerNotificationAudience.noop(),
                 ZoneOffset.UTC,
                 quietLogger()
         );
@@ -678,6 +862,20 @@ class FarmworldResetEngineTest {
         return world(name, environment, directory, 0L);
     }
 
+    private static Player player(String name) {
+        return (Player) Proxy.newProxyInstance(
+                Player.class.getClassLoader(),
+                new Class<?>[]{Player.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getName" -> name;
+                    case "toString" -> "FakePlayer[" + name + "]";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> defaultValue(method.getReturnType());
+                }
+        );
+    }
+
     private static World world(
             String name,
             World.Environment environment,
@@ -815,7 +1013,10 @@ class FarmworldResetEngineTest {
         private final List<String> calls;
         private WorldInspection initialInspection;
         private WorldInspection regeneratedInspection;
-        private CompletableFuture<Boolean> evacuationResult = CompletableFuture.completedFuture(true);
+        private CompletableFuture<FarmworldEvacuationResult> evacuationResult =
+                CompletableFuture.completedFuture(
+                        FarmworldEvacuationResult.completed(List.of())
+                );
         private boolean hasPlayers;
         private int inspectCount;
 
@@ -836,7 +1037,7 @@ class FarmworldResetEngineTest {
         }
 
         @Override
-        public CompletableFuture<Boolean> evacuatePlayers(World resetWorld) {
+        public CompletableFuture<FarmworldEvacuationResult> evacuatePlayers(World resetWorld) {
             calls.add("evacuate");
             return evacuationResult;
         }
@@ -846,6 +1047,9 @@ class FarmworldResetEngineTest {
             calls.add("hasPlayers");
             return hasPlayers;
         }
+    }
+
+    private record PlayerMessage(Player player, String message) {
     }
 
     private static final class FakeLifecycleService implements FarmworldLifecycleService {

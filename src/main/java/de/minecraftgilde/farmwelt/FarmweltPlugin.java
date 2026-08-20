@@ -9,6 +9,7 @@ import de.minecraftgilde.farmwelt.listener.FarmweltGuiListener;
 import de.minecraftgilde.farmwelt.listener.ResourceBreakListener;
 import de.minecraftgilde.farmwelt.reset.AutomaticResetScheduler;
 import de.minecraftgilde.farmwelt.reset.BukkitResetNotificationAudience;
+import de.minecraftgilde.farmwelt.reset.BukkitResetPlayerNotificationAudience;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldPostResetInitializer;
 import de.minecraftgilde.farmwelt.reset.BukkitFarmworldWorldOperations;
@@ -77,6 +78,7 @@ public final class FarmweltPlugin extends JavaPlugin {
                 resetService,
                 new ResetWarningTracker(),
                 new BukkitResetNotificationAudience(this),
+                new BukkitResetPlayerNotificationAudience(this),
                 ZoneId.systemDefault(),
                 getLogger()
         );

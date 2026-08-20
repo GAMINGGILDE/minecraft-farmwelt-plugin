@@ -10,6 +10,7 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.World;
+import org.bukkit.entity.Player;
 
 /** Executes one complete, asynchronous reset pipeline for a configured farmworld. */
 public final class FarmworldResetEngine implements FarmworldResetExecutor {
@@ -235,19 +236,22 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<PipelineContext> evacuatePlayers(PipelineContext context) {
-        CompletableFuture<Boolean> evacuation = mapOperationFailure(
+        CompletableFuture<FarmworldEvacuationResult> evacuation = mapOperationFailure(
                 scheduler.runGlobal(() -> worldOperations.evacuatePlayers(context.originalWorld()))
                         .thenCompose(Function.identity()),
                 ResetStatus.EVACUATION_FAILED,
                 "Mindestens ein Spieler konnte nicht sicher evakuiert werden."
         );
 
-        return evacuation.thenCompose(success -> {
-            if (!success) {
+        return evacuation.thenCompose(result -> {
+            for (Player player : result.evacuatedPlayers()) {
+                notificationService.sendEvacuationMessage(context.resetConfig(), player);
+            }
+            if (!result.successful()) {
                 return failed(
                         ResetStatus.EVACUATION_FAILED,
                         "Mindestens ein Spieler konnte nicht sicher evakuiert werden.",
-                        null
+                        result.failure().orElse(null)
                 );
             }
             return CompletableFuture.completedFuture(context);

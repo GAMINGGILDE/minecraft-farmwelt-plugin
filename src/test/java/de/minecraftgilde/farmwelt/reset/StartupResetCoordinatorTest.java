@@ -357,6 +357,7 @@ class StartupResetCoordinatorTest {
                         resetService,
                         new ResetWarningTracker(),
                         ignored -> { },
+                        ResetPlayerNotificationAudience.noop(),
                         ZoneOffset.UTC,
                         logger
                 ),

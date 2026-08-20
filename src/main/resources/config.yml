@@ -45,7 +45,7 @@ farmworlds:
           # Standardmäßig aus, damit technische Fehler nicht global angekündigt werden.
           enabled: false
           message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
-        # In Phase 5.3 weiterhin nur vorbereitet; die persönliche Zustellung folgt separat.
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
         evacuation:
           enabled: true
           message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
@@ -96,7 +96,7 @@ farmworlds:
         reset-failure:
           enabled: false
           message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
-        # Noch nicht aktiv; wird nicht global versendet.
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
         evacuation:
           enabled: true
           message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
@@ -145,7 +145,7 @@ farmworlds:
         reset-failure:
           enabled: false
           message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
-        # Noch nicht aktiv; wird nicht global versendet.
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
         evacuation:
           enabled: true
           message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."

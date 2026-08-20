@@ -8,7 +8,7 @@ public interface FarmworldWorldOperations {
 
     WorldInspection inspect(FarmworldResetConfig resetConfig);
 
-    CompletableFuture<Boolean> evacuatePlayers(World resetWorld);
+    CompletableFuture<FarmworldEvacuationResult> evacuatePlayers(World resetWorld);
 
     boolean hasPlayers(World world);
 }

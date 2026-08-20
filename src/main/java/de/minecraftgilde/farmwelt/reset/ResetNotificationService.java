@@ -8,9 +8,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import org.bukkit.entity.Player;
 
 /** Wertet Notification-Snapshots aus und versendet Reset-Nachrichten best-effort. */
 public final class ResetNotificationService {
@@ -18,6 +20,7 @@ public final class ResetNotificationService {
     private final FarmworldResetService resetService;
     private final ResetWarningTracker warningTracker;
     private final ResetNotificationAudience audience;
+    private final ResetPlayerNotificationAudience playerAudience;
     private final ResetNotificationMessageFormatter messageFormatter;
     private final Logger logger;
 
@@ -25,12 +28,14 @@ public final class ResetNotificationService {
             FarmworldResetService resetService,
             ResetWarningTracker warningTracker,
             ResetNotificationAudience audience,
+            ResetPlayerNotificationAudience playerAudience,
             ZoneId zoneId,
             Logger logger
     ) {
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.warningTracker = Objects.requireNonNull(warningTracker, "warningTracker");
         this.audience = Objects.requireNonNull(audience, "audience");
+        this.playerAudience = Objects.requireNonNull(playerAudience, "playerAudience");
         this.messageFormatter = new ResetNotificationMessageFormatter(zoneId);
         this.logger = Objects.requireNonNull(logger, "logger");
     }
@@ -94,6 +99,41 @@ public final class ResetNotificationService {
                 configuration.notifications().resetFailure(),
                 "Reset-Fehlermeldung"
         );
+    }
+
+    public void sendEvacuationMessage(
+            FarmworldResetConfig configuration,
+            Player player
+    ) {
+        Objects.requireNonNull(configuration, "configuration");
+        Objects.requireNonNull(player, "player");
+        ResetNotificationMessageConfig messageConfig = configuration.notifications().evacuation();
+        if (!configuration.enabled()
+                || !configuration.notifications().enabled()
+                || !messageConfig.enabled()) {
+            return;
+        }
+
+        try {
+            Optional<Instant> nextReset = resetService.getState(configuration.farmworldKey())
+                    .map(FarmworldResetState::nextReset);
+            String message = messageFormatter.formatLifecycle(
+                    messageConfig.message(),
+                    configuration.displayName(),
+                    nextReset
+            );
+            CompletableFuture<Void> delivery = Objects.requireNonNull(
+                    playerAudience.send(player, message),
+                    "playerAudience.send(...)"
+            );
+            delivery.whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    logEvacuationFailure(configuration, unwrap(failure));
+                }
+            });
+        } catch (RuntimeException exception) {
+            logEvacuationFailure(configuration, exception);
+        }
     }
 
     /**
@@ -194,5 +234,28 @@ public final class ResetNotificationService {
         return configuration.enabled()
                 && configuration.notifications().enabled()
                 && !configuration.notifications().warnings().isEmpty();
+    }
+
+    private void logEvacuationFailure(
+            FarmworldResetConfig configuration,
+            Throwable failure
+    ) {
+        logger.log(
+                Level.SEVERE,
+                "Evakuierungsnachricht für Farmwelt '"
+                        + configuration.farmworldKey()
+                        + "' konnte nicht versendet werden.",
+                failure
+        );
+    }
+
+    private Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 }

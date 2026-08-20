@@ -44,7 +44,7 @@ Reset-Intervalle werden pro logischer Farmwelt unter `farmworlds.<id>.reset.inte
 
 Eine Änderung des Intervalls per `/farmwelt reload` verändert einen bereits persistent geplanten `nextReset` nicht. Das neue Intervall gilt erst nach dem nächsten erfolgreichen Reset. `reset-state.yml` wird vom Plugin verwaltet und sollte im normalen Produktivbetrieb nicht manuell verändert werden.
 
-### Countdown- und Lifecycle-Nachrichten (Phase 5.3)
+### Countdown-, Lifecycle- und Evakuierungsnachrichten (Phase 5.4)
 
 Jede Farmwelt kann unter `farmworlds.<id>.reset.notifications` eigene Countdown-Schwellen erhalten. `notifications.enabled` ist der Hauptschalter für alle zu dieser Farmwelt gehörenden Reset-Benachrichtigungen. Fehlt der gesamte Bereich, verwendet Farmwelt dieselben Werte wie in diesem Standardbeispiel:
 
@@ -92,7 +92,9 @@ Der Warning-Zustand ist bewusst flüchtig und wird weder in `reset-state.yml` no
 
 Lifecycle-Texte unterstützen `{world}` und `{next-reset}`. `{world}` ist immer der nutzerfreundliche `display-name`. Die Erfolgsmeldung sieht den neu gespeicherten Folgetermin; Start und Fehler verwenden den zu diesem Zeitpunkt weiterhin veröffentlichten State. Fehlt ein verwendbarer Termin, erscheint robust `unbekannt`. `{time}` ist weiterhin der Countdown-Warnung vorbehalten. `notifications.enabled` und die drei jeweiligen `enabled`-Schalter wirken unabhängig. Versandfehler werden nur geloggt und verändern weder Reset-Ablauf noch `ResetResult`.
 
-Die persönliche `evacuation`-Nachricht ist weiterhin nicht aktiv und wird insbesondere nicht global versendet. Ihre gezielte Zustellung an tatsächlich evakuierte Spieler folgt separat in Phase 5.4.
+`evacuation` ist eine persönliche Nachricht und wird niemals global ausgegeben. Sie geht pro Reset genau einmal an jeden Spieler, den dieser Reset tatsächlich erfolgreich aus der betroffenen Farmwelt teleportiert hat. Spieler in anderen Welten sowie Spieler, die die Farmwelt zwischen Erfassung und Evakuierungsoperation selbst verlassen, erhalten sie nicht. Der Versand beginnt erst nach dem bestätigten Teleporterfolg und noch vor der weiterhin maßgeblichen Leerstandsprüfung. Scheitert ein anderer Spieler, die spätere Regeneration oder nur die Nachrichtenzustellung, bleibt eine bereits erfolgte Evakuierung fachlich unverändert.
+
+Der Hauptschalter `notifications.enabled` und `evacuation.enabled` müssen beide aktiv sein. Das Abschalten eines Schalters unterdrückt ausschließlich die Nachricht; Evakuierung, Leerstandsprüfung und Reset laufen normal weiter. Der Text unterstützt `{world}` mit dem nutzerfreundlichen `display-name` und wie die zentrale Lifecycle-Formatierung optional `{next-reset}`. Die Zustellung wird über den Entity-Scheduler des jeweiligen Spielers geplant. Ein Disconnect darf die Nachricht entfallen lassen; Scheduler-, Formatter- und Versandfehler werden best-effort geloggt und beeinflussen weder Teleporterfolg noch Reset-Ergebnis. Automatische Resets, Startup-Catch-up und `/farmwelt reset force <welt> [--dragon]` verwenden dafür denselben Engine-Pfad.
 
 ## Manueller End-to-End-Reset auf Folia
 

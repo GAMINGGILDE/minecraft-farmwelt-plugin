@@ -353,6 +353,7 @@ class AutomaticResetSchedulerTest {
                 ignored -> {
                     throw new IllegalStateException("Broadcast-Testfehler");
                 },
+                ResetPlayerNotificationAudience.noop(),
                 ZoneOffset.UTC,
                 logger
         );
@@ -413,6 +414,7 @@ class AutomaticResetSchedulerTest {
                         resetService,
                         new ResetWarningTracker(),
                         ignored -> { },
+                        ResetPlayerNotificationAudience.noop(),
                         ZoneOffset.UTC,
                         logger
                 ),
