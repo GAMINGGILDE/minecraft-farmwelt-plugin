@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.World;
@@ -188,10 +189,17 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ResetOptions options
     ) {
         return mapOperationFailure(
-                scheduler.runGlobal(() -> worldOperations.inspect(resetConfig)),
+                () -> scheduler.runGlobal(() -> worldOperations.inspect(resetConfig)),
                 ResetStatus.INVALID_CONFIGURATION,
                 "Die konfigurierte Welt konnte nicht geprüft werden."
         ).thenCompose(inspection -> {
+            if (inspection == null) {
+                return failed(
+                        ResetStatus.INVALID_CONFIGURATION,
+                        "Die Prüfung der konfigurierten Welt hat kein Ergebnis geliefert.",
+                        null
+                );
+            }
             if (!inspection.loaded()) {
                 return failed(
                         ResetStatus.WORLD_NOT_LOADED,
@@ -237,13 +245,22 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<PipelineContext> evacuatePlayers(PipelineContext context) {
         CompletableFuture<FarmworldEvacuationResult> evacuation = mapOperationFailure(
-                scheduler.runGlobal(() -> worldOperations.evacuatePlayers(context.originalWorld()))
+                () -> scheduler.runGlobal(
+                                () -> worldOperations.evacuatePlayers(context.originalWorld())
+                        )
                         .thenCompose(Function.identity()),
                 ResetStatus.EVACUATION_FAILED,
                 "Mindestens ein Spieler konnte nicht sicher evakuiert werden."
         );
 
         return evacuation.thenCompose(result -> {
+            if (result == null) {
+                return failed(
+                        ResetStatus.EVACUATION_FAILED,
+                        "Die Spieler-Evakuierung hat kein Ergebnis geliefert.",
+                        null
+                );
+            }
             for (Player player : result.evacuatedPlayers()) {
                 notificationService.sendEvacuationMessage(context.resetConfig(), player);
             }
@@ -260,10 +277,19 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<PipelineContext> confirmWorldIsEmpty(PipelineContext context) {
         return mapOperationFailure(
-                scheduler.runGlobal(() -> worldOperations.hasPlayers(context.originalWorld())),
+                () -> scheduler.runGlobal(
+                        () -> worldOperations.hasPlayers(context.originalWorld())
+                ),
                 ResetStatus.EVACUATION_FAILED,
                 "Die Spielerfreiheit der Farmwelt konnte nicht bestätigt werden."
         ).thenCompose(hasPlayers -> {
+            if (hasPlayers == null) {
+                return failed(
+                        ResetStatus.EVACUATION_FAILED,
+                        "Die Spielerfreiheit der Farmwelt konnte nicht bestätigt werden.",
+                        null
+                );
+            }
             if (hasPlayers) {
                 return failed(
                         ResetStatus.EVACUATION_FAILED,
@@ -280,26 +306,15 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         logger.info("Regeneration von '" + context.resetConfig().worldName()
                 + "' über Worlds mit zufälligem Seed gestartet.");
 
-        final CompletableFuture<World> regeneration;
-        try {
-            // Worlds owns Folia/global scheduling for its complete lifecycle operation.
-            regeneration = lifecycleService.regenerate(
-                    context.originalWorld(),
-                    FarmworldRegenerationOptions.forReset(
-                            context.resetConfig(),
-                            context.options()
-                    )
-            );
-        } catch (RuntimeException exception) {
-            return failed(
-                    ResetStatus.REGENERATE_FAILED,
-                    "Worlds konnte die Farmwelt nicht regenerieren.",
-                    exception
-            );
-        }
-
         return mapOperationFailure(
-                regeneration,
+                // Worlds owns Folia/global scheduling for its complete lifecycle operation.
+                () -> lifecycleService.regenerate(
+                        context.originalWorld(),
+                        FarmworldRegenerationOptions.forReset(
+                                context.resetConfig(),
+                                context.options()
+                        )
+                ),
                 ResetStatus.REGENERATE_FAILED,
                 "Worlds konnte die Farmwelt nicht regenerieren."
         ).thenCompose(regeneratedWorld -> {
@@ -330,26 +345,12 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<RegeneratedContext> applyPostReset(RegeneratedContext context) {
-        final CompletableFuture<PostResetResult> initialization;
-        try {
-            initialization = Objects.requireNonNull(
-                    postResetInitializer.apply(
-                            context.resetConfig(),
-                            context.regeneratedWorld(),
-                            context.options()
-                    ),
-                    "postResetInitializer.apply(...)"
-            );
-        } catch (RuntimeException exception) {
-            return failed(
-                    ResetStatus.POST_RESET_FAILED,
-                    "Die Farmwelt wurde neu erstellt, konnte aber nicht vollst\u00e4ndig initialisiert werden.",
-                    exception
-            );
-        }
-
         return mapOperationFailure(
-                initialization,
+                () -> postResetInitializer.apply(
+                        context.resetConfig(),
+                        context.regeneratedWorld(),
+                        context.options()
+                ),
                 ResetStatus.POST_RESET_FAILED,
                 "Die Farmwelt wurde neu erstellt, konnte aber nicht vollst\u00e4ndig initialisiert werden."
         ).thenCompose(result -> {
@@ -375,13 +376,20 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             RegeneratedContext context
     ) {
         return mapOperationFailure(
-                scheduler.runGlobal(() -> new RegeneratedInspection(
+                () -> scheduler.runGlobal(() -> new RegeneratedInspection(
                         worldOperations.inspect(context.resetConfig()),
                         context.regeneratedWorld().getWorldFolder().getAbsolutePath()
                 )),
                 ResetStatus.REGENERATE_FAILED,
                 "Die von Worlds regenerierte Bukkit-Welt konnte nicht geprüft werden."
         ).thenCompose(regeneratedInspection -> {
+            if (regeneratedInspection == null || regeneratedInspection.inspection() == null) {
+                return failed(
+                        ResetStatus.REGENERATE_FAILED,
+                        "Die Prüfung der regenerierten Bukkit-Welt hat kein Ergebnis geliefert.",
+                        null
+                );
+            }
             WorldInspection inspection = regeneratedInspection.inspection();
             if (!inspection.loaded()) {
                 return failed(
@@ -435,17 +443,38 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<FarmworldResetState> persistState(RegeneratedContext context) {
         return mapOperationFailure(
-                scheduler.runAsync(() -> resetService.completeReset(context.resetConfig())),
+                () -> scheduler.runAsync(
+                        () -> resetService.completeReset(context.resetConfig())
+                ),
                 ResetStatus.STATE_SAVE_FAILED,
                 "Der Weltreset war erfolgreich, aber der Reset-State konnte nicht gespeichert werden."
-        );
+        ).thenCompose(state -> {
+            if (state == null) {
+                return failed(
+                        ResetStatus.STATE_SAVE_FAILED,
+                        "Der Weltreset war erfolgreich, aber der Reset-State lieferte kein Ergebnis.",
+                        null
+                );
+            }
+            return CompletableFuture.completedFuture(state);
+        });
     }
 
     private <T> CompletableFuture<T> mapOperationFailure(
-            CompletableFuture<T> operation,
+            Supplier<CompletableFuture<T>> operationSupplier,
             ResetStatus status,
             String message
     ) {
+        final CompletableFuture<T> operation;
+        try {
+            operation = Objects.requireNonNull(
+                    operationSupplier.get(),
+                    "Externe Operation hat kein Future geliefert."
+            );
+        } catch (RuntimeException exception) {
+            return failed(status, message, exception);
+        }
+
         return operation.handle((value, failure) -> {
             if (failure == null) {
                 return value;

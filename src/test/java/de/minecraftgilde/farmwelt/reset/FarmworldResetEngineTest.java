@@ -120,6 +120,34 @@ class FarmworldResetEngineTest {
     }
 
     @Test
+    void cleanupExceptionDoesNotChangeSuccessOrLeaveLockBehind() {
+        postResetInitializer.closeFailure = new IllegalStateException("cleanup failed");
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.SUCCESS, result.status());
+        assertTrue(postResetInitializer.resetScopeClosed);
+        assertFalse(engine.isResetRunning("overworld"));
+        assertEquals(NOW.plus(Duration.ofDays(30)),
+                resetService.getState("overworld").orElseThrow().nextReset());
+    }
+
+    @Test
+    void synchronousScopeSetupExceptionReleasesLockWithoutStartingPipeline() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        IllegalStateException failure = new IllegalStateException("scope failed");
+        postResetInitializer.beginFailure = failure;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.INTERNAL_ERROR, result.status());
+        assertSame(failure, result.cause());
+        assertEquals(List.of(), calls);
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
     void successfulResetUsesActualCompletionInstantForSchedule() {
         CompletableFuture<World> pendingRegeneration = new CompletableFuture<>();
         lifecycleService.result = pendingRegeneration;
@@ -190,6 +218,20 @@ class FarmworldResetEngineTest {
         assertFalse(calls.contains("state"));
         assertFalse(engine.isResetRunning("overworld"));
         assertEquals(List.of(), evacuationMessages);
+    }
+
+    @Test
+    void nullEvacuationFutureIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        worldOperations.evacuationResult = null;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.EVACUATION_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertEquals(0, lifecycleService.invocations);
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
     }
 
     @Test
@@ -392,6 +434,47 @@ class FarmworldResetEngineTest {
     }
 
     @Test
+    void synchronousWorldsExceptionIsMappedAndReleasesLock() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        IllegalStateException worldsFailure = new IllegalStateException("synchronous failure");
+        lifecycleService.synchronousFailure = worldsFailure;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
+        assertSame(worldsFailure, result.cause());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void nullWorldsFutureIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        lifecycleService.result = null;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void nullWorldsResultIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        lifecycleService.result = CompletableFuture.completedFuture(null);
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
     void regeneratedWorldWithWrongNameIsRejected() {
         World wrongWorld = world("wrong_name", World.Environment.NORMAL, "wrong-name");
         lifecycleService.result = CompletableFuture.completedFuture(wrongWorld);
@@ -419,6 +502,33 @@ class FarmworldResetEngineTest {
 
         assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
         assertFalse(calls.contains("state"));
+    }
+
+    @Test
+    void regeneratedWorldMustStillBeLoadedAndUnprotected() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        worldOperations.regeneratedInspection = WorldInspection.unloaded();
+
+        ResetResult unloadedResult = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, unloadedResult.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+
+        calls.clear();
+        worldOperations.inspectCount = 0;
+        worldOperations.regeneratedInspection = WorldInspection.loaded(
+                regeneratedWorld,
+                FarmworldType.OVERWORLD,
+                true
+        );
+
+        ResetResult protectedResult = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.REGENERATE_FAILED, protectedResult.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
     }
 
     @Test
@@ -462,6 +572,33 @@ class FarmworldResetEngineTest {
                 lifecycleMessages
         );
         assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void nullStatePersistenceResultIsNotReportedAsSuccess() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        FarmweltScheduler nullResultScheduler = new DirectScheduler() {
+            @Override
+            public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+        FarmworldResetEngine nullStateEngine = new FarmworldResetEngine(
+                resetService,
+                worldOperations,
+                lifecycleService,
+                postResetInitializer,
+                nullResultScheduler,
+                notificationService,
+                quietLogger()
+        );
+
+        ResetResult result = nullStateEngine.reset("overworld").join();
+
+        assertEquals(ResetStatus.STATE_SAVE_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(nullStateEngine.isResetRunning("overworld"));
     }
 
     @Test
@@ -584,6 +721,47 @@ class FarmworldResetEngineTest {
         assertEquals(previousState, resetService.getState("overworld").orElseThrow());
         assertFalse(engine.isResetRunning("overworld"));
         assertTrue(postResetInitializer.resetScopeClosed);
+    }
+
+    @Test
+    void nullPostResetFutureIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        postResetInitializer.result = null;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.POST_RESET_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void synchronousPostResetExceptionIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        IllegalStateException failure = new IllegalStateException("post reset failed");
+        postResetInitializer.applyFailure = failure;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.POST_RESET_FAILED, result.status());
+        assertSame(failure, result.cause());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
+    }
+
+    @Test
+    void nullPostResetResultIsMappedAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        postResetInitializer.result = CompletableFuture.completedFuture(null);
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.POST_RESET_FAILED, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
     }
 
     @Test
@@ -732,6 +910,20 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.WORLD_NOT_LOADED, result.status());
         assertEquals(List.of("inspect"), calls);
         assertEquals(0, lifecycleService.invocations);
+    }
+
+    @Test
+    void nullWorldInspectionIsRejectedBeforeEvacuationAndDoesNotPersistState() {
+        FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
+        worldOperations.initialInspection = null;
+
+        ResetResult result = engine.reset("overworld").join();
+
+        assertEquals(ResetStatus.INVALID_CONFIGURATION, result.status());
+        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
+        assertEquals(0, lifecycleService.invocations);
+        assertFalse(calls.contains("state"));
+        assertFalse(engine.isResetRunning("overworld"));
     }
 
     @Test
@@ -958,7 +1150,7 @@ class FarmworldResetEngineTest {
         return logger;
     }
 
-    private static final class DirectScheduler implements FarmweltScheduler {
+    private static class DirectScheduler implements FarmweltScheduler {
 
         @Override
         public <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation) {
@@ -1059,6 +1251,7 @@ class FarmworldResetEngineTest {
         private World receivedWorld;
         private FarmworldRegenerationOptions receivedOptions;
         private int invocations;
+        private RuntimeException synchronousFailure;
 
         private FakeLifecycleService(List<String> calls, CompletableFuture<World> result) {
             this.calls = calls;
@@ -1074,6 +1267,9 @@ class FarmworldResetEngineTest {
             receivedWorld = world;
             receivedOptions = options;
             invocations++;
+            if (synchronousFailure != null) {
+                throw synchronousFailure;
+            }
             return result;
         }
     }
@@ -1086,6 +1282,9 @@ class FarmworldResetEngineTest {
         private FarmworldResetConfig receivedConfig;
         private ResetOptions receivedOptions;
         private boolean resetScopeClosed;
+        private RuntimeException beginFailure;
+        private RuntimeException closeFailure;
+        private RuntimeException applyFailure;
 
         private FakePostResetInitializer(List<String> calls) {
             this.calls = calls;
@@ -1093,8 +1292,16 @@ class FarmworldResetEngineTest {
 
         @Override
         public ResetScope beginReset(FarmworldResetConfig config, ResetOptions options) {
+            if (beginFailure != null) {
+                throw beginFailure;
+            }
             resetScopeClosed = false;
-            return () -> resetScopeClosed = true;
+            return () -> {
+                resetScopeClosed = true;
+                if (closeFailure != null) {
+                    throw closeFailure;
+                }
+            };
         }
 
         @Override
@@ -1106,6 +1313,9 @@ class FarmworldResetEngineTest {
             calls.add("postReset");
             receivedConfig = config;
             receivedOptions = options;
+            if (applyFailure != null) {
+                throw applyFailure;
+            }
             return result;
         }
     }

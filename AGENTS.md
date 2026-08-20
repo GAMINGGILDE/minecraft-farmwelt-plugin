@@ -67,6 +67,7 @@ Zielplattform sind aktuell Minecraft/Folia 26.1.2 und Java 25. Die technische So
 - Post-Reset unterstützt ausschließlich konfigurierte, typisierte Bukkit-Gamerules, WorldBorder-Größe und End-Policy. Fehlende Unterbereiche verändern nichts; unbekannte oder ungültige Werte lassen die Initialisierung fehlschlagen.
 - `lastReset` und `nextReset` erst nach erfolgreicher Regeneration, Validierung und Post-Reset-Initialisierung schreiben. Scheitert nur das Speichern, ist die Welt bereits erneuert, der veröffentlichte In-Memory-State bleibt aber unverändert.
 - `reset-state.yml` ist die vom Reset-System geschriebene Laufzeitpersistenz: versioniertes YAML mit ISO-8601-Instants, temporärer Datei und möglichst atomarem Replace. Fehlende States werden für aktivierte Welten initialisiert; ein bestehendes `nextReset` überlebt Neustart, Reload und Intervalländerung. Das Intervall des beim Start erfassten Config-Snapshots bestimmt den Folgetermin eines laufenden Resets.
+- Beim Shutdown keine neuen automatischen Resets mehr anstoßen. Bereits an Worlds beziehungsweise die laufende Reset-Pipeline übergebene Lifecycle-Operationen nicht mit `Future.cancel(...)`, Thread-Interrupts oder ähnlichen künstlichen Abbrüchen unterbrechen; nur Startup-Delay und periodischen Scheduler gezielt stoppen.
 
 ## Folia-Regeln
 

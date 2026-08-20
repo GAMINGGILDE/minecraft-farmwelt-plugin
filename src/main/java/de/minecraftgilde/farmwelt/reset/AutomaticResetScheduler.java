@@ -28,6 +28,7 @@ public final class AutomaticResetScheduler {
     private final Logger logger;
 
     private ScheduledTask scheduledTask;
+    private long lifecycleGeneration;
 
     public AutomaticResetScheduler(
             Plugin plugin,
@@ -58,12 +59,21 @@ public final class AutomaticResetScheduler {
             return;
         }
 
-        scheduledTask = globalRegionScheduler.runAtFixedRate(
-                plugin,
-                ignored -> runScheduledCheck(),
-                CHECK_INTERVAL_TICKS,
-                CHECK_INTERVAL_TICKS
-        );
+        long generation = ++lifecycleGeneration;
+        try {
+            scheduledTask = Objects.requireNonNull(
+                    globalRegionScheduler.runAtFixedRate(
+                            plugin,
+                            ignored -> runScheduledCheck(generation),
+                            CHECK_INTERVAL_TICKS,
+                            CHECK_INTERVAL_TICKS
+                    ),
+                    "globalRegionScheduler.runAtFixedRate(...)"
+            );
+        } catch (RuntimeException exception) {
+            lifecycleGeneration++;
+            throw exception;
+        }
     }
 
     public synchronized void stop() {
@@ -71,8 +81,18 @@ public final class AutomaticResetScheduler {
             return;
         }
 
-        scheduledTask.cancel();
+        ScheduledTask task = scheduledTask;
         scheduledTask = null;
+        lifecycleGeneration++;
+        try {
+            task.cancel();
+        } catch (RuntimeException exception) {
+            logger.log(
+                    Level.SEVERE,
+                    "Periodischer Reset-Scheduler konnte nicht sauber gestoppt werden.",
+                    exception
+            );
+        }
     }
 
     Map<String, ResetDueState> evaluateDueStates(Instant now) {
@@ -101,8 +121,23 @@ public final class AutomaticResetScheduler {
         }
     }
 
-    private void runScheduledCheck() {
-        Instant now = clock.instant();
+    private void runScheduledCheck(long generation) {
+        if (!isCurrentLifecycle(generation)) {
+            return;
+        }
+
+        final Instant now;
+        try {
+            now = clock.instant();
+        } catch (RuntimeException exception) {
+            logger.log(
+                    Level.SEVERE,
+                    "Zeitpunkt für automatische Reset-Prüfung konnte nicht ermittelt werden.",
+                    exception
+            );
+            return;
+        }
+
         try {
             notificationService.broadcastDueWarnings(now);
         } catch (RuntimeException exception) {
@@ -113,8 +148,12 @@ public final class AutomaticResetScheduler {
             );
         }
 
+        if (!isCurrentLifecycle(generation)) {
+            return;
+        }
+
         try {
-            startDueResets(now);
+            startDueResets(now, generation);
         } catch (RuntimeException exception) {
             logger.log(
                     Level.SEVERE,
@@ -122,6 +161,25 @@ public final class AutomaticResetScheduler {
                     exception
             );
         }
+    }
+
+    private void startDueResets(Instant now, long generation) {
+        Map<String, ResetDueState> dueStates = evaluateDueStates(now);
+        for (Map.Entry<String, ResetDueState> entry : dueStates.entrySet()) {
+            if (entry.getValue() != ResetDueState.DUE) {
+                continue;
+            }
+            synchronized (this) {
+                if (!isCurrentLifecycle(generation)) {
+                    return;
+                }
+                startReset(entry.getKey());
+            }
+        }
+    }
+
+    private synchronized boolean isCurrentLifecycle(long generation) {
+        return scheduledTask != null && lifecycleGeneration == generation;
     }
 
     CompletableFuture<ResetResult> startReset(String farmworldKey) {

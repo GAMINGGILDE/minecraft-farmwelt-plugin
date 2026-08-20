@@ -53,10 +53,13 @@ public final class StartupResetCoordinator {
         started = true;
         long generation = ++lifecycleGeneration;
         try {
-            startupTask = globalRegionScheduler.runDelayed(
-                    plugin,
-                    task -> beginStartupCatchUp(generation, task),
-                    STARTUP_DELAY_TICKS
+            startupTask = Objects.requireNonNull(
+                    globalRegionScheduler.runDelayed(
+                            plugin,
+                            task -> beginStartupCatchUp(generation, task),
+                            STARTUP_DELAY_TICKS
+                    ),
+                    "globalRegionScheduler.runDelayed(...)"
             );
         } catch (RuntimeException exception) {
             started = false;
@@ -74,8 +77,17 @@ public final class StartupResetCoordinator {
         started = false;
         lifecycleGeneration++;
         if (startupTask != null) {
-            startupTask.cancel();
+            ScheduledTask task = startupTask;
             startupTask = null;
+            try {
+                task.cancel();
+            } catch (RuntimeException exception) {
+                logger.log(
+                        Level.SEVERE,
+                        "Verzögerter Startup-Reset-Task konnte nicht sauber gestoppt werden.",
+                        exception
+                );
+            }
         }
         automaticResetScheduler.stop();
     }

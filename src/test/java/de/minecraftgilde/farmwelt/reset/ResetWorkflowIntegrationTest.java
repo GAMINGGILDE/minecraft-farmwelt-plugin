@@ -92,6 +92,39 @@ class ResetWorkflowIntegrationTest {
     }
 
     @Test
+    void differentFarmworldsRunIndependentlyWhileDuplicateTicksStayLocked() {
+        TestResetStateRepository repository = new TestResetStateRepository(dueStates(
+                "overworld", "nether"
+        ));
+        WorkflowHarness harness = harness(
+                List.of(
+                        config("overworld", THIRTY_DAYS),
+                        config("nether", THIRTY_DAYS)
+                ),
+                repository
+        );
+        CompletableFuture<World> overworld = harness.runtime.defer("overworld");
+        CompletableFuture<World> nether = harness.runtime.defer("nether");
+
+        harness.automaticScheduler.start();
+        harness.globalScheduler.tick();
+        harness.globalScheduler.tick();
+
+        assertEquals(List.of("overworld", "nether"), harness.runtime.regenerationKeys);
+        assertTrue(harness.engine.isResetRunning("overworld"));
+        assertTrue(harness.engine.isResetRunning("nether"));
+        assertEquals(0, repository.saveCount);
+
+        harness.runtime.complete("overworld", overworld);
+        assertFalse(harness.engine.isResetRunning("overworld"));
+        assertTrue(harness.engine.isResetRunning("nether"));
+
+        harness.runtime.complete("nether", nether);
+        assertFalse(harness.engine.isResetRunning("nether"));
+        assertEquals(2, repository.saveCount);
+    }
+
+    @Test
     void automaticPathKeepsCountdownLifecycleAndPersonalEvacuationOrder() {
         Instant nextReset = NOW.plus(Duration.ofMinutes(5));
         TestResetStateRepository repository = new TestResetStateRepository(Map.of(

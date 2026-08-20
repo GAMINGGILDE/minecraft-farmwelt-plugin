@@ -301,6 +301,29 @@ class StartupResetCoordinatorTest {
     }
 
     @Test
+    void startupTaskCancellationExceptionStillPreventsCatchUpAndScheduler() {
+        RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
+        RecordingResetExecutor executor = new RecordingResetExecutor(this::successfulResult);
+        StartupResetCoordinator coordinator = coordinatorForStates(
+                globalScheduler,
+                List.of(config("overworld", true)),
+                dueStates("overworld"),
+                executor,
+                quietLogger()
+        );
+
+        coordinator.start();
+        globalScheduler.startupTask.failCancellation = true;
+        coordinator.stop();
+        coordinator.stop();
+        globalScheduler.runStartupTask();
+
+        assertEquals(1, globalScheduler.startupTask.cancelCalls);
+        assertEquals(List.of(), executor.calls);
+        assertEquals(0, globalScheduler.repeatingTasks);
+    }
+
+    @Test
     void stopDuringCatchUpPreventsNextFarmworldAndPeriodicScheduler() {
         CompletableFuture<ResetResult> overworldResult = new CompletableFuture<>();
         RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
@@ -617,6 +640,7 @@ class StartupResetCoordinatorTest {
         private final boolean repeating;
         private int cancelCalls;
         private boolean cancelled;
+        private boolean failCancellation;
 
         private RecordingScheduledTask(Plugin plugin, boolean repeating) {
             this.plugin = plugin;
@@ -636,6 +660,9 @@ class StartupResetCoordinatorTest {
         @Override
         public CancelledState cancel() {
             cancelCalls++;
+            if (failCancellation) {
+                throw new IllegalStateException("cancel failed");
+            }
             if (cancelled) {
                 return CancelledState.NEXT_RUNS_CANCELLED_ALREADY;
             }

@@ -12,6 +12,7 @@ import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,6 +65,51 @@ class AutomaticResetSchedulerTest {
 
         assertEquals(2, globalScheduler.scheduledTasks);
         assertFalse(globalScheduler.task.isCancelled());
+    }
+
+    @Test
+    void callbackDeliveredAfterStopDoesNotRunAnotherCheck() {
+        RecordingResetExecutor executor = new RecordingResetExecutor(this::successfulResult);
+        RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
+        AutomaticResetScheduler scheduler = scheduler(
+                globalScheduler,
+                resetService(
+                        List.of(config("overworld", true)),
+                        Map.of("overworld", state("overworld", NOW))
+                ),
+                executor,
+                quietLogger()
+        );
+
+        scheduler.start();
+        scheduler.stop();
+        globalScheduler.tick();
+
+        assertEquals(List.of(), executor.calls);
+    }
+
+    @Test
+    void cancellationExceptionDoesNotBreakIdempotentStopOrAllowStaleCheck() {
+        RecordingResetExecutor executor = new RecordingResetExecutor(this::successfulResult);
+        RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
+        AutomaticResetScheduler scheduler = scheduler(
+                globalScheduler,
+                resetService(
+                        List.of(config("overworld", true)),
+                        Map.of("overworld", state("overworld", NOW))
+                ),
+                executor,
+                quietLogger()
+        );
+
+        scheduler.start();
+        globalScheduler.task.failCancellation = true;
+        scheduler.stop();
+        scheduler.stop();
+        globalScheduler.tick();
+
+        assertEquals(1, globalScheduler.task.cancelCalls);
+        assertEquals(List.of(), executor.calls);
     }
 
     @Test
@@ -374,6 +420,29 @@ class AutomaticResetSchedulerTest {
         assertTrue(logHandler.contains("Farmwelt 'nether' erfolgreich abgeschlossen"));
     }
 
+    @Test
+    void clockFailureDoesNotDestroyPeriodicScheduler() {
+        RecordingResetExecutor executor = new RecordingResetExecutor(this::successfulResult);
+        RecordingGlobalRegionScheduler globalScheduler = new RecordingGlobalRegionScheduler();
+        AutomaticResetScheduler scheduler = scheduler(
+                globalScheduler,
+                resetService(
+                        List.of(config("overworld", true)),
+                        Map.of("overworld", state("overworld", NOW))
+                ),
+                executor,
+                quietLogger(),
+                new ThrowOnceClock(NOW)
+        );
+
+        scheduler.start();
+        globalScheduler.tick();
+        globalScheduler.tick();
+
+        assertEquals(List.of("overworld"), executor.calls);
+        assertEquals(ScheduledTask.ExecutionState.IDLE, globalScheduler.task.getExecutionState());
+    }
+
     private AutomaticResetScheduler createScheduler(
             RecordingGlobalRegionScheduler globalScheduler
     ) {
@@ -405,6 +474,22 @@ class AutomaticResetSchedulerTest {
             FarmworldResetExecutor resetExecutor,
             Logger logger
     ) {
+        return scheduler(
+                globalScheduler,
+                resetService,
+                resetExecutor,
+                logger,
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+    }
+
+    private AutomaticResetScheduler scheduler(
+            RecordingGlobalRegionScheduler globalScheduler,
+            FarmworldResetService resetService,
+            FarmworldResetExecutor resetExecutor,
+            Logger logger,
+            Clock clock
+    ) {
         return new AutomaticResetScheduler(
                 plugin(logger),
                 globalScheduler,
@@ -418,7 +503,7 @@ class AutomaticResetSchedulerTest {
                         ZoneOffset.UTC,
                         logger
                 ),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                clock
         );
     }
 
@@ -663,6 +748,7 @@ class AutomaticResetSchedulerTest {
         private final Plugin plugin;
         private int cancelCalls;
         private boolean cancelled;
+        private boolean failCancellation;
 
         private RecordingScheduledTask(Plugin plugin) {
             this.plugin = plugin;
@@ -681,6 +767,9 @@ class AutomaticResetSchedulerTest {
         @Override
         public CancelledState cancel() {
             cancelCalls++;
+            if (failCancellation) {
+                throw new IllegalStateException("cancel failed");
+            }
             if (cancelled) {
                 return CancelledState.NEXT_RUNS_CANCELLED_ALREADY;
             }
@@ -691,6 +780,35 @@ class AutomaticResetSchedulerTest {
         @Override
         public ExecutionState getExecutionState() {
             return cancelled ? ExecutionState.CANCELLED : ExecutionState.IDLE;
+        }
+    }
+
+    private static final class ThrowOnceClock extends Clock {
+
+        private final Instant instant;
+        private boolean failed;
+
+        private ThrowOnceClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            if (!failed) {
+                failed = true;
+                throw new IllegalStateException("clock failed");
+            }
+            return instant;
         }
     }
 }
