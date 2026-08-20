@@ -242,7 +242,7 @@ download_verified() {
   fi
 }
 
-for command in curl find grep java jar readlink sed sha256sum sha512sum tail tee "$PYTHON_BIN"; do
+for command in awk curl find grep java jar readlink sed sha256sum sha512sum tail tee "$PYTHON_BIN"; do
   require_command "$command"
 done
 

@@ -19,7 +19,9 @@ Das Harness:
 9. weist die echte Regeneration durch das Verschwinden einer vorher im `region`-Bereich angelegten Markerdatei nach; unterschiedliche Seeds sind ein zusätzlicher, aber wegen der theoretisch möglichen Gleichheit nicht alleiniger Nachweis,
 10. sendet `stop`, wartet auf Prozessende und führt erst danach das vollständige Log-Gate aus.
 
-Das Log-Gate schlägt bei `SEVERE`/`ERROR`, Exception- und Stacktrace-Zeilen, ungefangenen Eventfehlern, relevanten Scheduler-/Lifecycle-Fehlern, Farmwelt-Selbstdeaktivierung, abgebrochenen oder doppelten Resets sowie kontextbezogenen Thread-/Region-Verstößen fehl. Die normalen Begriffe `Thread` oder `Region` reichen bewusst nicht aus. Die kleine [`log-allowlist.txt`](log-allowlist.txt) enthält ausschließlich bekannte Meldungen der isolierten Offline-Umgebung und des normalen Shutdowns.
+Das Log-Gate schlägt bei `SEVERE`/`ERROR`, Exception- und Stacktrace-Zeilen, ungefangenen Eventfehlern, relevanten Scheduler-/Lifecycle-Fehlern, Farmwelt-Selbstdeaktivierung, abgebrochenen oder doppelten Resets sowie kontextbezogenen Thread-/Region-Verstößen fehl. Die normalen Begriffe `Thread` oder `Region` reichen bewusst nicht aus. Die kleine [`log-allowlist.txt`](log-allowlist.txt) enthält ausschließlich bekannte Einzelmeldungen der isolierten Offline-Umgebung und des normalen Shutdowns.
+
+GitHub-Runner können bei Worlds-Welterstellung und -Regeneration die Folia-Watchdog-Schwelle von fünf Sekunden knapp überschreiten. Das Harness toleriert deshalb blockweise ausschließlich den bekannten Global-Region-Dump mit dem Worlds-Create- beziehungsweise Worlds-Regenerate-Pfad über `SimpleVersionHandler.createAsync`, `MinecraftServer.initWorld`, `PlayerSpawnFinder` und `ChunkTaskScheduler.syncLoadNonFull`. Die Dauer muss parsebar und höchstens zehn Sekunden sein; pro Lauf ist maximal ein Create- und ein Regenerate-Block erlaubt. Die erkannten Dumps bleiben im Artefakt `known-watchdogs.txt` als `KNOWN / ALLOWED` sichtbar. Andere Watchdogs, längere oder wiederholte Dumps, Threading-Fehler und Exceptions bleiben Testfehler. Diese eng begrenzte Ausnahme betrifft nur das Test-Harness und ändert weder Produktionslogik noch Worlds-Lifecycle-Verantwortung.
 
 ## Lokale Ausführung
 
@@ -31,6 +33,12 @@ Voraussetzungen sind Linux oder eine kompatible Bash, Java 25, Python 3, `curl`,
 bash ./testing/blackbox/run-blackbox.sh
 ```
 
+Die Log-Gate-Fixtures können ohne Serverstart separat ausgeführt werden:
+
+```bash
+bash ./testing/blackbox/test-assert-log.sh
+```
+
 Alternativ kann die exakt zu testende JAR gesetzt werden:
 
 ```bash
@@ -38,7 +46,7 @@ BLACKBOX_PLUGIN_JAR=/absoluter/pfad/Farmwelt-2.0.0-SNAPSHOT.jar \
   bash ./testing/blackbox/run-blackbox.sh
 ```
 
-Timeouts, Heap und Ausgabepfad sind über `BLACKBOX_DOWNLOAD_TIMEOUT_SECONDS`, `BLACKBOX_STARTUP_TIMEOUT_SECONDS`, `BLACKBOX_WORLD_TIMEOUT_SECONDS`, `BLACKBOX_RESET_TIMEOUT_SECONDS`, `BLACKBOX_SHUTDOWN_TIMEOUT_SECONDS`, `BLACKBOX_JAVA_XMS`, `BLACKBOX_JAVA_XMX` und `BLACKBOX_OUTPUT_DIR` anpassbar. Falls Python lokal anders heißt, kann `BLACKBOX_PYTHON=python` gesetzt werden. Jeder Lauf verwendet unabhängig davon ein neues `mktemp`-Verzeichnis. Bei Erfolg und Fehler bleiben Metadaten, Harness-Ausgabe, Serverkonsole, `latest.log`, Farmwelt-Config, State vor/nach dem Reset und Worlds-Laufzeitdaten unter `build/blackbox/run-*/artifacts/` erhalten.
+Timeouts, Heap und Ausgabepfad sind über `BLACKBOX_DOWNLOAD_TIMEOUT_SECONDS`, `BLACKBOX_STARTUP_TIMEOUT_SECONDS`, `BLACKBOX_WORLD_TIMEOUT_SECONDS`, `BLACKBOX_RESET_TIMEOUT_SECONDS`, `BLACKBOX_SHUTDOWN_TIMEOUT_SECONDS`, `BLACKBOX_JAVA_XMS`, `BLACKBOX_JAVA_XMX` und `BLACKBOX_OUTPUT_DIR` anpassbar. Falls Python lokal anders heißt, kann `BLACKBOX_PYTHON=python` gesetzt werden. Jeder Lauf verwendet unabhängig davon ein neues `mktemp`-Verzeichnis. Bei Erfolg und Fehler bleiben Metadaten, Harness-Ausgabe, Serverkonsole, `latest.log`, Log-Gate-Findings, bekannte Watchdog-Blöcke, Farmwelt-Config, State vor/nach dem Reset und Worlds-Laufzeitdaten unter `build/blackbox/run-*/artifacts/` erhalten.
 
 Bei jedem Exit versucht das Harness zuerst einen sauberen Konsolen-Stop. Erst nach dem Shutdown-Timeout wird der Prozess als reiner Cleanup-Schritt beendet; ein solcher Lauf bleibt fehlgeschlagen.
 

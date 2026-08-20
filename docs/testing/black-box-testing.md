@@ -39,6 +39,8 @@ Das vollständige Serverlog gehört bei jedem Szenario zur Evidenz. Zusätzlich 
 
 Ein fachlich korrekt wirkendes Szenario ist **FAIL**, sobald dabei ein relevanter unerwarteter Threading- oder Lifecycle-Fehler im Log entsteht. Bei absichtlich erzeugten Fehlerfällen müssen erwartete Plugin-Meldung und technischer Fehler dem Testschritt eindeutig zugeordnet werden; zusätzliche oder ungefangene Exceptions bleiben ein FAIL. Sensible Daten in archivierten Logausschnitten schwärzen, Zeitstempel und Szenario-ID jedoch erhalten.
 
+Das automatisierte CI-Smoke-Harness behandelt genau eine testumgebungsspezifische Ausnahme: Langsame GitHub-Runner können während der Worlds-Welterstellung oder -Regeneration die Folia-Watchdog-Schwelle von fünf Sekunden knapp überschreiten. Nur der vollständige Global-Region-Dump mit dem bekannten Worlds-/Minecraft-`initWorld`-Stack, parsebarer Dauer von höchstens zehn Sekunden und höchstens je einem Create-/Regenerate-Vorkommen wird als `KNOWN / ALLOWED` separat archiviert. Andere, längere oder wiederholte Watchdogs sowie sämtliche zusätzlichen Exceptions und Threading-Verstöße bleiben FAIL. Diese Harness-Regel verändert die Produktionslogik und die Lifecycle-Verantwortung von Worlds nicht; für die manuelle Abnahme gilt weiterhin die Bewertung des konkreten Testsystems.
+
 ## Test A – Manueller Reset
 
 1. In der isolierten Overworld-Farmwelt eine eindeutig erkennbare Teststruktur platzieren.

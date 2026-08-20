@@ -46,7 +46,11 @@ jobs:
         run: |
           bash -n ./testing/blackbox/run-blackbox.sh
           bash -n ./testing/blackbox/assert-log.sh
+          bash -n ./testing/blackbox/test-assert-log.sh
           python3 -m py_compile ./testing/blackbox/assert-state.py
+
+      - name: Test log gate fixtures
+        run: ./testing/blackbox/test-assert-log.sh
 
       - name: Run real Folia/Worlds smoke test
         run: ./testing/blackbox/run-blackbox.sh

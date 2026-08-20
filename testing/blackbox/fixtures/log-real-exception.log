@@ -1,0 +1,12 @@
+[12:00:00] [Server thread/INFO]: [Farmwelt] Worlds 4.4.0 erkannt.
+[12:00:00] [Server thread/INFO]: [Farmwelt] Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt.
+[12:00:00] [Server thread/INFO]: [Farmwelt] Farmwelt wurde gestartet.
+[12:00:01] [Server thread/INFO]: Done (6.000s)! For help, type "help"
+[12:00:02] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] CONSOLE hat einen manuellen Reset für Farmwelt 'overworld' angefordert.
+[12:00:02] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Geladene Bukkit-Welt 'worlds_test_farmwelt' gefunden.
+[12:00:02] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Regeneration von 'worlds_test_farmwelt' über Worlds mit zufälligem Seed gestartet.
+[12:00:03] [Global Region Tick Thread/ERROR]: java.lang.IllegalStateException: wrong lifecycle state
+[12:00:03] [Global Region Tick Thread/ERROR]: 	at com.example.lifecycle.ResetOperation.run(ResetOperation.java:15)
+[12:00:04] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Worlds hat Farmwelt 'worlds_test_farmwelt' erfolgreich regeneriert.
+[12:00:04] [Folia Async Scheduler Thread #0/INFO]: [Farmwelt] Reset für Farmwelt 'overworld' erfolgreich abgeschlossen. Nächster Reset: 2026-09-19T10:00:04Z
+[12:00:05] [Region shutdown thread/INFO]: [Farmwelt] Farmwelt wurde gestoppt.
