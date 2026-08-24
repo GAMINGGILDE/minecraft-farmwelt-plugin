@@ -5,7 +5,7 @@ plugins {
 group = "de.minecraftgilde"
 
 val releaseVersion = providers.gradleProperty("releaseVersion")
-    .orElse("1.0.3-SNAPSHOT")
+    .orElse("2.0.0-SNAPSHOT")
 
 version = releaseVersion.get()
 
@@ -17,10 +17,21 @@ repositories {
         name = "papermc"
         url = uri("https://repo.papermc.io/repository/maven-public/")
     }
+    maven {
+        name = "thenextlvl"
+        url = uri("https://repo.thenextlvl.net/releases")
+    }
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    compileOnly("net.thenextlvl:worlds:4.4.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
+    testImplementation("net.thenextlvl:worlds:4.4.0")
+    testCompileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.2")
+    testRuntimeOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
 }
 
 java {
@@ -37,6 +48,10 @@ tasks.processResources {
     filesMatching("paper-plugin.yml") {
         expand("version" to pluginVersion)
     }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.jar {

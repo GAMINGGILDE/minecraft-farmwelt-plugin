@@ -1,0 +1,32 @@
+farmworlds:
+  overworld:
+    enabled: true
+    display-name: "Black-Box-Farmwelt"
+    icon: GRASS_BLOCK
+    slot: 11
+    lore:
+      - "Isolierte CI-Testwelt"
+    reset:
+      enabled: true
+      # Worlds bildet den Key worlds:test_farmwelt auf diesen Bukkit-Namen ab.
+      world: "worlds_test_farmwelt"
+      interval: "30d"
+      notifications:
+        enabled: false
+      post-reset:
+        gamerules:
+          show_advancement_messages: false
+        world-border:
+          size: 512
+    teleport:
+      type: command
+      sender: console
+      command: "world teleport {player} worlds:test_farmwelt"
+
+resource-monitor:
+  enabled: false
+  mode: audit
+  monitored-worlds: []
+  ignored-worlds:
+    - worlds_test_farmwelt
+  world-rules: {}

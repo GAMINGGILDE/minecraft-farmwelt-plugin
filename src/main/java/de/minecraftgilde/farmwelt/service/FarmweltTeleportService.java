@@ -2,25 +2,38 @@ package de.minecraftgilde.farmwelt.service;
 
 import de.minecraftgilde.farmwelt.gui.FarmweltMenuItem;
 import de.minecraftgilde.farmwelt.gui.TeleportAction;
+import de.minecraftgilde.farmwelt.reset.FarmworldAvailabilityService;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.logging.Level;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.Plugin;
 
 public final class FarmweltTeleportService {
 
     private static final String TYPE_COMMAND = "command";
     private static final String SENDER_PLAYER = "player";
     private static final String SENDER_CONSOLE = "console";
+    private static final String RESET_BLOCK_MESSAGE = "Diese Farmwelt wird derzeit zurückgesetzt.";
 
-    private final JavaPlugin plugin;
+    private final Plugin plugin;
+    private final FarmworldAvailabilityService availabilityService;
 
-    public FarmweltTeleportService(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public FarmweltTeleportService(
+            Plugin plugin,
+            FarmworldAvailabilityService availabilityService
+    ) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.availabilityService = Objects.requireNonNull(availabilityService, "availabilityService");
     }
 
     public void teleport(Player player, FarmweltMenuItem menuItem) {
+        if (!availabilityService.isFarmworldAvailable(menuItem.id())) {
+            player.sendMessage(RESET_BLOCK_MESSAGE);
+            return;
+        }
+
         TeleportAction teleportAction = menuItem.teleportAction();
         if (!TYPE_COMMAND.equalsIgnoreCase(teleportAction.type())) {
             plugin.getLogger().warning("Farmwelt-Eintrag '" + menuItem.id()
@@ -38,6 +51,12 @@ public final class FarmweltTeleportService {
     private void executeCommand(Player player, FarmweltMenuItem menuItem) {
         player.closeInventory();
 
+        // Die zweite Prüfung schließt das Zeitfenster zwischen GUI-Klick und Spieler-Kontext.
+        if (!availabilityService.isFarmworldAvailable(menuItem.id())) {
+            player.sendMessage(RESET_BLOCK_MESSAGE);
+            return;
+        }
+
         TeleportAction teleportAction = menuItem.teleportAction();
         String command = normalizeCommand(replacePlaceholders(teleportAction.command(), player, menuItem));
         if (command.isBlank()) {
@@ -49,10 +68,14 @@ public final class FarmweltTeleportService {
         player.sendMessage("Du wirst in die Farmwelt geschickt...");
 
         String sender = teleportAction.sender().toLowerCase(Locale.ROOT);
+        if (SENDER_CONSOLE.equals(sender)) {
+            scheduleConsoleCommand(player, menuItem, command);
+            return;
+        }
+
         try {
             boolean executed = switch (sender) {
                 case SENDER_PLAYER -> player.performCommand(command);
-                case SENDER_CONSOLE -> dispatchConsoleCommand(command);
                 default -> {
                     plugin.getLogger().warning("Farmwelt-Eintrag '" + menuItem.id()
                             + "' nutzt einen nicht unterstützten Teleport-Absender: " + teleportAction.sender());
@@ -72,9 +95,76 @@ public final class FarmweltTeleportService {
         }
     }
 
-    private boolean dispatchConsoleCommand(String command) {
-        Server server = plugin.getServer();
-        return server.dispatchCommand(server.getConsoleSender(), command);
+    private void scheduleConsoleCommand(
+            Player player,
+            FarmweltMenuItem menuItem,
+            String command
+    ) {
+        try {
+            plugin.getServer().getGlobalRegionScheduler().execute(
+                    plugin,
+                    () -> dispatchConsoleCommand(player, menuItem, command)
+            );
+        } catch (RuntimeException exception) {
+            player.sendMessage("Der Teleport-Befehl ist fehlgeschlagen. Bitte melde dich beim Team.");
+            plugin.getLogger().log(
+                    Level.WARNING,
+                    "Konsolen-Teleportbefehl für Farmwelt-Eintrag '"
+                            + menuItem.id() + "' konnte nicht global geplant werden.",
+                    exception
+            );
+        }
+    }
+
+    private void dispatchConsoleCommand(
+            Player player,
+            FarmweltMenuItem menuItem,
+            String command
+    ) {
+        try {
+            Server server = plugin.getServer();
+            if (!server.dispatchCommand(server.getConsoleSender(), command)) {
+                plugin.getLogger().warning("Teleport-Befehl für Farmwelt-Eintrag '"
+                        + menuItem.id() + "' konnte nicht ausgeführt werden: " + command);
+                sendPlayerMessage(
+                        player,
+                        "Der Teleport-Befehl konnte nicht ausgeführt werden. Bitte melde dich beim Team."
+                );
+            }
+        } catch (RuntimeException exception) {
+            plugin.getLogger().log(
+                    Level.WARNING,
+                    "Fehler beim Ausführen des Teleport-Befehls für Farmwelt-Eintrag '"
+                            + menuItem.id() + "'.",
+                    exception
+            );
+            sendPlayerMessage(
+                    player,
+                    "Der Teleport-Befehl ist fehlgeschlagen. Bitte melde dich beim Team."
+            );
+        }
+    }
+
+    private void sendPlayerMessage(Player player, String message) {
+        try {
+            boolean scheduled = player.getScheduler().execute(
+                    plugin,
+                    () -> player.sendMessage(message),
+                    () -> { },
+                    1L
+            );
+            if (!scheduled) {
+                plugin.getLogger().warning(
+                        "Teleport-Fehlermeldung konnte nicht im Spieler-Kontext geplant werden."
+                );
+            }
+        } catch (RuntimeException exception) {
+            plugin.getLogger().log(
+                    Level.WARNING,
+                    "Teleport-Fehlermeldung konnte nicht im Spieler-Kontext geplant werden.",
+                    exception
+            );
+        }
     }
 
     private String replacePlaceholders(String command, Player player, FarmweltMenuItem menuItem) {

@@ -1,0 +1,76 @@
+name: Folia Worlds Black-Box Smoke Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blackbox-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  blackbox:
+    name: Folia/Worlds reset smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          validate-wrappers: true
+
+      - name: Make scripts executable
+        run: chmod +x ./gradlew ./testing/blackbox/*.sh ./testing/blackbox/*.py
+
+      - name: Run clean tests
+        run: ./gradlew clean test --no-daemon
+
+      - name: Build current commit
+        run: ./gradlew build --no-daemon
+
+      - name: Validate harness syntax
+        run: |
+          bash -n ./testing/blackbox/run-blackbox.sh
+          bash -n ./testing/blackbox/assert-log.sh
+          bash -n ./testing/blackbox/test-assert-log.sh
+          python3 -m py_compile ./testing/blackbox/assert-state.py
+
+      - name: Test log gate fixtures
+        run: ./testing/blackbox/test-assert-log.sh
+
+      - name: Run real Folia/Worlds smoke test
+        run: ./testing/blackbox/run-blackbox.sh
+
+      - name: Prepare artifact name
+        if: ${{ always() }}
+        id: artifact
+        env:
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          REF_SLUG="$(printf '%s' "$REF_NAME" | tr -cs '[:alnum:]_.-' '-')"
+          echo "name=blackbox-${REF_SLUG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload diagnostics and test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            build/blackbox/run-*/artifacts/
+            build/reports/tests/
+            build/test-results/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,17 @@
+package de.minecraftgilde.farmwelt.reset;
+
+public enum ResetStatus {
+    SUCCESS,
+    NOT_CONFIGURED,
+    DISABLED,
+    ALREADY_RUNNING,
+    INVALID_CONFIGURATION,
+    WORLD_NOT_FOUND,
+    WORLD_NOT_LOADED,
+    PROTECTED_WORLD,
+    EVACUATION_FAILED,
+    REGENERATE_FAILED,
+    POST_RESET_FAILED,
+    STATE_SAVE_FAILED,
+    INTERNAL_ERROR
+}

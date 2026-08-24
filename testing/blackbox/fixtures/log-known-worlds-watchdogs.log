@@ -1,0 +1,38 @@
+[12:00:00] [Server thread/INFO]: [Farmwelt] Worlds 4.4.0 erkannt.
+[12:00:00] [Server thread/INFO]: [Farmwelt] Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt.
+[12:00:00] [Server thread/INFO]: [Farmwelt] Farmwelt wurde gestartet.
+[12:00:01] [Server thread/INFO]: Done (6.000s)! For help, type "help"
+[12:00:07] [Folia Watchdog Thread/ERROR]: Global region has not responded in 5.31s:
+[12:00:07] [Folia Watchdog Thread/ERROR]: ------------------------------
+[12:00:07] [Folia Watchdog Thread/ERROR]: Current Thread: Global Region Tick Thread
+[12:00:07] [Folia Watchdog Thread/ERROR]: 	PID: 42 | Suspended: false | Native: false | State: RUNNABLE
+[12:00:07] [Folia Watchdog Thread/ERROR]: 	Stack:
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.syncLoadNonFull(ChunkTaskScheduler.java:100)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.level.PlayerSpawnFinder.findSpawn(PlayerSpawnFinder.java:50)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.MinecraftServer.setInitialSpawn(MinecraftServer.java:700)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.MinecraftServer.initWorld(MinecraftServer.java:650)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.versions.v26_1_2.SimpleVersionHandler.createAsync(SimpleVersionHandler.java:120)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.WorldsPlugin.create(WorldsPlugin.java:210)
+[12:00:07] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.commands.WorldCreateCommand.execute(WorldCreateCommand.java:80)
+[12:00:08] [Folia Region Scheduler Thread #0/INFO]: Worlds » Successfully created the world worlds:test_farmwelt
+[12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] CONSOLE hat einen manuellen Reset für Farmwelt 'overworld' angefordert.
+[12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Geladene Bukkit-Welt 'worlds_test_farmwelt' gefunden.
+[12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Regeneration von 'worlds_test_farmwelt' über Worlds mit zufälligem Seed gestartet.
+[12:00:15] [Folia Watchdog Thread/ERROR]: [io.papermc.paper.threadedregions.FoliaWatchdogThread] Global region has not responded in 5.09s:
+[12:00:15] [Folia Watchdog Thread/ERROR]: ------------------------------
+[12:00:15] [Folia Watchdog Thread/ERROR]: Current Thread: Folia Region Scheduler Thread #0
+[12:00:15] [Folia Watchdog Thread/ERROR]: 	PID: 42 | Suspended: false | Native: false | State: RUNNABLE
+[12:00:15] [Folia Watchdog Thread/ERROR]: 	Stack:
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		java.base@25.0.4/jdk.internal.misc.Unsafe.park(Native Method)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.syncLoadNonFull(ChunkTaskScheduler.java:100)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.level.PlayerSpawnFinder.findSpawn(PlayerSpawnFinder.java:50)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.MinecraftServer.setInitialSpawn(MinecraftServer.java:700)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.MinecraftServer.initWorld(MinecraftServer.java:650)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.versions.v26_1_2.SimpleVersionHandler.createAsync(SimpleVersionHandler.java:120)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.WorldsPlugin.create(WorldsPlugin.java:210)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.WorldsPlugin.regenerateNow(WorldsPlugin.java:260)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		net.thenextlvl.worlds.WorldsPlugin.regenerate(WorldsPlugin.java:250)
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		de.gaminggilde.farmwelt.reset.WorldsFarmworldLifecycleService.regenerate(WorldsFarmworldLifecycleService.java:70)
+[12:00:16] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Worlds hat Farmwelt 'worlds_test_farmwelt' erfolgreich regeneriert.
+[12:00:16] [Folia Async Scheduler Thread #0/INFO]: [Farmwelt] Reset für Farmwelt 'overworld' erfolgreich abgeschlossen. Nächster Reset: 2026-09-19T10:00:16Z
+[12:00:17] [Region shutdown thread/INFO]: [Farmwelt] Farmwelt wurde gestoppt.

@@ -1,3 +1,4 @@
+# reset-state.yml wird vom Plugin verwaltet und sollte im Produktivbetrieb nicht manuell geändert werden.
 farmworlds:
   overworld:
     enabled: true
@@ -7,6 +8,54 @@ farmworlds:
     lore:
       - "Normale Farmwelt"
       - "Für Holz, Sand, Erde und weitere Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # Der Zeitplan ist nur aktiv, wenn auch farmworlds.overworld.enabled auf true steht.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "overworld" verwechseln.
+      world: "farmwelt"
+      # Abstand zwischen zwei erfolgreichen Resets: positive Ganzzahl; m = Minuten, h = Stunden, d = Tage.
+      # Fehlende oder ungültige Werte deaktivieren diesen Reset-Zeitplan sicher.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "30d"
+      # Countdown-Warnungen gelten nur für automatische Resets. Die Lifecycle-Nachrichten
+      # reset-start, reset-success und optional reset-failure gelten zusätzlich für Force-Resets.
+      # Pro nextReset-Termin wird jede Schwelle höchstens einmal verwendet. Nach einem Neustart
+      # wird höchstens die zeitlich nächste bereits erreichte Schwelle nachgeholt.
+      notifications:
+        enabled: true
+        # Positive Ganzzahlen mit m, h oder d. Ungültige Werte werden einzeln ignoriert.
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        # Countdown-Platzhalter: {world}, {time}, {next-reset}
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        # Lifecycle-Platzhalter: {world}, {next-reset}
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          # Standardmäßig aus, damit technische Fehler nicht global angekündigt werden.
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
+      # Wird erst nach erfolgreicher Regeneration und Validierung angewendet.
+      post-reset:
+        gamerules:
+          players_sleeping_percentage: 50
+          show_advancement_messages: false
+        world-border:
+          size: 20000
     teleport:
       type: command
       sender: player
@@ -19,6 +68,43 @@ farmworlds:
     slot: 13
     lore:
       - "Farmwelt für Nether-Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "nether" verwechseln.
+      world: "netherfarm"
+      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "30d"
+      notifications:
+        enabled: true
+        # Countdown nur automatisch; Lifecycle-Nachrichten auch bei Force-Resets.
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
+      post-reset:
+        gamerules:
+          show_advancement_messages: false
+        world-border:
+          size: 20000
     teleport:
       type: command
       sender: player
@@ -31,6 +117,46 @@ farmworlds:
     slot: 15
     lore:
       - "Farmwelt für End-Ressourcen"
+    reset:
+      # Aktiviert den Reset-Zeitplan für diese Farmwelt.
+      # Der Scheduler prüft den Reset-Zeitplan regelmäßig und startet fällige Resets automatisch.
+      enabled: true
+      # Tatsächlicher Bukkit-Weltname. Nicht mit der logischen ID "end" verwechseln.
+      world: "endfarm"
+      # Abstand zwischen zwei erfolgreichen Resets: m = Minuten, h = Stunden, d = Tage.
+      # Ein bereits gespeicherter nächster Termin wird bei Intervalländerungen nicht verschoben.
+      interval: "60d"
+      notifications:
+        enabled: true
+        # Countdown nur automatisch; Lifecycle-Nachrichten auch bei Force-Resets.
+        warnings:
+          - 1h
+          - 30m
+          - 10m
+          - 5m
+          - 1m
+        warning-message: "&eDie &6{world}&e wird in &6{time}&e zurückgesetzt."
+        reset-start:
+          enabled: true
+          message: "&eDie &6{world}&e wird jetzt zurückgesetzt."
+        reset-success:
+          enabled: true
+          message: "&aDie &6{world}&a wurde erfolgreich zurückgesetzt."
+        reset-failure:
+          enabled: false
+          message: "&cDer Reset der &6{world}&c konnte nicht abgeschlossen werden."
+        # Persönlich und erst nach einem erfolgreichen Reset-Teleport; kein Broadcast.
+        evacuation:
+          enabled: true
+          message: "&eDu wurdest aus der &6{world}&e teleportiert, da sie gerade zurückgesetzt wird."
+      post-reset:
+        gamerules:
+          show_advancement_messages: false
+        world-border:
+          size: 20000
+        end:
+          # false unterdrückt Drachen; --dragon startet einmalig einen frischen Erstkampf.
+          dragon: false
     teleport:
       type: command
       sender: player

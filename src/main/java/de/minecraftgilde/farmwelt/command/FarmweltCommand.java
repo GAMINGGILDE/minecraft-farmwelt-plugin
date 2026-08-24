@@ -44,6 +44,7 @@ public final class FarmweltCommand implements BasicCommand, Listener {
     private final ResourceDetectionService resourceDetectionService;
     private final ViolationService violationService;
     private final ConfigManager configManager;
+    private final FarmweltAdminCommandHandler adminCommandHandler;
     private final Set<UUID> monitorDebugPlayers = ConcurrentHashMap.newKeySet();
 
     public FarmweltCommand(
@@ -52,7 +53,8 @@ public final class FarmweltCommand implements BasicCommand, Listener {
             ClaimProtectionService claimProtectionService,
             ResourceDetectionService resourceDetectionService,
             ViolationService violationService,
-            ConfigManager configManager
+            ConfigManager configManager,
+            FarmweltAdminCommandHandler adminCommandHandler
     ) {
         this.plugin = plugin;
         this.farmweltMenu = farmweltMenu;
@@ -60,6 +62,7 @@ public final class FarmweltCommand implements BasicCommand, Listener {
         this.resourceDetectionService = resourceDetectionService;
         this.violationService = violationService;
         this.configManager = configManager;
+        this.adminCommandHandler = adminCommandHandler;
     }
 
     @Override
@@ -91,16 +94,23 @@ public final class FarmweltCommand implements BasicCommand, Listener {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         CommandSender sender = source.getSender();
+        BukkitCommandAudience audience = new BukkitCommandAudience(plugin, sender);
         if (args.length == 1) {
-            if (!canUseAdminCommand(sender)) {
-                return List.of();
+            List<String> suggestions = new ArrayList<>(adminCommandHandler.suggest(audience, args));
+            if (canUseAdminCommand(sender) && "info".startsWith(args[0].toLowerCase(java.util.Locale.ROOT))) {
+                suggestions.add("info");
             }
-
-            List<String> suggestions = new ArrayList<>(List.of("reload", "info"));
-            if (sender instanceof Player) {
+            if (canUseAdminCommand(sender)
+                    && sender instanceof Player
+                    && "debug".startsWith(args[0].toLowerCase(java.util.Locale.ROOT))) {
                 suggestions.add("debug");
             }
             return suggestions;
+        }
+
+        Collection<String> adminSuggestions = adminCommandHandler.suggest(audience, args);
+        if (!adminSuggestions.isEmpty()) {
+            return adminSuggestions;
         }
 
         if (args.length == 2
@@ -122,8 +132,7 @@ public final class FarmweltCommand implements BasicCommand, Listener {
     }
 
     private void handleSubCommand(CommandSender sender, String[] args) {
-        if (args.length == 1 && "reload".equalsIgnoreCase(args[0])) {
-            handleReload(sender);
+        if (adminCommandHandler.handle(new BukkitCommandAudience(plugin, sender), args)) {
             return;
         }
 
@@ -155,16 +164,6 @@ public final class FarmweltCommand implements BasicCommand, Listener {
         }
 
         sender.sendMessage("Unbekannter Farmwelt-Befehl.");
-    }
-
-    private void handleReload(CommandSender sender) {
-        if (!canUseAdminCommand(sender)) {
-            sender.sendMessage("Dafür hast du keine Berechtigung.");
-            return;
-        }
-
-        plugin.reloadFarmweltConfiguration();
-        sender.sendMessage("Farmwelt-Konfiguration wurde neu geladen.");
     }
 
     private void handleInfo(CommandSender sender) {

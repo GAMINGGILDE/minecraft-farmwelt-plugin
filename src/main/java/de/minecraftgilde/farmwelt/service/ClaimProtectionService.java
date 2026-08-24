@@ -14,12 +14,7 @@ public final class ClaimProtectionService {
     private static final String FAIL_MODE_DISABLE_MONITOR = "disable-monitor";
 
     private final JavaPlugin plugin;
-    private boolean enabled;
-    private boolean skipInsideClaims;
-    private String configuredProviderName;
-    private String failMode;
-    private ClaimProtectionProvider provider;
-    private boolean resourceMonitorWouldBeDisabled;
+    private volatile ClaimProtectionState state;
 
     public ClaimProtectionService(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -28,31 +23,49 @@ public final class ClaimProtectionService {
 
     public void reload() {
         ConfigurationSection section = plugin.getConfig().getConfigurationSection("resource-monitor.claim-protection");
-        enabled = section != null && section.getBoolean("enabled", false);
-        skipInsideClaims = section == null || section.getBoolean("skip-inside-claims", true);
-        configuredProviderName = section == null ? PROVIDER_GRIEF_PREVENTION : section.getString("provider", PROVIDER_GRIEF_PREVENTION);
-        failMode = section == null ? FAIL_MODE_DISABLE_MONITOR : section.getString("fail-mode", FAIL_MODE_DISABLE_MONITOR);
+        boolean enabled = section != null && section.getBoolean("enabled", false);
+        boolean skipInsideClaims = section == null
+                || section.getBoolean("skip-inside-claims", true);
+        String configuredProviderName = section == null
+                ? PROVIDER_GRIEF_PREVENTION
+                : section.getString("provider", PROVIDER_GRIEF_PREVENTION);
+        String failMode = section == null
+                ? FAIL_MODE_DISABLE_MONITOR
+                : section.getString("fail-mode", FAIL_MODE_DISABLE_MONITOR);
         boolean ignoreHeight = section == null || section.getBoolean("ignore-height", true);
 
-        provider = createProvider(ignoreHeight);
-        resourceMonitorWouldBeDisabled = enabled
+        ClaimProtectionProvider provider = createProvider(
+                enabled,
+                configuredProviderName,
+                ignoreHeight
+        );
+        boolean resourceMonitorWouldBeDisabled = enabled
                 && !provider.isAvailable()
                 && FAIL_MODE_DISABLE_MONITOR.equalsIgnoreCase(failMode);
-
-        logStartupState();
+        ClaimProtectionState loadedState = new ClaimProtectionState(
+                enabled,
+                skipInsideClaims,
+                configuredProviderName,
+                provider,
+                resourceMonitorWouldBeDisabled
+        );
+        state = loadedState;
+        logStartupState(loadedState);
     }
 
     public boolean isAvailable() {
-        return enabled && provider.isAvailable();
+        ClaimProtectionState snapshot = state;
+        return snapshot.enabled() && snapshot.provider().isAvailable();
     }
 
     public boolean isInsideClaim(Location location) {
-        if (!isAvailable() || location == null) {
+        ClaimProtectionState snapshot = state;
+        if (!snapshot.enabled() || !snapshot.provider().isAvailable() || location == null) {
             return false;
         }
 
         try {
-            return provider.isInsideClaim(location);
+            return snapshot.provider().isInsideClaim(location);
         } catch (RuntimeException exception) {
             plugin.getLogger().log(Level.WARNING, "Fehler bei der Claim-Prüfung.", exception);
             return false;
@@ -60,18 +73,23 @@ public final class ClaimProtectionService {
     }
 
     public boolean shouldSkipInsideClaims() {
-        return enabled && skipInsideClaims;
+        ClaimProtectionState snapshot = state;
+        return snapshot.enabled() && snapshot.skipInsideClaims();
     }
 
     public String getProviderName() {
-        return provider.getName();
+        return state.provider().getName();
     }
 
     public boolean wouldDisableResourceMonitor() {
-        return resourceMonitorWouldBeDisabled;
+        return state.resourceMonitorWouldBeDisabled();
     }
 
-    private ClaimProtectionProvider createProvider(boolean ignoreHeight) {
+    private ClaimProtectionProvider createProvider(
+            boolean enabled,
+            String configuredProviderName,
+            boolean ignoreHeight
+    ) {
         if (!enabled) {
             return new NoopClaimProtectionProvider();
         }
@@ -91,20 +109,32 @@ public final class ClaimProtectionService {
         return griefPreventionProvider;
     }
 
-    private void logStartupState() {
+    private void logStartupState(ClaimProtectionState snapshot) {
         boolean griefPreventionFound = plugin.getServer().getPluginManager().getPlugin(PROVIDER_GRIEF_PREVENTION) != null;
-        plugin.getLogger().info("Claim-Schutz aktiviert: " + yesNo(enabled));
-        plugin.getLogger().info("Konfigurierter Claim-Provider: " + configuredProviderName);
+        plugin.getLogger().info("Claim-Schutz aktiviert: " + yesNo(snapshot.enabled()));
+        plugin.getLogger().info("Konfigurierter Claim-Provider: "
+                + snapshot.configuredProviderName());
         plugin.getLogger().info("GriefPrevention gefunden: " + yesNo(griefPreventionFound));
-        plugin.getLogger().info("Claim-Hook aktiv: " + yesNo(isAvailable()));
-        plugin.getLogger().info("Claims werden vom Ressourcenmonitor übersprungen: " + yesNo(enabled && skipInsideClaims));
+        plugin.getLogger().info("Claim-Hook aktiv: "
+                + yesNo(snapshot.enabled() && snapshot.provider().isAvailable()));
+        plugin.getLogger().info("Claims werden vom Ressourcenmonitor übersprungen: "
+                + yesNo(snapshot.enabled() && snapshot.skipInsideClaims()));
 
-        if (resourceMonitorWouldBeDisabled) {
+        if (snapshot.resourceMonitorWouldBeDisabled()) {
             plugin.getLogger().warning("Der Ressourcenmonitor wird wegen fehlendem Claim-Provider deaktiviert.");
         }
     }
 
     private String yesNo(boolean value) {
         return value ? "ja" : "nein";
+    }
+
+    private record ClaimProtectionState(
+            boolean enabled,
+            boolean skipInsideClaims,
+            String configuredProviderName,
+            ClaimProtectionProvider provider,
+            boolean resourceMonitorWouldBeDisabled
+    ) {
     }
 }

@@ -3,22 +3,25 @@ package de.minecraftgilde.farmwelt.service;
 import de.minecraftgilde.farmwelt.config.ConfigManager;
 import de.minecraftgilde.farmwelt.model.ResourceMatch;
 import de.minecraftgilde.farmwelt.model.ViolationSnapshot;
+import java.util.List;
+import java.util.Objects;
+import java.util.logging.Level;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.bukkit.Server;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.Plugin;
 
 public final class MessageService {
 
     private static final LegacyComponentSerializer LEGACY_AMPERSAND = LegacyComponentSerializer.legacyAmpersand();
 
-    private final JavaPlugin plugin;
+    private final Plugin plugin;
     private final ConfigManager configManager;
 
-    public MessageService(JavaPlugin plugin, ConfigManager configManager) {
-        this.plugin = plugin;
-        this.configManager = configManager;
+    public MessageService(Plugin plugin, ConfigManager configManager) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.configManager = Objects.requireNonNull(configManager, "configManager");
     }
 
     public void sendResourceAudit(Player player, Block block, ResourceMatch match) {
@@ -30,14 +33,13 @@ public final class MessageService {
             return;
         }
 
-        Server server = plugin.getServer();
         String notifyPermission = configManager.getNotifyPermission();
         String message = replaceAuditPlaceholders(configManager.getStaffMessage(), player, block, match);
-        for (Player onlinePlayer : server.getOnlinePlayers()) {
-            if (notifyPermission.isBlank() || onlinePlayer.hasPermission(notifyPermission)) {
-                onlinePlayer.sendMessage(LEGACY_AMPERSAND.deserialize(message));
-            }
-        }
+        scheduleStaffNotification(
+                plugin,
+                notifyPermission,
+                LEGACY_AMPERSAND.deserialize(message)
+        );
     }
 
     public void logResourceAudit(Player player, Block block, ResourceMatch match) {
@@ -59,14 +61,13 @@ public final class MessageService {
             return;
         }
 
-        Server server = plugin.getServer();
         String notifyPermission = configManager.getNotifyPermission();
         String formattedMessage = replaceViolationPlaceholders(message, player, snapshot, windowSeconds);
-        for (Player onlinePlayer : server.getOnlinePlayers()) {
-            if (notifyPermission.isBlank() || onlinePlayer.hasPermission(notifyPermission)) {
-                onlinePlayer.sendMessage(LEGACY_AMPERSAND.deserialize(formattedMessage));
-            }
-        }
+        scheduleStaffNotification(
+                plugin,
+                notifyPermission,
+                LEGACY_AMPERSAND.deserialize(formattedMessage)
+        );
     }
 
     public void sendJailStaffNotification(Player player, ViolationSnapshot snapshot, String message, int windowSeconds) {
@@ -133,5 +134,42 @@ public final class MessageService {
                 .replace("{count}", Integer.toString(snapshot.currentCount()))
                 .replace("{blocked-count}", Integer.toString(snapshot.blockedCount()))
                 .replace("{window-seconds}", Integer.toString(windowSeconds));
+    }
+
+    static void scheduleStaffNotification(
+            Plugin plugin,
+            String notifyPermission,
+            Component message
+    ) {
+        Objects.requireNonNull(plugin, "plugin");
+        Objects.requireNonNull(notifyPermission, "notifyPermission");
+        Objects.requireNonNull(message, "message");
+        for (Player onlinePlayer : List.copyOf(plugin.getServer().getOnlinePlayers())) {
+            try {
+                boolean scheduled = onlinePlayer.getScheduler().execute(
+                        plugin,
+                        () -> {
+                            if (notifyPermission.isBlank()
+                                    || onlinePlayer.hasPermission(notifyPermission)) {
+                                onlinePlayer.sendMessage(message);
+                            }
+                        },
+                        () -> { },
+                        1L
+                );
+                if (!scheduled) {
+                    plugin.getLogger().warning(
+                            "Staff-Nachricht konnte nicht im Entity-Kontext geplant werden."
+                    );
+                }
+            } catch (RuntimeException exception) {
+                // Ein einzelner ungültiger Entity-Scheduler darf andere Empfänger nicht auslassen.
+                plugin.getLogger().log(
+                        Level.WARNING,
+                        "Staff-Nachricht konnte nicht im Entity-Kontext geplant werden.",
+                        exception
+                );
+            }
+        }
     }
 }
