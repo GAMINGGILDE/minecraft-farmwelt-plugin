@@ -20,7 +20,7 @@
 [12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Regeneration von 'worlds_test_farmwelt' über Worlds mit zufälligem Seed gestartet.
 [12:00:15] [Folia Watchdog Thread/ERROR]: Global region has not responded in 5.09s:
 [12:00:15] [Folia Watchdog Thread/ERROR]: ------------------------------
-[12:00:15] [Folia Watchdog Thread/ERROR]: Current Thread: Global Region Tick Thread
+[12:00:15] [Folia Watchdog Thread/ERROR]: Current Thread: Folia Region Scheduler Thread #0
 [12:00:15] [Folia Watchdog Thread/ERROR]: 	PID: 42 | Suspended: false | Native: false | State: RUNNABLE
 [12:00:15] [Folia Watchdog Thread/ERROR]: 	Stack:
 [12:00:15] [Folia Watchdog Thread/ERROR]: 		ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.syncLoadNonFull(ChunkTaskScheduler.java:100)

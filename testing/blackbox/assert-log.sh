@@ -14,6 +14,7 @@ WATCHDOG_MAX_BLOCKS=2
 WATCHDOG_MAX_BLOCK_LINES=200
 WATCHDOG_HEADER_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: Global region has not responded in ([0-9]+([.][0-9]+)?)s:$'
 WATCHDOG_LINE_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: '
+WATCHDOG_CURRENT_THREAD_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: Current Thread: (Global Region Tick Thread|Folia Region Scheduler Thread #[0-9]+)$'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -113,7 +114,7 @@ classify_watchdog_block() {
 
   [[ "$block_text" == *"Global region has not responded in ${watchdog_duration}s:"* ]] || return 1
   [[ "$block_text" == *"------------------------------"* ]] || return 1
-  [[ "$block_text" == *"Current Thread: Global Region Tick Thread"* ]] || return 1
+  grep -Eq -- "$WATCHDOG_CURRENT_THREAD_REGEX" <<< "$block_text" || return 1
   [[ "$block_text" == *"PID:"* ]] || return 1
   [[ "$block_text" == *"Stack:"* ]] || return 1
   [[ "$block_text" == *"net.thenextlvl.worlds"* ]] || return 1

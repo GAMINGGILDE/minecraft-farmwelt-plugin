@@ -22,6 +22,10 @@ assert_pass_fixture() {
   [[ ! -s "$findings" ]] || fail "$fixture produced unexpected findings"
   [[ "$(grep -c '^KNOWN / ALLOWED:' "$known" || true)" == "2" ]] \
     || fail "$fixture should preserve exactly two known watchdog blocks"
+  grep -Fq 'Current Thread: Global Region Tick Thread' "$known" \
+    || fail "$fixture did not preserve the known global-region thread variant"
+  grep -Fq 'Current Thread: Folia Region Scheduler Thread #0' "$known" \
+    || fail "$fixture did not preserve the known Folia region-scheduler thread variant"
   grep -Fq 'KNOWN: Worlds create watchdog, 5.31s' "$output" \
     || fail "$fixture did not report the known create watchdog"
   grep -Fq 'KNOWN: Worlds regenerate watchdog, 5.09s' "$output" \
@@ -47,6 +51,7 @@ assert_fail_fixture() {
 
 assert_pass_fixture "log-known-worlds-watchdogs.log"
 assert_fail_fixture "log-foreign-watchdog.log" "ForeignPlugin.blockGlobalRegion"
+assert_fail_fixture "log-foreign-watchdog-thread.log" "Current Thread: Async Command Executor"
 assert_fail_fixture "log-real-exception.log" "IllegalStateException"
 assert_fail_fixture "log-too-many-known-watchdogs.log" "Global region has not responded in 5.30s"
 assert_fail_fixture "log-too-long-worlds-watchdog.log" "Global region has not responded in 10.01s"
