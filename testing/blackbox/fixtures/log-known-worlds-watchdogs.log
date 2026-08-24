@@ -18,11 +18,12 @@
 [12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] CONSOLE hat einen manuellen Reset für Farmwelt 'overworld' angefordert.
 [12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Geladene Bukkit-Welt 'worlds_test_farmwelt' gefunden.
 [12:00:09] [Folia Region Scheduler Thread #0/INFO]: [Farmwelt] Regeneration von 'worlds_test_farmwelt' über Worlds mit zufälligem Seed gestartet.
-[12:00:15] [Folia Watchdog Thread/ERROR]: Global region has not responded in 5.09s:
+[12:00:15] [Folia Watchdog Thread/ERROR]: [io.papermc.paper.threadedregions.FoliaWatchdogThread] Global region has not responded in 5.09s:
 [12:00:15] [Folia Watchdog Thread/ERROR]: ------------------------------
 [12:00:15] [Folia Watchdog Thread/ERROR]: Current Thread: Folia Region Scheduler Thread #0
 [12:00:15] [Folia Watchdog Thread/ERROR]: 	PID: 42 | Suspended: false | Native: false | State: RUNNABLE
 [12:00:15] [Folia Watchdog Thread/ERROR]: 	Stack:
+[12:00:15] [Folia Watchdog Thread/ERROR]: 		java.base@25.0.4/jdk.internal.misc.Unsafe.park(Native Method)
 [12:00:15] [Folia Watchdog Thread/ERROR]: 		ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.syncLoadNonFull(ChunkTaskScheduler.java:100)
 [12:00:15] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.level.PlayerSpawnFinder.findSpawn(PlayerSpawnFinder.java:50)
 [12:00:15] [Folia Watchdog Thread/ERROR]: 		net.minecraft.server.MinecraftServer.setInitialSpawn(MinecraftServer.java:700)

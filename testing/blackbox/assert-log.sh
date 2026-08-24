@@ -12,7 +12,7 @@ KNOWN_WATCHDOGS_FILE="${3:-$(dirname -- "$FINDINGS_FILE")/known-watchdogs.txt}"
 WATCHDOG_MAX_SECONDS=10
 WATCHDOG_MAX_BLOCKS=2
 WATCHDOG_MAX_BLOCK_LINES=200
-WATCHDOG_HEADER_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: Global region has not responded in ([0-9]+([.][0-9]+)?)s:$'
+WATCHDOG_HEADER_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: (\[io[.]papermc[.]paper[.]threadedregions[.]FoliaWatchdogThread\] )?Global region has not responded in ([0-9]+([.][0-9]+)?)s:$'
 WATCHDOG_LINE_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: '
 WATCHDOG_CURRENT_THREAD_REGEX='^\[[^]]+\] \[Folia Watchdog Thread/ERROR\]: Current Thread: (Global Region Tick Thread|Folia Region Scheduler Thread #[0-9]+)$'
 
@@ -93,7 +93,7 @@ watchdog_block=()
 is_watchdog_header() {
   local line="$1"
   if [[ "$line" =~ $WATCHDOG_HEADER_REGEX ]]; then
-    detected_watchdog_duration="${BASH_REMATCH[1]}"
+    detected_watchdog_duration="${BASH_REMATCH[2]}"
     return 0
   fi
   return 1
@@ -105,6 +105,7 @@ is_watchdog_error_line() {
 }
 
 classify_watchdog_block() {
+  local block_content
   local block_text="$1"
   watchdog_phase=""
 
@@ -123,8 +124,10 @@ classify_watchdog_block() {
   [[ "$block_text" == *"PlayerSpawnFinder"* ]] || return 1
   [[ "$block_text" == *"ChunkTaskScheduler.syncLoadNonFull"* ]] || return 1
 
+  # Der Logpräfix enthält selbst "Thread" und darf zusammen mit Unsafe.park keinen Fehlalarm auslösen.
+  block_content="$(sed -E 's/^\[[^]]+\] \[Folia Watchdog Thread\/ERROR\]: //' <<< "$block_text")"
   if grep -Eiq -- 'IllegalStateException|CompletionException|NullPointerException|Caused by:|Suppressed:|uncaught exception|Unhandled exception|Could not pass event|scheduler.*(failed|exception|rejected)|(Thread|Region).*(violation|unsafe|wrong|not owned|not on|access error)' \
-      <<< "$block_text"; then
+      <<< "$block_content"; then
     return 1
   fi
 
