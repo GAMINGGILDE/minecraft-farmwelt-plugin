@@ -87,14 +87,14 @@ farmworlds:
       command: "betterrtp:rtp world farmwelt"
 ```
 
-Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle V2-Bereiche und konservative Defaults. Eine kommentierte Schlüsselreferenz, Notifications, `reset-state.yml`, Scheduler, Reload, Ressourcenmonitor und Endfarm-Betrieb sind im [Admin Guide](docs/ADMIN_GUIDE.md) dokumentiert.
+Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle verfügbaren Konfigurationsbereiche und konservative Defaults. Eine kommentierte Schlüsselreferenz, Notifications, `reset-state.yml`, Scheduler, Reload, Ressourcenmonitor und Endfarm-Betrieb sind im [Admin Guide](docs/ADMIN_GUIDE.md) dokumentiert.
 
 ## Dokumentation
 
 - [Admin Guide](docs/ADMIN_GUIDE.md) – Installation, vollständige Config- und Betriebsreferenz, Commands, Permissions und Wartung.
 - [Architektur](docs/ARCHITECTURE.md) – Lifecycle-, Worlds-, State-, Locking-, Notification- und Folia-Verträge.
 - [Manuelle Black-Box-Abnahme](docs/testing/black-box-testing.md) – vollständige reale V2-Teststrategie.
-- [V2-Abnahmematrix](docs/testing/v2-acceptance-checklist.md) – BB-01 bis BB-26 und Evidenzvorlage.
+- [V2-Abnahmevorlage](docs/testing/v2-acceptance-template.md) – wiederverwendbare Matrix für BB-01 bis BB-26 und die zugehörige Evidenz.
 - [Automatisierter Smoke-Test](testing/blackbox/README.md) – Folia-/Worlds-Harness und CI-spezifisches Log-Gate.
 - [Release-Prozess](docs/RELEASE.md) – Build-, Versions-, Tag- und GitHub-Release-Ablauf.
 

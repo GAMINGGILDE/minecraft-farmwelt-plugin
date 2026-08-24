@@ -386,4 +386,4 @@ Typische Ursachen:
 
 ## Tests und Freigabe
 
-Vor produktiver Aktivierung mindestens Gradle-Tests und Build ausführen. Der echte automatisierte Folia-/Worlds-Smoke-Test ist unter [`testing/blackbox/`](../testing/blackbox/README.md) dokumentiert und läuft in einem eigenen GitHub-Actions-Workflow. Er prüft eine reale Worlds-Regeneration, ersetzt aber nicht die vollständige manuelle [V2-Abnahme](testing/black-box-testing.md) mit der [BB-01-bis-BB-26-Matrix](testing/v2-acceptance-checklist.md).
+Vor produktiver Aktivierung mindestens Gradle-Tests und Build ausführen. Der echte automatisierte Folia-/Worlds-Smoke-Test ist unter [`testing/blackbox/`](../testing/blackbox/README.md) dokumentiert und läuft in einem eigenen GitHub-Actions-Workflow. Er prüft eine reale Worlds-Regeneration, ersetzt aber nicht die vollständige manuelle [V2-Abnahme](testing/black-box-testing.md) mit der [BB-01-bis-BB-26-Abnahmevorlage](testing/v2-acceptance-template.md).

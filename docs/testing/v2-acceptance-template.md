@@ -1,6 +1,8 @@
-# V2-Abnahmematrix
+# V2-Abnahmevorlage
 
-Diese Matrix protokolliert die vollständige manuelle V2-Integration von Farmwelt, Folia, Minecraft und Worlds. Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Der separate [automatisierte Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md) deckt einen echten Overworld-Reset ab, setzt die manuellen BB-01-bis-BB-26-Statuswerte aber nicht automatisch auf `PASS`. Vor einem Testlauf diese Datei oder zumindest die Matrix und die Protokollvorlage kopieren; die Vorlage im Repository bleibt im Ausgangszustand `NOT RUN`.
+Diese Datei ist die wiederverwendbare Vorlage für das Abnahmeprotokoll eines konkreten manuellen Release-Candidate-Testlaufs der vollständigen V2-Integration von Farmwelt, Folia, Minecraft und Worlds. Die Repository-Version bleibt absichtlich im Ausgangszustand `NOT RUN` und wird nicht als Testergebnis gepflegt. Für einen realen Testlauf ist eine Kopie beziehungsweise ein separates Abnahmeprotokoll anzulegen und auszufüllen. `NOT RUN` in dieser Template-Datei bedeutet nicht, dass das Repository oder die Implementierung unfertig ist.
+
+Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Der separate [automatisierte Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md) deckt einen echten Overworld-Reset ab, setzt die manuellen BB-01-bis-BB-26-Statuswerte aber nicht automatisch auf `PASS`.
 
 Die Statuswerte bedeuten:
 
@@ -80,4 +82,4 @@ Für jeden realen Lauf eine eigene Kopie ausfüllen. Dateipfade oder Artefakt-Li
 
 Evidenz soll die Szenario-ID und Run-ID im Namen tragen, beispielsweise `V2-2026-08-20-BB-08-server.log`. Mindestens zu sichern sind der relevante Logzeitraum, Chat- oder Konsolenausgaben, Config- und State-Ausschnitte vor und nach dem Test sowie bei visuellen End-/GUI-Prüfungen ein Screenshot oder Video. Keine produktiven Welten, Zugangsdaten oder vollständigen produktiven Konfigurationen als Testartefakte verwenden.
 
-Nach Abschluss dürfen keine `NOT RUN`-Einträge verbleiben. `BLOCKED` ist kein bestandenes Szenario; Grund, fehlende Voraussetzung und geplanter Nachtest müssen dokumentiert sein. Die V2-Gesamtabnahme ist nur bei `PASS` für alle BB-01 bis BB-26 erteilt.
+In der ausgefüllten Laufkopie dürfen nach Abschluss keine `NOT RUN`-Einträge verbleiben. `BLOCKED` ist kein bestandenes Szenario; Grund, fehlende Voraussetzung und geplanter Nachtest müssen dokumentiert sein. Die V2-Gesamtabnahme ist nur bei `PASS` für alle BB-01 bis BB-26 erteilt.

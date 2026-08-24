@@ -1,8 +1,8 @@
 # Black-Box-Abnahme
 
-Die ausfüllbare V2-Abnahmematrix mit den Testfällen BB-01 bis BB-26 befindet sich in
-[`v2-acceptance-checklist.md`](v2-acceptance-checklist.md). Diese Anleitung beschreibt die Durchführung und die
-fachlichen PASS-Kriterien; die Matrix dokumentiert das Ergebnis des konkreten Testlaufs.
+Die wiederverwendbare V2-Abnahmevorlage mit den Testfällen BB-01 bis BB-26 befindet sich in
+[`v2-acceptance-template.md`](v2-acceptance-template.md). Diese Anleitung beschreibt die Durchführung und die
+fachlichen PASS-Kriterien; eine separate Laufkopie der Vorlage dokumentiert das Ergebnis des konkreten Testlaufs.
 
 ## Zweck und Testumgebung
 
@@ -220,7 +220,7 @@ Für jeden Lauf festhalten:
 - relevante, zeitlich zuordenbare Serverlog-Ausschnitte einschließlich Log-Gate-Prüfung,
 - Status `PASS`, `FAIL` oder `BLOCKED` und eine kurze Notiz bei Abweichungen.
 
-Bei Fehlern Server- und Pluginlogs sowie die verwendeten Config- und State-Dateien sichern. Die Vorlage in [`v2-acceptance-checklist.md`](v2-acceptance-checklist.md) ist pro Testlauf zu kopieren und auszufüllen.
+Bei Fehlern Server- und Pluginlogs sowie die verwendeten Config- und State-Dateien sichern. Die [`V2-Abnahmevorlage`](v2-acceptance-template.md) ist pro Testlauf zu kopieren und auszufüllen.
 
 ## Automatisierter Smoke-Test
 

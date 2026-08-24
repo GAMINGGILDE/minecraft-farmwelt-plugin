@@ -110,7 +110,7 @@ Die internen NBT-/CraftBukkit-Zugriffe sind explizit auf unterstützte Minecraft
 - Bestehende Config-Schlüssel, Defaults, Commands, Permissions, Platzhalter und Integrationsgrenzen als öffentliche Betriebsverträge behandeln.
 - Bestehende Tests als Vertrag behandeln und Bugfixes mit Regressionstests absichern. Neue Listener-/Service-Funktionalität ebenfalls gezielt testen.
 - Öffentliche APIs bevorzugen, vorhandene bewusst versionsgebundene interne Lösungen aber nicht ohne Not ersetzen.
-- Keine spätere Produktphase oder weitere Features ohne ausdrücklichen Auftrag vorwegnehmen.
+- Keine zukünftigen Features oder größeren Scope-Erweiterungen ohne ausdrücklichen Auftrag vorwegnehmen.
 - Bei nutzersichtbaren Änderungen README/Admin-Guide und bei Architekturänderungen `docs/ARCHITECTURE.md` konsistent aktualisieren.
 
 ## Tests und Build

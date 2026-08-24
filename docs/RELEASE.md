@@ -1,6 +1,6 @@
 # Release-Prozess
 
-Diese Anleitung bereitet das geplante Release `v2.0.0` vor. Vor Merge, Tag und Release müssen der technische Release-Candidate-Audit aus Phase 6.4.1 und anschließend die vollständige manuelle V2-Abnahme aus Phase 6.4.2 erfolgreich abgeschlossen sein.
+Diese Anleitung beschreibt den dauerhaft verwendbaren Release-Prozess. `v2.0.0` dient dabei als konkretes Beispiel für das nächste Release; für spätere Releases werden Version und Tag entsprechend ersetzt. Vor Tagging und Veröffentlichung müssen alle technischen und manuellen Release-Gates erfolgreich abgeschlossen sein.
 
 ## Technische Source of Truth
 
@@ -13,7 +13,7 @@ Diese Anleitung bereitet das geplante Release `v2.0.0` vor. Vor Merge, Tag und R
 
 Ein Standardbuild erzeugt `build/libs/Farmwelt-2.0.0-SNAPSHOT.jar`. Für den Release-Build wird `-PreleaseVersion=2.0.0` gesetzt; das Ergebnis heißt `build/libs/Farmwelt-2.0.0.jar`. Die Version in `paper-plugin.yml` wird beim Verarbeiten der Ressourcen aus derselben Gradle-Version eingesetzt.
 
-## Release-Gates für V2
+## Release-Gates
 
 Ein Release darf erst vorbereitet werden, wenn alle folgenden Gates erfüllt sind:
 
@@ -22,11 +22,11 @@ Ein Release darf erst vorbereitet werden, wenn alle folgenden Gates erfüllt sin
 3. `./gradlew build` läuft erfolgreich.
 4. Der GitHub-Workflow [Build](../.github/workflows/build.yml) ist für den Release-Commit grün.
 5. Der separate [Folia-/Worlds-Black-Box-Workflow](../.github/workflows/blackbox.yml) ist für den Release-Commit grün.
-6. Die vollständige manuelle [V2-Abnahmematrix BB-01 bis BB-26](testing/v2-acceptance-checklist.md) ist ohne `NOT RUN`, `FAIL` oder `BLOCKED` abgeschlossen und ihre Evidenz ist gesichert.
+6. Eine Laufkopie der vollständigen manuellen [V2-Abnahmevorlage BB-01 bis BB-26](testing/v2-acceptance-template.md) ist ohne `NOT RUN`, `FAIL` oder `BLOCKED` abgeschlossen und ihre Evidenz ist gesichert.
 7. Version, Changelog/Release Notes, Dokumentation und Runtime-Abhängigkeiten sind nochmals gegengeprüft.
-8. Erst nach erfolgreicher manueller V2-Abnahme wird `feature/v2` kontrolliert nach `main` übernommen.
+8. Der abgenommene Release-Commit ist kontrolliert in den vorgesehenen Release-Branch übernommen; für reguläre Releases ist das `main`.
 
-Der automatisierte Smoke-Test startet einen isolierten Folia-Server, installiert Worlds und die Farmwelt-JAR des aktuellen Commits, erzeugt eine Testwelt und führt einen echten Force-Reset einschließlich State-, Regenerationsmarker-, Seed-, Log- und Shutdown-Prüfung aus. Er ist ein Release-Gate, ersetzt aber nicht die manuelle V2-Abnahme.
+Der automatisierte Smoke-Test startet einen isolierten Folia-Server, installiert Worlds und die Farmwelt-JAR des aktuellen Commits, erzeugt eine Testwelt und führt einen echten Force-Reset einschließlich State-, Regenerationsmarker-, Seed-, Log- und Shutdown-Prüfung aus. Er ist ein Release-Gate, ersetzt aber nicht die manuelle Black-Box-Abnahme.
 
 ## Lokale Vorprüfung
 
@@ -77,9 +77,9 @@ Der lokale Release-Build ersetzt nicht die beiden GitHub-Workflows und nicht die
 
 Die manuelle Workflow-Ausführung ist nur zum erneuten Bauen eines bereits vorhandenen Release-Tags vorgesehen; sie ersetzt keinen neuen Tag oder Release.
 
-## Tagging und GitHub Release nach der manuellen V2-Abnahme
+## Tagging und GitHub Release
 
-Nach Merge und finaler Freigabe muss der Tag exakt auf dem abgenommenen `main`-Commit liegen. Für V2 ist vorgesehen:
+Nach Integration und finaler Freigabe muss der Tag exakt auf dem abgenommenen `main`-Commit liegen. Beispiel für `v2.0.0`:
 
 ```powershell
 git checkout main
@@ -108,14 +108,3 @@ gh workflow run release.yml -f tag=v2.0.0
 ```
 
 Der Workflow lädt das gleichnamige Asset mit `--clobber` erneut hoch. Vorher Ursache, Tag-Commit und Notwendigkeit dokumentieren; für inhaltliche Änderungen ist eine neue Version statt eines stillen Asset-Austauschs zu verwenden.
-
-## Abgrenzung vor der manuellen V2-Abnahme
-
-Bis zum erfolgreichen Abschluss der manuellen V2-Abnahme bleiben bewusst offen:
-
-- vollständige manuelle BB-01-bis-BB-26-Abnahme,
-- finale Release-Notes und Freigabeentscheidung,
-- Merge von `feature/v2` nach `main`,
-- Erstellen und Pushen von `v2.0.0`,
-- Veröffentlichen des GitHub Releases,
-- abschließende Prüfung des hochgeladenen Release-Assets.

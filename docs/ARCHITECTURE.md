@@ -633,6 +633,6 @@ Leitlinien:
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md): technische Architektur und Lifecycle-Verträge.
 - [`docs/RELEASE.md`](RELEASE.md): Build-, Versions- und Releaseprozess.
 - [`docs/testing/black-box-testing.md`](testing/black-box-testing.md): vollständige manuelle Black-Box-Teststrategie.
-- [`docs/testing/v2-acceptance-checklist.md`](testing/v2-acceptance-checklist.md): V2-Abnahmematrix.
+- [`docs/testing/v2-acceptance-template.md`](testing/v2-acceptance-template.md): wiederverwendbare V2-Abnahmevorlage.
 - [`testing/blackbox/README.md`](../testing/blackbox/README.md): automatisiertes Folia-/Worlds-Smoke-Harness.
 - [`AGENTS.md`](../AGENTS.md): Entwicklungsregeln und technische Verträge für zukünftige Änderungen.

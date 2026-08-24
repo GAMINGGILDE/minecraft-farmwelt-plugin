@@ -1,6 +1,6 @@
 # Automatisierter Folia-/Worlds-Smoke-Test
 
-Dieses Harness startet einen vollständig isolierten Folia-Testserver, installiert die Farmwelt-JAR aus dem aktuellen Build sowie das echte Worlds-Plugin und führt genau einen Overworld-Reset über die öffentliche Serverkonsole aus. Es ergänzt die Gradle-Tests und die [vollständige manuelle Black-Box-Anleitung](../../docs/testing/black-box-testing.md), ersetzt aber weder diese noch die [V2-Abnahmematrix BB-01 bis BB-26](../../docs/testing/v2-acceptance-checklist.md).
+Dieses Harness startet einen vollständig isolierten Folia-Testserver, installiert die Farmwelt-JAR aus dem aktuellen Build sowie das echte Worlds-Plugin und führt genau einen Overworld-Reset über die öffentliche Serverkonsole aus. Es ergänzt die Gradle-Tests und die [vollständige manuelle Black-Box-Anleitung](../../docs/testing/black-box-testing.md), ersetzt aber weder diese noch einen anhand der [V2-Abnahmevorlage BB-01 bis BB-26](../../docs/testing/v2-acceptance-template.md) dokumentierten manuellen Testlauf.
 
 ## Abgedeckter Ablauf
 
