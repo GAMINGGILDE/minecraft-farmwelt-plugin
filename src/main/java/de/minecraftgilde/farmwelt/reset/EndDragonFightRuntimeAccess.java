@@ -9,11 +9,9 @@ import org.bukkit.boss.DragonBattle;
 /** Applies the parts of the End fight state that Bukkit's DragonBattle API cannot express. */
 interface EndDragonFightRuntimeAccess {
 
-    int VANILLA_EXIT_PORTAL_Y = 64;
+    void suppress(DragonBattle battle, int initialExitPortalY);
 
-    void suppress(DragonBattle battle);
-
-    void prepareInitialFight(DragonBattle battle);
+    void prepareInitialFight(DragonBattle battle, int initialExitPortalY);
 
     static EndDragonFightRuntimeAccess runningServer() {
         return reflective(
@@ -30,22 +28,24 @@ interface EndDragonFightRuntimeAccess {
         Objects.requireNonNull(expectedFightType, "expectedFightType");
         return new EndDragonFightRuntimeAccess() {
             @Override
-            public void suppress(DragonBattle battle) {
+            public void suppress(DragonBattle battle, int initialExitPortalY) {
                 applyReflectively(
                         battle,
                         expectedCraftBattleType,
                         expectedFightType,
-                        true
+                        true,
+                        initialExitPortalY
                 );
             }
 
             @Override
-            public void prepareInitialFight(DragonBattle battle) {
+            public void prepareInitialFight(DragonBattle battle, int initialExitPortalY) {
                 applyReflectively(
                         battle,
                         expectedCraftBattleType,
                         expectedFightType,
-                        false
+                        false,
+                        initialExitPortalY
                 );
             }
         };
@@ -55,7 +55,8 @@ interface EndDragonFightRuntimeAccess {
             DragonBattle battle,
             String expectedCraftBattleType,
             String expectedFightType,
-            boolean suppress
+            boolean suppress,
+            int initialExitPortalY
     ) {
         Objects.requireNonNull(battle, "battle");
         try {
@@ -81,7 +82,7 @@ interface EndDragonFightRuntimeAccess {
             Method spawnExitPortal = accessibleMethod(fightType, "spawnExitPortal", boolean.class);
             Method setDirty = accessibleMethod(fightType, "setDirty");
 
-            ensureInitialExitPortalLocation(fight, fightType);
+            ensureInitialExitPortalLocation(fight, fightType, initialExitPortalY);
 
             // The public API cannot switch the loaded fight between a fresh initial battle and
             // a completed one. Rebuilding the podium also works when an inactive portal was found.
@@ -120,7 +121,11 @@ interface EndDragonFightRuntimeAccess {
         }
     }
 
-    private static void ensureInitialExitPortalLocation(Object fight, Class<?> fightType)
+    private static void ensureInitialExitPortalLocation(
+            Object fight,
+            Class<?> fightType,
+            int initialExitPortalY
+    )
             throws IllegalAccessException, InvocationTargetException {
         Field exitPortalLocation = accessibleField(fightType, "exitPortalLocation");
         if (exitPortalLocation.get(fight) != null) {
@@ -134,14 +139,13 @@ interface EndDragonFightRuntimeAccess {
         );
         Method atY = accessibleMethod(fightOrigin.getClass(), "atY", int.class);
 
-        // Ohne gespeicherte Position leitet Vanilla die Höhe aus der frischen Heightmap ab. Beim
-        // Reset kann der Brunnen dadurch unter der Hauptinsel entstehen; die normale Basis liegt
-        // in der unterstützten Version bei Y=64. Bekannte Positionen werden oben bewusst erhalten.
-        Object vanillaPortalLocation = Objects.requireNonNull(
-                atY.invoke(fightOrigin, VANILLA_EXIT_PORTAL_Y),
-                "Vanilla-Endbrunnenposition ist null."
+        // Die Höhe stammt aus der vollständig geladenen zentralen Insel. Bekannte Positionen
+        // werden oben bewusst erhalten, damit ein später repariertes Portal nicht versetzt wird.
+        Object initialPortalLocation = Objects.requireNonNull(
+                atY.invoke(fightOrigin, initialExitPortalY),
+                "Ermittelte Endbrunnenposition ist null."
         );
-        exitPortalLocation.set(fight, vanillaPortalLocation);
+        exitPortalLocation.set(fight, initialPortalLocation);
     }
 
     private static Class<?> requireType(Class<?> actual, String expectedName) {

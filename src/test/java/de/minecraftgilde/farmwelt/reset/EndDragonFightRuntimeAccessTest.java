@@ -31,7 +31,7 @@ class EndDragonFightRuntimeAccessTest {
                 FakeDragonFight.class.getName()
         );
 
-        access.suppress(battle);
+        access.suppress(battle, 72);
 
         assertTrue(fight.dragonKilled);
         assertTrue(fight.hasPreviouslyKilledDragon);
@@ -40,7 +40,7 @@ class EndDragonFightRuntimeAccessTest {
         assertNull(fight.respawnStage);
         assertNotNull(fight.respawnCrystals);
         assertTrue(fight.activePortal);
-        assertEquals(new FakeBlockPos(0, 64, 0), fight.generatedPortalLocation);
+        assertEquals(new FakeBlockPos(0, 72, 0), fight.generatedPortalLocation);
         assertTrue(fight.dirty);
         assertFalse(battle.bossBarVisible.get());
     }
@@ -59,7 +59,7 @@ class EndDragonFightRuntimeAccessTest {
                 FakeDragonFight.class.getName()
         );
 
-        access.prepareInitialFight(battle);
+        access.prepareInitialFight(battle, 68);
 
         assertFalse(fight.dragonKilled);
         assertFalse(fight.hasPreviouslyKilledDragon);
@@ -69,7 +69,7 @@ class EndDragonFightRuntimeAccessTest {
         assertNotNull(fight.respawnCrystals);
         assertTrue(fight.portalPresent);
         assertFalse(fight.activePortal);
-        assertEquals(new FakeBlockPos(0, 64, 0), fight.generatedPortalLocation);
+        assertEquals(new FakeBlockPos(0, 68, 0), fight.generatedPortalLocation);
         assertTrue(fight.dirty);
         assertTrue(battle.bossBarVisible.get());
     }
@@ -84,7 +84,7 @@ class EndDragonFightRuntimeAccessTest {
                 FakeDragonFight.class.getName()
         );
 
-        access.suppress(battle);
+        access.suppress(battle, 64);
 
         assertEquals(new FakeBlockPos(3, 71, -5), fight.generatedPortalLocation);
     }
@@ -101,7 +101,7 @@ class EndDragonFightRuntimeAccessTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> access.suppress(battle)
+                () -> access.suppress(battle, 64)
         );
 
         assertTrue(exception.getMessage().contains(
