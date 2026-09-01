@@ -138,6 +138,8 @@ class BukkitFarmworldPostResetInitializerTest {
         assertEquals(scenario.world(), scheduler.regionWorld());
         assertEquals(0, scheduler.regionChunkX());
         assertEquals(0, scheduler.regionChunkZ());
+        assertEquals(1, scenario.centralChunkLoads().get());
+        assertEquals(1, scenario.heightLookups().get());
         assertTrue(result.isDone());
         assertTrue(result.join().successful());
         assertTrue(scheduler.delays().isEmpty());
@@ -578,6 +580,8 @@ class BukkitFarmworldPostResetInitializerTest {
         assertEquals(1, scenario.battleLookups().get());
         assertEquals(0, scenario.entityLookups().get());
         assertEquals(1, scheduler.regionExecutions());
+        assertEquals(1, scenario.centralChunkLoads().get());
+        assertEquals(1, scenario.heightLookups().get());
         assertTrue(scheduler.delays().isEmpty());
         assertFalse(dragon.removed().get());
         assertFalse(delayedSpawn.isCancelled());
@@ -804,13 +808,18 @@ class BukkitFarmworldPostResetInitializerTest {
                 gameRuleAccess,
                 new EndDragonFightRuntimeAccess() {
                     @Override
-                    public void suppress(DragonBattle battle) {
+                    public void suppress(DragonBattle battle, int initialExitPortalY) {
+                        assertEquals(73, initialExitPortalY);
                         battle.generateEndPortal(true);
                         battle.setPreviouslyKilled(true);
                     }
 
                     @Override
-                    public void prepareInitialFight(DragonBattle battle) {
+                    public void prepareInitialFight(
+                            DragonBattle battle,
+                            int initialExitPortalY
+                    ) {
+                        assertEquals(73, initialExitPortalY);
                         battle.generateEndPortal(false);
                         battle.setPreviouslyKilled(false);
                     }
@@ -1007,6 +1016,8 @@ class BukkitFarmworldPostResetInitializerTest {
         AtomicInteger battleLookups = new AtomicInteger();
         AtomicInteger entityLookups = new AtomicInteger();
         AtomicInteger blockLookups = new AtomicInteger();
+        AtomicInteger centralChunkLoads = new AtomicInteger();
+        AtomicInteger heightLookups = new AtomicInteger();
         AtomicBoolean previouslyKilled = new AtomicBoolean();
         AtomicBoolean endPortalGenerated = new AtomicBoolean();
         AtomicReference<DragonBattle.RespawnPhase> respawnPhase =
@@ -1057,6 +1068,14 @@ class BukkitFarmworldPostResetInitializerTest {
                         entityLookups.incrementAndGet();
                         yield checks.get(checkIndex.getAndIncrement());
                     }
+                    case "getChunkAtAsync" -> {
+                        centralChunkLoads.incrementAndGet();
+                        yield CompletableFuture.completedFuture(proxy(org.bukkit.Chunk.class));
+                    }
+                    case "getHighestBlockYAt" -> {
+                        heightLookups.incrementAndGet();
+                        yield 73;
+                    }
                     case "getBlockAt" -> {
                         blockLookups.incrementAndGet();
                         int x = (Integer) arguments[0];
@@ -1084,7 +1103,9 @@ class BukkitFarmworldPostResetInitializerTest {
                 respawnCrystals,
                 battleLookups,
                 entityLookups,
-                blockLookups
+                blockLookups,
+                centralChunkLoads,
+                heightLookups
         );
     }
 
@@ -1314,7 +1335,9 @@ class BukkitFarmworldPostResetInitializerTest {
             AtomicReference<List<EnderCrystal>> respawnCrystals,
             AtomicInteger battleLookups,
             AtomicInteger entityLookups,
-            AtomicInteger blockLookups
+            AtomicInteger blockLookups,
+            AtomicInteger centralChunkLoads,
+            AtomicInteger heightLookups
     ) {
     }
 

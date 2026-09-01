@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.GameRule;
+import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -42,6 +43,10 @@ public final class BukkitFarmworldPostResetInitializer
     private static final int MINIMUM_VANILLA_DRAGON_RESPAWN_CRYSTALS = 4;
     private static final int EXIT_PORTAL_HORIZONTAL_VERIFICATION_RADIUS = 4;
     private static final int EXIT_PORTAL_VERTICAL_VERIFICATION_RADIUS = 2;
+    private static final int END_ORIGIN_CHUNK_X = 0;
+    private static final int END_ORIGIN_CHUNK_Z = 0;
+    private static final int END_PODIUM_X = 0;
+    private static final int END_PODIUM_Z = 0;
 
     private final Plugin plugin;
     private final FarmweltScheduler scheduler;
@@ -241,7 +246,7 @@ public final class BukkitFarmworldPostResetInitializer
 
         DragonBattle battle = event.getDragonBattle();
         scheduler.runRegionDelayed(world, 0, 0, DRAGON_KILL_PORTAL_REPAIR_DELAY_TICKS, () -> {
-            dragonFightRuntimeAccess.suppress(battle);
+            dragonFightRuntimeAccess.suppress(battle, centralEndIslandSurfaceY(world));
             verifyActiveExitPortal(world, battle);
             logger.info("Aktives End-Ausgangsportal nach dem Drachenkampf wiederhergestellt "
                     + "und verifiziert.");
@@ -376,14 +381,22 @@ public final class BukkitFarmworldPostResetInitializer
 
         logger.info("Dragon-Policy f\u00fcr '" + world.getName() + "' wird angewendet.");
         // DragonBattle and the central exit portal are owned by the End origin region on Folia.
-        return scheduler.runRegion(world, 0, 0, () -> {
-            DragonBattle battle = requireDragonBattle(world);
-            dragonFightRuntimeAccess.suppress(battle);
-            verifyActiveExitPortal(world, battle);
-            logger.info("DragonBattle vollständig beendet und aktives End-Ausgangsportal "
-                    + "verifiziert.");
-            return null;
-        }).thenCompose(ignored -> scheduler.runGlobal(() -> inspectDragonPolicy(world)))
+        return loadEndOriginChunk(world).thenCompose(ignored -> scheduler.runRegion(
+                world,
+                END_ORIGIN_CHUNK_X,
+                END_ORIGIN_CHUNK_Z,
+                () -> {
+                    DragonBattle battle = requireDragonBattle(world);
+                    dragonFightRuntimeAccess.suppress(
+                            battle,
+                            centralEndIslandSurfaceY(world)
+                    );
+                    verifyActiveExitPortal(world, battle);
+                    logger.info("DragonBattle vollständig beendet und aktives "
+                            + "End-Ausgangsportal verifiziert.");
+                    return null;
+                }
+        )).thenCompose(ignored -> scheduler.runGlobal(() -> inspectDragonPolicy(world)))
                 .thenCompose(snapshot -> {
                     if (snapshot.activeDragons().isEmpty()) {
                         return finishDragonPolicy(world, snapshot);
@@ -440,38 +453,72 @@ public final class BukkitFarmworldPostResetInitializer
     private CompletableFuture<Void> prepareAllowedEndDragon(
             FarmworldResetConfig config,
             World world,
-        boolean oneTimeOverride
+            boolean oneTimeOverride
     ) {
-        return scheduler.runRegion(world, 0, 0, () -> {
-            DragonBattle battle = requireDragonBattle(world);
-            dragonFightRuntimeAccess.prepareInitialFight(battle);
-            if (battle.hasBeenPreviouslyKilled()) {
-                throw new IllegalStateException(
-                        "DragonBattle konnte nicht auf einen frischen Erstkampf gesetzt werden."
-                );
-            }
-            logger.info("DragonBattle als frischer Erstkampf initialisiert.");
+        return loadEndOriginChunk(world).thenCompose(ignored -> scheduler.runRegion(
+                world,
+                END_ORIGIN_CHUNK_X,
+                END_ORIGIN_CHUNK_Z,
+                () -> {
+                    DragonBattle battle = requireDragonBattle(world);
+                    dragonFightRuntimeAccess.prepareInitialFight(
+                            battle,
+                            centralEndIslandSurfaceY(world)
+                    );
+                    if (battle.hasBeenPreviouslyKilled()) {
+                        throw new IllegalStateException(
+                                "DragonBattle konnte nicht auf einen frischen Erstkampf gesetzt "
+                                        + "werden."
+                        );
+                    }
+                    logger.info("DragonBattle als frischer Erstkampf initialisiert.");
 
-            if (oneTimeOverride) {
-                if (suppressesEnderDragon(config)) {
-                    EnderDragon activeDragon = battle.getEnderDragon();
-                    if (activeDragon == null || !activeDragon.isValid() || activeDragon.isDead()) {
-                        pendingOneTimeDragonSpawnWorlds.add(world.getName());
-                        logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr den verz\u00f6gerten "
-                                + "Vanilla-Spawn in '" + world.getName() + "' vorgemerkt.");
+                    if (oneTimeOverride) {
+                        if (suppressesEnderDragon(config)) {
+                            EnderDragon activeDragon = battle.getEnderDragon();
+                            if (activeDragon == null
+                                    || !activeDragon.isValid()
+                                    || activeDragon.isDead()) {
+                                pendingOneTimeDragonSpawnWorlds.add(world.getName());
+                                logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr den "
+                                        + "verz\u00f6gerten Vanilla-Spawn in '" + world.getName()
+                                        + "' vorgemerkt.");
+                            } else {
+                                pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                            }
+                        } else {
+                            pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                        }
+                        logger.info("Enderdrache f\u00fcr diesen Reset ausdr\u00fccklich aktiviert.");
                     } else {
                         pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                        logger.info("Enderdrache gem\u00e4\u00df Post-Reset-Konfiguration aktiviert.");
                     }
-                } else {
-                    pendingOneTimeDragonSpawnWorlds.remove(world.getName());
+                    return null;
                 }
-                logger.info("Enderdrache f\u00fcr diesen Reset ausdr\u00fccklich aktiviert.");
-            } else {
-                pendingOneTimeDragonSpawnWorlds.remove(world.getName());
-                logger.info("Enderdrache gem\u00e4\u00df Post-Reset-Konfiguration aktiviert.");
-            }
-            return null;
-        });
+        ));
+    }
+
+    private CompletableFuture<Void> loadEndOriginChunk(World world) {
+        try {
+            return Objects.requireNonNull(
+                    world.getChunkAtAsync(END_ORIGIN_CHUNK_X, END_ORIGIN_CHUNK_Z, true),
+                    "Bukkit lieferte kein Future für den zentralen End-Chunk."
+            ).thenApply(chunk -> {
+                Objects.requireNonNull(chunk, "Bukkit lieferte keinen zentralen End-Chunk.");
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+    }
+
+    private int centralEndIslandSurfaceY(World world) {
+        return world.getHighestBlockYAt(
+                END_PODIUM_X,
+                END_PODIUM_Z,
+                HeightMap.MOTION_BLOCKING_NO_LEAVES
+        );
     }
 
     private CompletableFuture<Void> finishDragonPolicy(

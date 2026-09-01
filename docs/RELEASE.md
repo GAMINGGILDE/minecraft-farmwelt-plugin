@@ -1,17 +1,17 @@
 # Release-Prozess
 
-Diese Anleitung beschreibt den dauerhaft verwendbaren Release-Prozess. `v2.0.0` dient dabei als konkretes Beispiel für das nächste Release; für spätere Releases werden Version und Tag entsprechend ersetzt. Vor Tagging und Veröffentlichung müssen alle technischen und manuellen Release-Gates erfolgreich abgeschlossen sein.
+Diese Anleitung beschreibt den dauerhaft verwendbaren Release-Prozess. `v2.0.1` dient dabei als konkretes Beispiel für das nächste Release; für spätere Releases werden Version und Tag entsprechend ersetzt. Vor Tagging und Veröffentlichung müssen alle technischen und manuellen Release-Gates erfolgreich abgeschlossen sein.
 
 ## Technische Source of Truth
 
 - Java-Toolchain: 25.
-- Standard-Projektversion: `2.0.0-SNAPSHOT`.
+- Standard-Projektversion: `2.0.1-SNAPSHOT`.
 - Release-Version: Gradle-Property `releaseVersion`.
 - Zielplattform und Dependencies: [`build.gradle.kts`](../build.gradle.kts).
 - Plugin-Metadaten und Runtime-Abhängigkeiten: [`paper-plugin.yml`](../src/main/resources/paper-plugin.yml).
 - JAR-Basisname: `Farmwelt`.
 
-Ein Standardbuild erzeugt `build/libs/Farmwelt-2.0.0-SNAPSHOT.jar`. Für den Release-Build wird `-PreleaseVersion=2.0.0` gesetzt; das Ergebnis heißt `build/libs/Farmwelt-2.0.0.jar`. Die Version in `paper-plugin.yml` wird beim Verarbeiten der Ressourcen aus derselben Gradle-Version eingesetzt.
+Ein Standardbuild erzeugt `build/libs/Farmwelt-2.0.1-SNAPSHOT.jar`. Für den Release-Build wird `-PreleaseVersion=2.0.1` gesetzt; das Ergebnis heißt `build/libs/Farmwelt-2.0.1.jar`. Die Version in `paper-plugin.yml` wird beim Verarbeiten der Ressourcen aus derselben Gradle-Version eingesetzt.
 
 ## Release-Gates
 
@@ -35,7 +35,7 @@ Windows PowerShell:
 ```powershell
 ./gradlew.bat clean test
 ./gradlew.bat build
-./gradlew.bat clean build "-PreleaseVersion=2.0.0"
+./gradlew.bat clean build "-PreleaseVersion=2.0.1"
 ```
 
 Linux/macOS:
@@ -43,13 +43,13 @@ Linux/macOS:
 ```bash
 ./gradlew clean test
 ./gradlew build
-./gradlew clean build -PreleaseVersion=2.0.0
+./gradlew clean build -PreleaseVersion=2.0.1
 ```
 
 Danach prüfen:
 
-- `build/libs/Farmwelt-2.0.0.jar` existiert.
-- Die JAR enthält `paper-plugin.yml` mit Version `2.0.0`.
+- `build/libs/Farmwelt-2.0.1.jar` existiert.
+- Die JAR enthält `paper-plugin.yml` mit Version `2.0.1`.
 - Es existiert genau das erwartete Release-Artefakt.
 - Optional die SHA-256-Prüfsumme für Release Notes oder Abnahmeprotokoll festhalten.
 
@@ -79,22 +79,22 @@ Die manuelle Workflow-Ausführung ist nur zum erneuten Bauen eines bereits vorha
 
 ## Tagging und GitHub Release
 
-Nach Integration und finaler Freigabe muss der Tag exakt auf dem abgenommenen `main`-Commit liegen. Beispiel für `v2.0.0`:
+Nach Integration und finaler Freigabe muss der Tag exakt auf dem abgenommenen `main`-Commit liegen. Beispiel für `v2.0.1`:
 
 ```powershell
 git checkout main
 git pull --ff-only
-git tag -a v2.0.0 -m "Release v2.0.0"
-git push origin v2.0.0
-gh release create v2.0.0 --verify-tag --title "Farmwelt v2.0.0" --notes-file RELEASE_NOTES.md
+git tag -a v2.0.1 -m "Release v2.0.1"
+git push origin v2.0.1
+gh release create v2.0.1 --verify-tag --title "Farmwelt v2.0.1" --notes-file RELEASE_NOTES.md
 ```
 
-`RELEASE_NOTES.md` ist dabei nur ein Beispiel für eine vorab geprüfte lokale Notes-Datei; sie muss nicht dauerhaft im Repository liegen. Alternativ kann der GitHub Release über die Weboberfläche für den bereits gepushten Tag `v2.0.0` veröffentlicht werden.
+`RELEASE_NOTES.md` ist dabei nur ein Beispiel für eine vorab geprüfte lokale Notes-Datei; sie muss nicht dauerhaft im Repository liegen. Alternativ kann der GitHub Release über die Weboberfläche für den bereits gepushten Tag `v2.0.1` veröffentlicht werden.
 
 Nach Veröffentlichung:
 
 1. Workflow `Release` bis zum erfolgreichen Abschluss überwachen.
-2. Asset `Farmwelt-2.0.0.jar` herunterladen.
+2. Asset `Farmwelt-2.0.1.jar` herunterladen.
 3. Dateiname, eingebettete Plugin-Version und optional Prüfsumme prüfen.
 4. Release Notes und dokumentierte Voraussetzungen kontrollieren.
 5. Das Asset nicht durch einen Build eines anderen Commits ersetzen.
@@ -104,7 +104,7 @@ Nach Veröffentlichung:
 Nur wenn Tag und GitHub Release bereits existieren und exakt derselbe Commit erneut gebaut werden soll:
 
 ```powershell
-gh workflow run release.yml -f tag=v2.0.0
+gh workflow run release.yml -f tag=v2.0.1
 ```
 
 Der Workflow lädt das gleichnamige Asset mit `--clobber` erneut hoch. Vorher Ursache, Tag-Commit und Notwendigkeit dokumentieren; für inhaltliche Änderungen ist eine neue Version statt eines stillen Asset-Austauschs zu verwenden.

@@ -96,7 +96,8 @@ Mit `post-reset.end.dragon: false` einen normalen End-Reset ohne `--dragon` ausf
 
 - kein Enderdrache nach dem Reset,
 - keine aktive Bossbar,
-- aktives und benutzbares Ausgangsportal,
+- aktives und benutzbares Ausgangsportal, dessen Brunnenbasis bei `x/z = 0` auf der
+  tatsächlichen Oberfläche der zentralen Endinsel liegt und weder schwebt noch darunter liegt,
 - keine verzögerte Erstspawn-Auslösung beim späteren Spielerbeitritt,
 - ein echter Vanilla-Respawn mit vier Endkristallen bleibt möglich,
 - nach dem Tod dieses Respawn-Drachens ist das Ausgangsportal wieder aktiv.

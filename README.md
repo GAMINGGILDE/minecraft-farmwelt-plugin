@@ -105,4 +105,4 @@ Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle ve
 ./gradlew build
 ```
 
-Unter Windows PowerShell entsprechend `./gradlew.bat`. Der Standardbuild erzeugt aktuell `build/libs/Farmwelt-2.0.0-SNAPSHOT.jar`; ein Release-Build erhält seine Version über `-PreleaseVersion=X.Y.Z`.
+Unter Windows PowerShell entsprechend `./gradlew.bat`. Der Standardbuild erzeugt aktuell `build/libs/Farmwelt-2.0.1-SNAPSHOT.jar`; ein Release-Build erhält seine Version über `-PreleaseVersion=X.Y.Z`.

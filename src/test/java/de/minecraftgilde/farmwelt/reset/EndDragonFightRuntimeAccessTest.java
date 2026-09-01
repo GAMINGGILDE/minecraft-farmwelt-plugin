@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -30,7 +31,7 @@ class EndDragonFightRuntimeAccessTest {
                 FakeDragonFight.class.getName()
         );
 
-        access.suppress(battle);
+        access.suppress(battle, 72);
 
         assertTrue(fight.dragonKilled);
         assertTrue(fight.hasPreviouslyKilledDragon);
@@ -39,6 +40,7 @@ class EndDragonFightRuntimeAccessTest {
         assertNull(fight.respawnStage);
         assertNotNull(fight.respawnCrystals);
         assertTrue(fight.activePortal);
+        assertEquals(new FakeBlockPos(0, 72, 0), fight.generatedPortalLocation);
         assertTrue(fight.dirty);
         assertFalse(battle.bossBarVisible.get());
     }
@@ -57,7 +59,7 @@ class EndDragonFightRuntimeAccessTest {
                 FakeDragonFight.class.getName()
         );
 
-        access.prepareInitialFight(battle);
+        access.prepareInitialFight(battle, 68);
 
         assertFalse(fight.dragonKilled);
         assertFalse(fight.hasPreviouslyKilledDragon);
@@ -67,8 +69,24 @@ class EndDragonFightRuntimeAccessTest {
         assertNotNull(fight.respawnCrystals);
         assertTrue(fight.portalPresent);
         assertFalse(fight.activePortal);
+        assertEquals(new FakeBlockPos(0, 68, 0), fight.generatedPortalLocation);
         assertTrue(fight.dirty);
         assertTrue(battle.bossBarVisible.get());
+    }
+
+    @Test
+    void preservesKnownExitPortalLocationWhenRebuildingPortal() {
+        FakeDragonFight fight = new FakeDragonFight();
+        fight.exitPortalLocation = new FakeBlockPos(3, 71, -5);
+        FakeDragonBattle battle = new FakeDragonBattle(fight);
+        EndDragonFightRuntimeAccess access = EndDragonFightRuntimeAccess.reflective(
+                FakeDragonBattle.class.getName(),
+                FakeDragonFight.class.getName()
+        );
+
+        access.suppress(battle, 64);
+
+        assertEquals(new FakeBlockPos(3, 71, -5), fight.generatedPortalLocation);
     }
 
     @Test
@@ -83,7 +101,7 @@ class EndDragonFightRuntimeAccessTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> access.suppress(battle)
+                () -> access.suppress(battle, 64)
         );
 
         assertTrue(exception.getMessage().contains(
@@ -124,7 +142,11 @@ class EndDragonFightRuntimeAccessTest {
 
         @Override
         public Location getEndPortalLocation() {
-            return handle.portalPresent ? new Location(null, 0, 64, 0) : null;
+            if (!handle.portalPresent) {
+                return null;
+            }
+            FakeBlockPos position = handle.generatedPortalLocation;
+            return new Location(null, position.x(), position.y(), position.z());
         }
 
         @Override
@@ -198,6 +220,9 @@ class EndDragonFightRuntimeAccessTest {
         public UUID dragonUUID = UUID.randomUUID();
         public Object respawnStage = new Object();
         public Object respawnCrystals = new Object();
+        private FakeBlockPos origin = new FakeBlockPos(0, 0, 0);
+        private FakeBlockPos exitPortalLocation;
+        private FakeBlockPos generatedPortalLocation;
         private boolean portalPresent;
         private boolean activePortal;
         private boolean portalGenerationSucceeds = true;
@@ -209,6 +234,7 @@ class EndDragonFightRuntimeAccessTest {
             if (!portalGenerationSucceeds) {
                 return;
             }
+            generatedPortalLocation = exitPortalLocation;
             portalPresent = true;
             activePortal = active;
         }
@@ -216,6 +242,13 @@ class EndDragonFightRuntimeAccessTest {
         @SuppressWarnings("unused")
         public void setDirty() {
             dirty = true;
+        }
+    }
+
+    private record FakeBlockPos(int x, int y, int z) {
+
+        public FakeBlockPos atY(int newY) {
+            return new FakeBlockPos(x, newY, z);
         }
     }
 
