@@ -9,6 +9,8 @@ import org.bukkit.boss.DragonBattle;
 /** Applies the parts of the End fight state that Bukkit's DragonBattle API cannot express. */
 interface EndDragonFightRuntimeAccess {
 
+    int VANILLA_EXIT_PORTAL_Y = 64;
+
     void suppress(DragonBattle battle);
 
     void prepareInitialFight(DragonBattle battle);
@@ -79,6 +81,8 @@ interface EndDragonFightRuntimeAccess {
             Method spawnExitPortal = accessibleMethod(fightType, "spawnExitPortal", boolean.class);
             Method setDirty = accessibleMethod(fightType, "setDirty");
 
+            ensureInitialExitPortalLocation(fight, fightType);
+
             // The public API cannot switch the loaded fight between a fresh initial battle and
             // a completed one. Rebuilding the podium also works when an inactive portal was found.
             spawnExitPortal.invoke(fight, suppress);
@@ -114,6 +118,30 @@ interface EndDragonFightRuntimeAccess {
                     cause
             );
         }
+    }
+
+    private static void ensureInitialExitPortalLocation(Object fight, Class<?> fightType)
+            throws IllegalAccessException, InvocationTargetException {
+        Field exitPortalLocation = accessibleField(fightType, "exitPortalLocation");
+        if (exitPortalLocation.get(fight) != null) {
+            return;
+        }
+
+        Field origin = accessibleField(fightType, "origin");
+        Object fightOrigin = Objects.requireNonNull(
+                origin.get(fight),
+                "EnderDragonFight.origin ist null."
+        );
+        Method atY = accessibleMethod(fightOrigin.getClass(), "atY", int.class);
+
+        // Ohne gespeicherte Position leitet Vanilla die Höhe aus der frischen Heightmap ab. Beim
+        // Reset kann der Brunnen dadurch unter der Hauptinsel entstehen; die normale Basis liegt
+        // in der unterstützten Version bei Y=64. Bekannte Positionen werden oben bewusst erhalten.
+        Object vanillaPortalLocation = Objects.requireNonNull(
+                atY.invoke(fightOrigin, VANILLA_EXIT_PORTAL_Y),
+                "Vanilla-Endbrunnenposition ist null."
+        );
+        exitPortalLocation.set(fight, vanillaPortalLocation);
     }
 
     private static Class<?> requireType(Class<?> actual, String expectedName) {

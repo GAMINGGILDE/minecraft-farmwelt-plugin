@@ -42,7 +42,7 @@ bash ./testing/blackbox/test-assert-log.sh
 Alternativ kann die exakt zu testende JAR gesetzt werden:
 
 ```bash
-BLACKBOX_PLUGIN_JAR=/absoluter/pfad/Farmwelt-2.0.0-SNAPSHOT.jar \
+BLACKBOX_PLUGIN_JAR=/absoluter/pfad/Farmwelt-2.0.1-SNAPSHOT.jar \
   bash ./testing/blackbox/run-blackbox.sh
 ```
 
