@@ -24,14 +24,14 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    compileOnly("io.papermc.paper:paper-api:26.2.build.121-stable")
     compileOnly("net.thenextlvl:worlds:4.4.0")
 
-    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testImplementation("net.thenextlvl:worlds:4.4.0")
-    testCompileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.2")
-    testRuntimeOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    testCompileOnly("io.papermc.paper:paper-api:26.2.build.121-stable")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.3")
+    testRuntimeOnly("io.papermc.paper:paper-api:26.2.build.121-stable")
 }
 
 java {
