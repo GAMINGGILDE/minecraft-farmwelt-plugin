@@ -42,7 +42,7 @@ Ein Szenario darf nur `PASS` erhalten, wenn sein Serverlog frei von relevanten u
 | BB-21 | Hauptwelt-Schutz | Als Hauptwelt erkannte Instanz wird vor Worlds-Regeneration sicher abgewiesen; State bleibt unverändert. | `NOT RUN` | — | — |
 | BB-22 | Falsche Dimension | Geladene Welt falscher Dimension wird nicht regeneriert; kein Erfolg und keine State-Änderung. | `NOT RUN` | — | — |
 | BB-23 | Nicht geladene Farmwelt | Keine Regeneration, kein falscher Erfolg und keine State-Änderung. | `NOT RUN` | — | — |
-| BB-24 | Persistenzfehler | Nach erneuerter Welt folgt `STATE_SAVE_FAILED`; alter veröffentlichter/persistierter State bleibt und Erfolgsmeldung bleibt aus. | `NOT RUN` | — | — |
+| BB-24 | Persistenzfehler | Nach erneuerter Welt folgt `STATE_SAVE_FAILED`; alter veröffentlichter State und Recovery-Sperre bleiben erhalten. Genau ein Worlds-Aufruf über weitere Ticks, Force und Neustart. | `NOT RUN` | — | — |
 | BB-25 | Shutdown während Startup-Delay | Sauberer Stopp hinterlässt keinen Task; nächster Start hat genau eine Nachholung und einen Scheduler. | `NOT RUN` | — | — |
 | BB-26 | Folia-/Worlds-Logprüfung | Logs aller Szenarien sind klassifiziert und frei von unerwarteten Threading-/Lifecycle-Fehlern sowie doppelten Reset-Starts. | `NOT RUN` | — | — |
 

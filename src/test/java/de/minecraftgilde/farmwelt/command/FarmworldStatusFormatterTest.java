@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetState;
+import de.minecraftgilde.farmwelt.reset.ResetDueState;
 import de.minecraftgilde.farmwelt.reset.ResetDueStateEvaluator;
 import java.time.Duration;
 import java.time.Instant;
@@ -159,8 +160,20 @@ class FarmworldStatusFormatterTest {
                 state,
                 running,
                 dueStateEvaluator.evaluate(config, state, NOW),
-                NOW
+                NOW, Optional.empty()
         );
+    }
+
+    @Test
+    void overviewAndDetailsIdentifyBlockedAttemptAndMissingConfirmation() {
+        var config = new FarmworldResetConfig("overworld", "farm", true, Duration.ofDays(1));
+        String evidence = "overworld (farm), Versuch 26510595 seit " + NOW + ", WORLDS_PENDING";
+        var snapshot = new FarmworldResetStatusSnapshot(config, Optional.of(state(NOW)), false,
+                ResetDueState.DUE, NOW, Optional.of(evidence));
+        for (var lines : List.of(formatter.formatOverview(List.of(snapshot)), formatter.formatDetails(snapshot))) {
+            assertTrue(lines.stream().anyMatch(line -> line.contains("Recovery-Sperre") && line.contains(evidence)));
+            assertTrue(lines.contains("§7Verbleibend: §f-"));
+        }
     }
 
     private FarmworldResetState state(Instant nextReset) {

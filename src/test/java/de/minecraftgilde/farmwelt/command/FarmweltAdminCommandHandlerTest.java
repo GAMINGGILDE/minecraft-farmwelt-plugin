@@ -13,6 +13,7 @@ import de.minecraftgilde.farmwelt.reset.ResetResult;
 import de.minecraftgilde.farmwelt.reset.ResetOptions;
 import de.minecraftgilde.farmwelt.reset.ResetStateRepository;
 import de.minecraftgilde.farmwelt.reset.ResetStatus;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,14 +29,19 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class FarmweltAdminCommandHandlerTest {
+
+    @TempDir
+    static Path dataDirectory;
 
     private static final Instant NOW = Instant.parse("2026-08-17T08:00:00Z");
 
     private final InMemoryRepository repository = new InMemoryRepository();
     private final FarmworldResetService resetService = new FarmworldResetService(
             repository,
+            dataDirectory,
             Clock.fixed(NOW, ZoneOffset.UTC),
             quietLogger()
     );
@@ -89,7 +95,7 @@ class FarmweltAdminCommandHandlerTest {
         audience.clear();
         assertTrue(handler.handle(audience, new String[]{"reset", "force", "overworld"}));
         assertEquals("overworld", resetExecutor.lastKey);
-        assertTrue(audience.contains("wurde gestartet"));
+        assertTrue(audience.contains("wurde angefordert"));
     }
 
     @Test
@@ -167,7 +173,7 @@ class FarmweltAdminCommandHandlerTest {
 
         assertFalse(resetExecutor.future.isDone());
         assertEquals(1, audience.messages.size());
-        assertTrue(audience.contains("wurde gestartet"));
+        assertTrue(audience.contains("wurde angefordert"));
 
         resetExecutor.future.complete(new ResetResult(
                 "overworld",

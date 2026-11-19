@@ -86,7 +86,7 @@ public final class FarmworldStatusFormatter {
     }
 
     String formatRemaining(FarmworldResetStatusSnapshot snapshot) {
-        if (!snapshot.config().enabled()
+        if (snapshot.recovery().isPresent() || !snapshot.config().enabled()
                 || snapshot.state().isEmpty()
                 || snapshot.dueState() == ResetDueState.DISABLED) {
             return VALUE + "-";
@@ -102,8 +102,11 @@ public final class FarmworldStatusFormatter {
     }
 
     private String status(FarmworldResetStatusSnapshot snapshot) {
+        if (snapshot.recovery().isPresent() && !snapshot.resetRunning()) {
+            return "§cRecovery-Sperre. " + snapshot.recovery().orElseThrow() + " Admin Guide zur Wiederherstellung prüfen.";
+        }
         if (snapshot.resetRunning()) {
-            return "§eLäuft";
+            return snapshot.recovery().map(reason -> "§eLäuft. " + reason).orElse("§eLäuft");
         }
         if (!snapshot.config().enabled()) {
             return "§cDeaktiviert";
@@ -115,6 +118,7 @@ public final class FarmworldStatusFormatter {
         return switch (snapshot.dueState()) {
             case DUE -> "§cÜberfällig";
             case NOT_DUE -> "§aGeplant";
+            case RECOVERY_BLOCKED -> "§cRecovery-Sperre";
             case DISABLED -> throw new IllegalStateException("DISABLED wurde bereits behandelt.");
         };
     }

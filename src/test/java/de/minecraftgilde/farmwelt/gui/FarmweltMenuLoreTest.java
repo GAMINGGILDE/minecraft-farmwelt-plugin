@@ -9,6 +9,7 @@ import de.minecraftgilde.farmwelt.reset.FarmworldResetService;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetState;
 import de.minecraftgilde.farmwelt.reset.ResetStateRepository;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,18 +25,22 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class FarmweltMenuLoreTest {
 
+    @TempDir
+    static Path dataDirectory;
+
     private static final Instant NOW = Instant.parse("2026-09-06T12:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
     private static final ZoneId ZONE = ZoneId.of("Europe/Berlin");
     private final InMemoryRepository repository = new InMemoryRepository();
     private final FarmworldResetService resetService = new FarmworldResetService(
-            repository, CLOCK, Logger.getAnonymousLogger()
+            repository, dataDirectory, CLOCK, Logger.getAnonymousLogger()
     );
     private final Set<String> resetting = new HashSet<>();
     private final FarmweltMenuLore menuLore = new FarmweltMenuLore(
@@ -183,6 +188,16 @@ class FarmweltMenuLoreTest {
         assertThrows(IOException.class, () -> resetService.completeReset("overworld"));
 
         assertEquals("Reset fällig", text(menuLore.forWorld(item("overworld"))).getFirst());
+    }
+
+    @Test
+    void recoveryReplacesCountdownAndKeepsTeleportHint(@TempDir Path data) throws IOException {
+        java.nio.file.Files.writeString(data.resolve("reset-recovery.version"), "1\n");
+        var service = new FarmworldResetService(repository, data, CLOCK, Logger.getAnonymousLogger());
+        assertTrue(service.reload(List.of(config("overworld", true, Duration.ofDays(30)))));
+        var lore = new FarmweltMenuLore(service, key -> true, CLOCK, ZONE);
+        assertEquals(List.of("Reset bis zur Klärung gesperrt", "", "Klicken zum Teleportieren"),
+                text(lore.forWorld(item("overworld"))));
     }
 
     @Test

@@ -214,7 +214,7 @@ public final class FarmweltAdminCommandHandler {
             return;
         }
 
-        audience.sendMessage("§eReset für Farmwelt '" + farmworldKey + "' wurde gestartet.");
+        audience.sendMessage("§eReset für Farmwelt '" + farmworldKey + "' wurde angefordert.");
         resetFuture.whenComplete((result, failure) -> {
             if (failure != null) {
                 logger.log(Level.SEVERE, "Unerwarteter Fehler beim Abschluss des manuellen Resets für Farmwelt '"
@@ -250,7 +250,8 @@ public final class FarmweltAdminCommandHandler {
                 state,
                 resetExecutor.isResetRunning(config.farmworldKey()),
                 dueState,
-                evaluatedAt
+                evaluatedAt,
+                resetService.recoveryProblem(config)
         );
     }
 

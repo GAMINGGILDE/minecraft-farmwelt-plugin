@@ -13,8 +13,11 @@ final class ResetCommandMessages {
         return switch (result.status()) {
             case SUCCESS -> List.of("§aFarmwelt '" + farmworldKey + "' wurde erfolgreich zurückgesetzt.");
             case NOT_CONFIGURED -> List.of("§cDie Farmwelt '" + farmworldKey + "' ist nicht konfiguriert.");
+            case NOT_DUE -> List.of("§eEs liegt kein fälliger Reset-Termin vor.");
             case DISABLED -> List.of("§cDer Reset ist für diese Farmwelt deaktiviert.");
             case ALREADY_RUNNING -> List.of("§eFür diese Farmwelt läuft bereits ein Reset.");
+            case RECOVERY_BLOCKED -> List.of("§c" + result.message(),
+                    "§e/farmwelt status " + farmworldKey + " und Serverlog prüfen.");
             case INVALID_CONFIGURATION -> List.of(
                     "§cDie Reset-Konfiguration oder die geladene Bukkit-Welt ist ungültig.",
                     "§cBitte Serverlog prüfen!"
@@ -33,7 +36,7 @@ final class ResetCommandMessages {
                     "§cDer Reset wurde abgebrochen, da nicht alle Spieler sicher evakuiert werden konnten."
             );
             case REGENERATE_FAILED -> List.of(
-                    "§cDie Farmwelt konnte durch Worlds nicht neu generiert werden.",
+                    "§cWorlds-Regeneration fehlgeschlagen oder Ergebnis unklar. Recovery-Sperre prüfen.",
                     "§cBitte Serverlog prüfen!"
             );
             case POST_RESET_FAILED -> List.of(

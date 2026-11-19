@@ -2,6 +2,7 @@ package de.minecraftgilde.farmwelt.reset;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.logging.Logger;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -32,7 +34,7 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
     @Override
     public Map<String, FarmworldResetState> load() throws IOException {
-        if (!Files.exists(stateFile)) {
+        if (Files.notExists(stateFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return Map.of();
         }
 
@@ -82,6 +84,7 @@ public final class YamlResetStateRepository implements ResetStateRepository {
         for (Map.Entry<String, FarmworldResetState> entry : new TreeMap<>(states).entrySet()) {
             FarmworldResetState state = entry.getValue();
             ConfigurationSection stateSection = worldsSection.createSection(entry.getKey());
+            state.attemptId().ifPresent(id -> stateSection.set("attempt-id", id.toString()));
             state.lastReset().ifPresent(lastReset -> stateSection.set("last-reset", lastReset.toString()));
             stateSection.set("next-reset", state.nextReset().toString());
         }
@@ -93,8 +96,10 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
         Path temporaryFile = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
         try {
-            yaml.save(temporaryFile.toFile());
+            Files.writeString(temporaryFile, yaml.saveToString(), StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.SYNC);
             replaceStateFile(temporaryFile);
+            DurableResetFiles.syncDirectory(parent);
         } finally {
             try {
                 Files.deleteIfExists(temporaryFile);
@@ -141,7 +146,16 @@ public final class YamlResetStateRepository implements ResetStateRepository {
             }
         }
 
-        return Optional.of(new FarmworldResetState(farmworldKey, lastReset, nextReset.orElseThrow()));
+        Optional<UUID> attemptId = Optional.empty();
+        if (stateSection.contains("attempt-id")) {
+            try {
+                attemptId = Optional.of(ResetAttempt.parseId(stateSection.getString("attempt-id", "")));
+            } catch (IllegalArgumentException e) {
+                warnInvalidState(farmworldKey, "ungültige Versuchs-ID");
+                return Optional.empty();
+            }
+        }
+        return Optional.of(new FarmworldResetState(farmworldKey, lastReset, nextReset.orElseThrow(), attemptId));
     }
 
     private Optional<Instant> parseInstant(Object value) {

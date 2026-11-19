@@ -63,6 +63,9 @@ public final class FarmweltMenuLore {
         synchronized (resetService) {
             config = resetService.getConfig(farmworldKey);
             state = resetService.getState(farmworldKey);
+            if (config.flatMap(resetService::recoveryProblem).isPresent()) {
+                return List.of(Component.text("Reset bis zur Klärung gesperrt", NamedTextColor.RED));
+            }
         }
 
         if (config.isPresent() && !config.orElseThrow().enabled()) {

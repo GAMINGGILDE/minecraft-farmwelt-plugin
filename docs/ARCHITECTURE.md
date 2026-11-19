@@ -85,7 +85,7 @@ Beim Start:
 1. `saveDefaultConfig()` erzeugt die Standardconfig, falls noch keine existiert.
 2. Die harte Dependency Worlds wird einmalig über `WorldsAccess.access()` im Adapter verbunden. Bei einem Fehler deaktiviert sich Farmwelt ohne Bukkit-Fallback.
 3. `ConfigManager` lädt Farmwelt-GUI-Einträge, Reset-Konfiguration und Ressourcenmonitor-Regeln.
-4. `FarmworldResetService` lädt beziehungsweise initialisiert `reset-state.yml`.
+4. `FarmworldResetService` lädt den Zeitplan und die Recovery-Journale. Anschließend initialisiert er fehlende Zeitpläne freigegebener Welten.
 5. `FarmworldResetEngine` erhält Reset-Service, Notification-Service und den einmal erzeugten Worlds-Adapter per Constructor Injection.
 6. GUI, weitere Services und Listener werden erstellt.
 7. Der Befehl `/farmwelt` wird registriert.
@@ -161,10 +161,14 @@ Reset-Lock und Config-Snapshot
     -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz validieren
     -> Spieler evakuieren und erfolgreiche Einzelteleports persönlich benachrichtigen
     -> Welt erneut auf Leerstand prüfen
+    -> WORLDS_PENDING dauerhaft speichern
+    -> Instanz, Hauptweltschutz, Dimension und Leerstand vor Übergabe erneut prüfen
     -> WorldsAccess.regenerate(world)
+    -> WORLDS_RETURNED dauerhaft speichern
     -> neue Bukkit-Weltinstanz, Name, Dimension und Hauptweltschutz validieren
     -> Gamerules, WorldBorder und Enderdragon-Policy anwenden
-    -> Reset-State persistieren und veröffentlichen
+    -> POST_RESET_DONE mit Abschlusszeit und Folgetermin dauerhaft speichern
+    -> Reset-State mit Versuchs-ID persistieren und veröffentlichen
     -> SUCCESS
     -> Lock auf jedem Exit-Pfad freigeben
 ```
@@ -177,7 +181,29 @@ Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `n
 
 `ResetDueStateEvaluator` liefert je logischer Farmwelt `NOT_DUE`, `DUE` oder `DISABLED`. Nach einer festen Startup-Sicherheitsverzögerung von 60 Sekunden ermittelt `StartupResetCoordinator` damit die überfälligen Welten in stabiler Konfigurationsreihenfolge. Die Reset-Futures werden per `thenCompose` sequenziell verkettet; vor dem Start jeder Welt wird deren aktueller State erneut mit derselben Due-Logik bewertet. Ein Fehler oder `ALREADY_RUNNING` wird verarbeitet, ohne die nächste Welt zu blockieren. Es gibt pro überfälliger Welt nur einen Versuch, nicht je verpasstem Intervall. Der Coordinator manipuliert keine States und besitzt keinen Reset-Lock.
 
-Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Countdown-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` ohne zusätzlichen Lifecycle-Broadcast behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie, erhalten über dieselbe Engine aber dieselben Start-/Erfolgs-/Fehlermeldungen wie automatische und Startup-Resets.
+Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Countdown-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler asynchron `FarmworldResetExecutor.resetIfDue(...)` ohne Dragon-Override auf. Die Engine prüft den Termin nach dem Lock-Erwerb nochmals. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` ohne zusätzlichen Lifecycle-Broadcast behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie, erhalten über dieselbe Engine aber dieselben Start-/Erfolgs-/Fehlermeldungen wie automatische und Startup-Resets.
+
+### Recovery an der Worlds-Grenze (FW-002)
+
+Vor FW-002 überdauerte ausschließlich der Zeitplan einen Prozessabbruch. Zwischen dem ersten Worlds-Aufruf und der Veröffentlichung des neuen Plans konnte derselbe überfällige Termin deshalb einen zweiten destruktiven Versuch auslösen. Der Lock gilt bis zum tatsächlichen Pipeline-Abschluss. Das Journal überbrückt einen Fehler oder das Ende des Prozesses.
+
+| Übergang | Dauerhafter Nachweis | Verhalten nach Fehler, Stop oder Neustart |
+| --- | --- | --- |
+| Anforderung, Fälligkeit, Lock, Config-/Dragon-Snapshot | Bisheriger Plan und bisheriges Journal | Lock, Optionen und Snapshot sind flüchtig. Ein neuer Versuch durchläuft alle Prüfungen. |
+| Weltprüfung, Evakuierung, Leerprüfung | Bisheriger Plan | Ein erneuter Versuch prüft die aktuelle Spielerbelegung. Bereits erfolgte Teleports können bestehen bleiben. |
+| Evakuierung und Leerprüfung bestanden, unmittelbar vor Worlds | `WORLDS_PENDING` mit UUID, logischer ID, Bukkit-Name und Startzeit | Erst nach bestätigtem Schreiben gelangt die Welt an Worlds. Fehler beim Schreiben stoppen die Übergabe. Nach einem Crash in diesem Fenster sperrt bereits der vorbereitete Versuch. |
+| Entladen, Entfernen und Neuerstellen durch Worlds | `WORLDS_PENDING` | Ein ausstehendes, fehlerhaftes oder unbrauchbares Future lässt das tatsächliche Ergebnis offen. Die Sperre bleibt bestehen. |
+| Worlds liefert eine andere Instanz, Validierung und Post-Reset laufen | `WORLDS_RETURNED` | Ein Fehler bei Weltprüfung, Gamerules, Border oder Dragon-Policy sperrt die Welt. Bei Fehler im Phasenwechsel bleibt die vorherige Bestätigung maßgeblich. |
+| Initialisierung bestätigt, Zeitplan noch offen | `POST_RESET_DONE` mit exaktem Abschluss und Folgetermin aus dem Intervall-Snapshot | Der Plan wird als Kandidat gespeichert. Bei `STATE_SAVE_FAILED` bleibt der veröffentlichte Plan erhalten. Eine administrative Nachtragung ist anhand des Journals möglich. |
+| State-Save abgeschlossen, Veröffentlichung, Benachrichtigung und Lock-Freigabe | `POST_RESET_DONE` und passende `attempt-id`, `last-reset`, `next-reset` im Weltabschnitt | Auch ein Prozessende direkt nach dem Dateiersatz hinterlässt einen erkennbaren Abschluss. Alte UUIDs oder abweichende Termine sperren die Welt. |
+
+`ResetRecoveryJournal` liest die drei Plätze beim Service-Start. Scheduler und Commands prüfen den veröffentlichten Speicherstand. Vor jedem Phasenwechsel vergleicht der asynchrone Schreiber zusätzlich den erwarteten Vorgänger mit der Datei. Die Vorbereitung prüft Sperre und Vorgänger unter demselben Schreiblock. Das Journal verwendet einen festen Platz pro `FarmworldType`, auch bei unterschiedlich geschriebener ID. Ein lesbarer offener Versuch schützt zusätzlich seinen Bukkit-Namen bei einer geänderten Zuordnung. Die umfassende Kanonisierung der Konfiguration gehört zu FW-003.
+
+Der Shutdown stoppt die Planung. Eine laufende Pipeline kann ihre Belege bis zum Prozessende fortschreiben. Der Abbruch eines wartenden Aufrufers berührt den internen Abschluss-Callback nicht. Startup-Catch-up und periodischer Scheduler überspringen `RECOVERY_BLOCKED`. Ein weiterhin offenes Worlds-Future hält den Laufzeit-Lock und kann die sequenzielle Startup-Kette bis zum Prozessende aufhalten (FW-007).
+
+**Dateivertrag.** Im Plugin-Datenordner kennzeichnet `reset-recovery.version` die eingerichtete Formatversion 1. Die drei Dateien `reset-recovery-{overworld,nether,end}.journal` enthalten UTF-8-Zeilen in fester Reihenfolge. Ein unbenutzter Platz enthält `version=1` und `phase=READY`. Bei einem Versuch folgen auf Version und Phase die Felder `id`, `key`, `world`, `started`, `completed` und `next`. Zeiten sind ISO-8601-Instants. Die letzten beiden Felder bleiben bis zur bestätigten Initialisierung leer. Pro Welt bleibt der letzte Beleg erhalten, bis ein zulässiger neuer Versuch ihn ersetzt. Fehlende Pflichtfelder, unbekannte Versionen, widersprüchliche Belege und nicht lesbare Plätze sperren die betroffene Welt. Ein fehlender oder ungültiger gemeinsamer Versionsmarker bei bestehender Recovery-Historie erfordert die Prüfung des gesamten Dateisatzes.
+
+Der Schreiber synchronisiert die temporäre Datei mit `SYNC` und fordert für das Journal einen atomaren Replace im selben Verzeichnis an. Der Zeitplan behält seinen bisherigen Replace-Fallback. Nach jedem Replace wird unter Unix das Elternverzeichnis synchronisiert. Der Windows-NIO-Provider bietet dafür keinen Verzeichniskanal. Prozessneustarts sind abgedeckt. Bei Stromausfall hängt die Dauerhaftigkeit von Dateisystem, Controller und Schreibcache ab, unter Windows zusätzlich von der Persistenz der Verzeichniseinträge. Der Vertrag setzt einen einzelnen Serverprozess pro Datenordner und ein kohärentes lokales Dateisystem voraus. Ein gemeinsamer Verlust oder ein gemeinsames Zurückrollen aller Nachweise lässt sich aus den Dateien selbst nicht erkennen.
 
 ## Endfarm- und DragonBattle-Vertrag
 

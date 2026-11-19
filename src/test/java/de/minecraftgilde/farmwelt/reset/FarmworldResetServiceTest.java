@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,8 +18,12 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class FarmworldResetServiceTest {
+
+    @TempDir
+    Path dataDirectory;
 
     private static final Instant NOW = Instant.parse("2026-08-17T06:00:00Z");
 
@@ -314,6 +319,7 @@ class FarmworldResetServiceTest {
         logger.setLevel(Level.OFF);
         return new FarmworldResetService(
                 repository,
+                dataDirectory,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 logger
         );

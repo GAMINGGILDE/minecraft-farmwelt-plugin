@@ -28,6 +28,8 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -55,36 +57,43 @@ class FarmworldResetEngineTest {
             CompletableFuture.completedFuture(regeneratedWorld)
     );
     private final MutableClock clock = new MutableClock(NOW, ZoneOffset.UTC);
-    private final FarmworldResetService resetService = new FarmworldResetService(
-            repository,
-            clock,
-            quietLogger()
-    );
+    private final FarmworldResetService resetService;
     private final List<String> lifecycleMessages = new ArrayList<>();
     private final List<PlayerMessage> evacuationMessages = new ArrayList<>();
-    private final ResetNotificationService notificationService = new ResetNotificationService(
-            resetService,
-            new ResetWarningTracker(),
-            lifecycleMessages::add,
-            (player, message) -> {
-                evacuationMessages.add(new PlayerMessage(player, message));
-                return CompletableFuture.completedFuture(null);
-            },
-            ZoneOffset.UTC,
-            quietLogger()
-    );
+    private final ResetNotificationService notificationService;
     private final FakePostResetInitializer postResetInitializer = new FakePostResetInitializer(calls);
     private String minecraftVersion = "26.1.2";
-    private final FarmworldResetEngine engine = new FarmworldResetEngine(
-            resetService,
-            worldOperations,
-            lifecycleService,
-            postResetInitializer,
-            new DirectScheduler(),
-            notificationService,
-            quietLogger(),
-            new EndDragonFightCompatibility(() -> minecraftVersion)
-    );
+    private final FarmworldResetEngine engine;
+
+    FarmworldResetEngineTest(@TempDir Path dataDirectory) {
+        resetService = new FarmworldResetService(
+                repository,
+                dataDirectory,
+                clock,
+                quietLogger()
+        );
+        notificationService = new ResetNotificationService(
+                resetService,
+                new ResetWarningTracker(),
+                lifecycleMessages::add,
+                (player, message) -> {
+                    evacuationMessages.add(new PlayerMessage(player, message));
+                    return CompletableFuture.completedFuture(null);
+                },
+                ZoneOffset.UTC,
+                quietLogger()
+        );
+        engine = new FarmworldResetEngine(
+                resetService,
+                worldOperations,
+                lifecycleService,
+                postResetInitializer,
+                new DirectScheduler(),
+                notificationService,
+                quietLogger(),
+                new EndDragonFightCompatibility(() -> minecraftVersion)
+        );
+    }
 
     @BeforeEach
     void configureReset() {
@@ -107,6 +116,8 @@ class FarmworldResetEngineTest {
         assertEquals(List.of(
                 "inspect",
                 "evacuate",
+                "hasPlayers",
+                "inspectHandoff",
                 "hasPlayers",
                 "regenerate",
                 "inspectRegenerated",
@@ -424,6 +435,15 @@ class FarmworldResetEngineTest {
     }
 
     @Test
+    void playerReturningDuringJournalWriteStopsHandoff() {
+        worldOperations.playerArrivedDuringWrite = true;
+        assertEquals(ResetStatus.EVACUATION_FAILED, engine.reset("overworld").join().status());
+        assertEquals(0, lifecycleService.invocations);
+        assertFalse(engine.isResetRunning("overworld"));
+        assertEquals(ResetStatus.RECOVERY_BLOCKED, engine.reset("overworld").join().status());
+    }
+
+    @Test
     void regenerationFailureDoesNotUpdateStateAndReleasesLock() {
         IllegalStateException worldsFailure = new IllegalStateException("regenerate failed");
         lifecycleService.result = CompletableFuture.failedFuture(worldsFailure);
@@ -509,24 +529,13 @@ class FarmworldResetEngineTest {
         assertFalse(calls.contains("state"));
     }
 
-    @Test
-    void regeneratedWorldMustStillBeLoadedAndUnprotected() {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void regeneratedWorldMustStillBeLoadedAndUnprotected(boolean loaded) {
         FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
-        worldOperations.regeneratedInspection = WorldInspection.unloaded();
-
-        ResetResult unloadedResult = engine.reset("overworld").join();
-
-        assertEquals(ResetStatus.REGENERATE_FAILED, unloadedResult.status());
-        assertEquals(previousState, resetService.getState("overworld").orElseThrow());
-        assertFalse(calls.contains("state"));
-
-        calls.clear();
-        worldOperations.inspectCount = 0;
-        worldOperations.regeneratedInspection = WorldInspection.loaded(
-                regeneratedWorld,
-                FarmworldType.OVERWORLD,
-                true
-        );
+        worldOperations.regeneratedInspection = loaded
+                ? WorldInspection.loaded(regeneratedWorld, FarmworldType.OVERWORLD, true)
+                : WorldInspection.unloaded();
 
         ResetResult protectedResult = engine.reset("overworld").join();
 
@@ -583,9 +592,11 @@ class FarmworldResetEngineTest {
     void nullStatePersistenceResultIsNotReportedAsSuccess() {
         FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
         FarmweltScheduler nullResultScheduler = new DirectScheduler() {
+            private int asyncCalls;
+
             @Override
             public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
-                return CompletableFuture.completedFuture(null);
+                return ++asyncCalls == 4 ? CompletableFuture.completedFuture(null) : super.runAsync(operation);
             }
         };
         FarmworldResetEngine nullStateEngine = new FarmworldResetEngine(
@@ -717,6 +728,8 @@ class FarmworldResetEngineTest {
         assertEquals(List.of(
                 "inspect",
                 "evacuate",
+                "hasPlayers",
+                "inspectHandoff",
                 "hasPlayers",
                 "regenerate",
                 "inspectRegenerated",
@@ -1256,6 +1269,7 @@ class FarmworldResetEngineTest {
                         FarmworldEvacuationResult.completed(List.of())
                 );
         private boolean hasPlayers;
+        private boolean playerArrivedDuringWrite;
         private int inspectCount;
 
         private FakeWorldOperations(
@@ -1270,8 +1284,12 @@ class FarmworldResetEngineTest {
 
         @Override
         public WorldInspection inspect(FarmworldResetConfig resetConfig) {
-            calls.add(inspectCount++ == 0 ? "inspect" : "inspectRegenerated");
-            return inspectCount == 1 ? initialInspection : regeneratedInspection;
+            calls.add(switch (++inspectCount) {
+                case 1 -> "inspect";
+                case 2 -> "inspectHandoff";
+                default -> "inspectRegenerated";
+            });
+            return inspectCount <= 2 ? initialInspection : regeneratedInspection;
         }
 
         @Override
@@ -1283,7 +1301,7 @@ class FarmworldResetEngineTest {
         @Override
         public boolean hasPlayers(World world) {
             calls.add("hasPlayers");
-            return hasPlayers;
+            return hasPlayers || (inspectCount == 2 && playerArrivedDuringWrite);
         }
     }
 

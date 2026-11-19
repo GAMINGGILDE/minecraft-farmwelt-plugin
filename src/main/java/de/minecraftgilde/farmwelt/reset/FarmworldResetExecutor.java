@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -13,6 +14,10 @@ public interface FarmworldResetExecutor extends FarmworldAvailabilityService {
         if (options.allowEnderDragon()) {
             throw new UnsupportedOperationException("Dieser Reset-Executor unterst\u00fctzt keine Optionen.");
         }
+        return reset(farmworldKey);
+    }
+
+    default CompletableFuture<ResetResult> resetIfDue(String farmworldKey, Instant evaluatedAt) {
         return reset(farmworldKey);
     }
 
