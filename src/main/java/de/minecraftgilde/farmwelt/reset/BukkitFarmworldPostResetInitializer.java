@@ -7,6 +7,7 @@ import static de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.effe
 
 import de.minecraftgilde.farmwelt.reset.FarmworldRegenerationOptions.EndDragonFightDataMode;
 import io.papermc.paper.event.block.DragonEggFormEvent;
+import java.lang.ref.WeakReference;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,6 +33,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
+import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.boss.DragonBattle;
@@ -65,7 +67,7 @@ public final class BukkitFarmworldPostResetInitializer
     private final GameRuleAccess gameRuleAccess;
     private final EndDragonFightRuntimeAccess dragonFightRuntimeAccess;
     private final EndDragonFightCompatibility dragonCompatibility;
-    private volatile Map<String, World> registeredEndFarms = Map.of();
+    private volatile Map<String, EndWorldIdentity> registeredEndFarms = Map.of();
     private long policyRevision;
     private final AtomicReference<Set<String>> configuredEndWorlds =
             new AtomicReference<>(Set.of());
@@ -77,7 +79,8 @@ public final class BukkitFarmworldPostResetInitializer
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> temporaryDragonAllowWorlds =
             new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, World> pendingOneTimeDragonSpawnWorlds = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, WeakReference<World>> pendingOneTimeDragonSpawnWorlds =
+            new ConcurrentHashMap<>();
     private final Set<String> loggedSuppressedDragonSpawns = ConcurrentHashMap.newKeySet();
 
     public BukkitFarmworldPostResetInitializer(
@@ -115,22 +118,27 @@ public final class BukkitFarmworldPostResetInitializer
                 dragonFightRuntimeAccess,
                 "dragonFightRuntimeAccess"
         );
-        refreshEndWorldIdentities(null);
+        refreshEndWorldIdentities();
     }
 
-    // Nur beim Start und im Welt-Lifecycle die Bukkit-Weltliste lesen. Regions-Events
-    // vergleichen ihre konkrete Welt mit dem zuletzt veröffentlichten Identitätssnapshot.
-    private synchronized void refreshEndWorldIdentities(World unloading) {
+    // Die geordnete Bukkit-Namensregistry nur beim Start oder auf der Globalregion lesen.
+    private synchronized void refreshEndWorldIdentities() {
         try {
             var server = plugin.getServer();
-            List<World> worlds = server.getWorlds().stream().filter(world -> world != unloading).toList();
-            Map<String, World> eligible = new HashMap<>();
-            for (World world : worlds) {
+            List<World> worlds = server.getWorlds();
+            List<WorldReference> order = worlds.stream().map(WorldReference::new).toList();
+            Map<String, EndWorldIdentity> eligible = new HashMap<>();
+            for (int i = 0; i < worlds.size(); i++) {
+                World world = worlds.get(i);
                 if (BukkitFarmworldWorldOperations.isRegisteredEndFarm(server, worlds, world)) {
-                    eligible.put(world.getName(), world);
+                    eligible.put(world.getName(), new EndWorldIdentity(order.get(i), order.subList(0, i)));
                 }
             }
             registeredEndFarms = Map.copyOf(eligible);
+            pendingOneTimeDragonSpawnWorlds.entrySet().removeIf(entry -> {
+                var identity = eligible.get(entry.getKey());
+                return identity == null || identity.farm().reference().get() != entry.getValue().get();
+            });
         } catch (RuntimeException failure) {
             registeredEndFarms = Map.of();
             throw failure;
@@ -139,14 +147,56 @@ public final class BukkitFarmworldPostResetInitializer
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldLoad(WorldLoadEvent event) {
-        refreshEndWorldIdentities(null);
+        if (plugin.getServer().isGlobalTickThread()) {
+            refreshEndWorldIdentities();
+        } else {
+            scheduleIdentityRefresh();
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onWorldUnload(WorldUnloadEvent event) {
+    public synchronized void onWorldUnload(WorldUnloadEvent event) {
         World world = event.getWorld();
-        refreshEndWorldIdentities(world);
-        pendingOneTimeDragonSpawnWorlds.remove(world.getName(), world);
+        var identity = registeredEndFarms.get(world.getName());
+        if (identity != null && identity.farm().reference().get() == world) {
+            var eligible = new HashMap<>(registeredEndFarms);
+            eligible.remove(world.getName());
+            registeredEndFarms = Map.copyOf(eligible);
+        }
+        // Ein zugelassenes Event bestätigt weder das Schließen noch das Entfernen der Welt.
+        scheduleIdentityRefresh();
+    }
+
+    private void scheduleIdentityRefresh() {
+        scheduler.runGlobalDelayed(1L, () -> {
+            refreshEndWorldIdentities();
+            return null;
+        }).whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                logger.log(Level.SEVERE, "Weltidentitäten konnten nicht aktualisiert werden.", unwrap(failure));
+            }
+        });
+    }
+
+    private record WorldReference(NamespacedKey key, WeakReference<World> reference) {
+        WorldReference(World world) {
+            this(world.getKey(), new WeakReference<>(world));
+        }
+
+        boolean isRegistered(Server server) {
+            World world = reference.get();
+            return world != null && key != null && server.getWorld(key) == world;
+        }
+    }
+
+    private record EndWorldIdentity(WorldReference farm, List<WorldReference> predecessors) {
+        boolean matches(Server server, World world) {
+            // Worlds kann eine Welt auch nach dem Abgleich noch entfernen. Der Key-Lookup
+            // liest in 26.1.2 die per Copy-on-Write ersetzte Level-Tabelle, keine Bukkit-Weltliste.
+            // Mindestens eine früher geladene Instanz muss der Farm noch vorangehen.
+            return farm.reference().get() == world && farm.isRegistered(server)
+                    && predecessors.stream().anyMatch(previous -> previous.isRegistered(server));
+        }
     }
 
     /** Atomically replaces the persistent spawn-guard policy with the supplied configuration. */
@@ -240,10 +290,11 @@ public final class BukkitFarmworldPostResetInitializer
     /** Returns whether the spawn guard applies before inspecting the live DragonBattle state. */
     public boolean shouldSuppressEnderDragonSpawn(String worldName) {
         Objects.requireNonNull(worldName, "worldName");
-        World pending = pendingOneTimeDragonSpawnWorlds.get(worldName);
+        var allowance = pendingOneTimeDragonSpawnWorlds.get(worldName);
+        World pending = allowance == null ? null : allowance.get();
         if (temporaryDragonAllowWorlds.containsKey(worldName)
                 || activeResetDragonAllowWorlds.containsKey(worldName)
-                || (pending != null && pending == registeredEndFarms.get(worldName))) {
+                || (pending != null && isRegisteredEndWorld(worldName, pending))) {
             return false;
         }
         return configuredDragonSuppressionWorlds.get().contains(worldName)
@@ -299,8 +350,9 @@ public final class BukkitFarmworldPostResetInitializer
         }
         World world = dragon.getWorld();
         String worldName = world.getName();
-        if (pendingOneTimeDragonSpawnWorlds.get(worldName) == world && isAllowedEndWorld(world)
-                && pendingOneTimeDragonSpawnWorlds.remove(worldName, world)) {
+        var allowance = pendingOneTimeDragonSpawnWorlds.get(worldName);
+        if (allowance != null && allowance.get() == world && isAllowedEndWorld(world)
+                && pendingOneTimeDragonSpawnWorlds.remove(worldName, allowance)) {
             logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr '" + worldName
                     + "' beim erfolgreichen Spawn eingel\u00f6st.");
         }
@@ -339,12 +391,17 @@ public final class BukkitFarmworldPostResetInitializer
     }
 
     private boolean isAllowedEndWorld(World world) {
-        return registeredEndFarms.get(world.getName()) == world && dragonCompatibility.isSupported();
+        return isRegisteredEndWorld(world.getName(), world) && dragonCompatibility.isSupported();
+    }
+
+    private boolean isRegisteredEndWorld(String name, World world) {
+        var identity = registeredEndFarms.get(name);
+        return identity != null && identity.matches(plugin.getServer(), world);
     }
 
     private void requireDragonTarget(String expectedName, World world) {
         dragonCompatibility.requireSupported();
-        if (registeredEndFarms.get(expectedName) != world) {
+        if (!isRegisteredEndWorld(expectedName, world)) {
             throw new IllegalStateException("Keine geladene, separate Endfarm für '" + expectedName + "'.");
         }
     }
@@ -572,7 +629,7 @@ public final class BukkitFarmworldPostResetInitializer
                             if (activeDragon == null
                                     || !activeDragon.isValid()
                                     || activeDragon.isDead()) {
-                                pendingOneTimeDragonSpawnWorlds.put(world.getName(), world);
+                                pendingOneTimeDragonSpawnWorlds.put(world.getName(), new WeakReference<>(world));
                                 logger.info("Einmalige Enderdrachen-Freigabe f\u00fcr den "
                                         + "verz\u00f6gerten Vanilla-Spawn in '" + world.getName()
                                         + "' vorgemerkt.");

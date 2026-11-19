@@ -44,7 +44,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BukkitFarmworldPostResetInitializerTest {
 
-    private final List<World> loaded = new java.util.ArrayList<>(List.of(proxy(World.class)));
+    private final List<World> loaded = new java.util.ArrayList<>(List.of(mainWorld()));
+    private boolean globalTick = true;
+    private boolean registryListAllowed = true;
     private String minecraftVersion = "26.1.2";
     private CompletableFuture<Chunk> originChunk = CompletableFuture.completedFuture(proxy(Chunk.class));
     private World entityWorld;
@@ -591,6 +593,84 @@ class BukkitFarmworldPostResetInitializerTest {
     }
 
     @Test
+    void unloadThatLeavesWorldRegisteredRestoresGuardAndPreservesOneTimeSpawn() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        var initializer = initializer(name -> null, scheduler);
+        var config = dragonDisabledConfig();
+        initializer.synchronizeDragonSpawnGuards(List.of(config));
+        var scope = initializer.beginReset(config, ResetOptions.allowingEnderDragon());
+        assertTrue(initializer.apply(config, scenario.world(), ResetOptions.allowingEnderDragon())
+                .join().successful());
+        scope.close();
+
+        initializer.onWorldUnload(new WorldUnloadEvent(scenario.world()));
+        scheduler.advance();
+
+        var spawn = dragonSpawnEvent(scenario.world());
+        initializer.preventSuppressedEnderDragonSpawn(spawn);
+        assertFalse(spawn.isCancelled());
+        initializer.completeOneTimeEnderDragonSpawn(spawn);
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
+    void lateUnregistrationAfterGlobalCheckRevokesPendingPortalRepair() {
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        var initializer = initializer(name -> null, scheduler);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+        initializer.onWorldUnload(new WorldUnloadEvent(scenario.world()));
+        scheduler.advance();
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+
+        initializer.ensureExitPortalAfterDragonKill(dragonEggFormEvent(scenario));
+        loaded.remove(scenario.world());
+        scheduler.advance();
+
+        assertFalse(scenario.endPortalGenerated().get());
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
+    void lateRemovalOfFirstWorldProtectsItsSuccessor() {
+        World primary = loaded.getFirst();
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        ControllableScheduler scheduler = new ControllableScheduler();
+        var initializer = initializer(name -> null, scheduler);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+
+        initializer.onWorldUnload(new WorldUnloadEvent(primary));
+        scheduler.advance();
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        loaded.removeFirst();
+
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
+    void loadAndUnloadOutsideGlobalTickDeferBukkitRegistryReads() {
+        var scheduler = new ControllableScheduler();
+        var initializer = initializer(name -> null, scheduler);
+        initializer.synchronizeDragonSpawnGuards(List.of(dragonDisabledConfig()));
+        DragonScenario scenario = dragonScenario(List.of(List.of()));
+        globalTick = false;
+        registryListAllowed = false;
+        initializer.onWorldLoad(new WorldLoadEvent(scenario.world()));
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+
+        registryListAllowed = true;
+        scheduler.advance();
+        registryListAllowed = false;
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+        initializer.onWorldUnload(new WorldUnloadEvent(scenario.world()));
+        assertFalse(spawnIsSuppressed(initializer, scenario.world()));
+        registryListAllowed = true;
+        scheduler.advance();
+        assertTrue(spawnIsSuppressed(initializer, scenario.world()));
+    }
+
+    @Test
     void replacementBeforeCallbackCannotRepairEitherWorld() {
         DragonScenario original = dragonScenario(List.of(List.of()));
         ControllableScheduler scheduler = new ControllableScheduler();
@@ -1011,12 +1091,31 @@ class BukkitFarmworldPostResetInitializerTest {
         );
     }
 
+    private static World mainWorld() {
+        return (World) Proxy.newProxyInstance(World.class.getClassLoader(), new Class<?>[]{World.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "world";
+                    case "getKey" -> NamespacedKey.minecraft("overworld");
+                    case "getEnvironment" -> World.Environment.NORMAL;
+                    default -> defaultValue(method.getReturnType());
+                });
+    }
+
     private Plugin pluginWithWorldRegistry() {
         Server server = (Server) Proxy.newProxyInstance(Server.class.getClassLoader(),
                 new Class<?>[]{Server.class}, (proxy, method, args) -> switch (method.getName()) {
-                    case "getWorlds" -> List.copyOf(loaded);
-                    case "getWorld" -> loaded.stream().filter(w -> args[0].equals(w.getName()))
-                            .findFirst().orElse(null);
+                    case "isGlobalTickThread" -> globalTick;
+                    case "getWorlds" -> {
+                        assertTrue(registryListAllowed);
+                        yield List.copyOf(loaded);
+                    }
+                    case "getWorld" -> {
+                        if (args[0] instanceof String name) {
+                            assertTrue(registryListAllowed);
+                            yield loaded.stream().filter(w -> name.equals(w.getName())).findFirst().orElse(null);
+                        }
+                        yield loaded.stream().filter(w -> args[0].equals(w.getKey())).findFirst().orElse(null);
+                    }
                     default -> defaultValue(method.getReturnType());
                 });
         return (Plugin) Proxy.newProxyInstance(Plugin.class.getClassLoader(),
