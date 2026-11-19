@@ -41,9 +41,6 @@ final class EndDragonFightCompatibility {
     }
 
     private String currentMinecraftVersion() {
-        return Objects.requireNonNull(
-                minecraftVersion.get(),
-                "Minecraft-Version aus ServerBuildInfo"
-        );
+        return Objects.toString(minecraftVersion.get(), "unbekannt");
     }
 }

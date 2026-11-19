@@ -604,7 +604,8 @@ class ResetWorkflowIntegrationTest {
                     runtime,
                     new DirectScheduler(),
                     notificationService,
-                    logger
+                    logger,
+                    new EndDragonFightCompatibility(() -> "26.1.2")
             );
             this.globalScheduler = new RecordingGlobalRegionScheduler();
             Plugin plugin = plugin(logger);

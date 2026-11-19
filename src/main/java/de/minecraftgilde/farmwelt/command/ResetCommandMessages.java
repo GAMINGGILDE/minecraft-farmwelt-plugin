@@ -28,6 +28,7 @@ final class ResetCommandMessages {
             case PROTECTED_WORLD -> List.of(
                     "§cDie konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden."
             );
+            case UNSUPPORTED_DRAGON_VERSION -> List.of("§c" + result.message());
             case EVACUATION_FAILED -> List.of(
                     "§cDer Reset wurde abgebrochen, da nicht alle Spieler sicher evakuiert werden konnten."
             );

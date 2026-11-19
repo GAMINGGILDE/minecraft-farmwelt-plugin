@@ -23,18 +23,24 @@ public record FarmworldRegenerationOptions(EndDragonFightDataMode endDragonFight
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(resetOptions, "resetOptions");
 
-        if (config.farmworldType() != FarmworldType.END
-                || config.postReset().end().isEmpty()) {
+        // Ohne End-Abschnitt betrifft --dragon ausschließlich den geladenen Kampf.
+        if (config.postReset().end().isEmpty()) {
             return defaults();
         }
 
-        boolean spawnDragon = resetOptions.allowEnderDragon()
-                || config.postReset().end().orElseThrow().dragon();
-        return new FarmworldRegenerationOptions(
-                spawnDragon
-                        ? EndDragonFightDataMode.INITIAL_FIGHT
-                        : EndDragonFightDataMode.SUPPRESSED
-        );
+        return new FarmworldRegenerationOptions(effectiveDragonPolicy(config, resetOptions));
+    }
+
+    static EndDragonFightDataMode effectiveDragonPolicy(FarmworldResetConfig config, ResetOptions options) {
+        if (!config.enabled() || config.farmworldType() != FarmworldType.END) {
+            return EndDragonFightDataMode.PRESERVE;
+        }
+        if (options.allowEnderDragon()) {
+            return EndDragonFightDataMode.INITIAL_FIGHT;
+        }
+        return config.postReset().end()
+                .map(end -> end.dragon() ? EndDragonFightDataMode.INITIAL_FIGHT : EndDragonFightDataMode.SUPPRESSED)
+                .orElse(EndDragonFightDataMode.PRESERVE);
     }
 
     public boolean resetsEndDragonFightData() {

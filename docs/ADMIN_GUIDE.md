@@ -352,7 +352,11 @@ Die Datei niemals während eines laufenden Servers manuell bearbeiten. Für isol
 
 ## Endfarm-Sonderlogik
 
-Die Endfarm-Policy ist versionssensitiv und wird nach der Worlds-Regeneration angewendet.
+Für die internen DragonBattle-Zugriffe ist ausschließlich Minecraft 26.1.2 freigegeben. Bei einer anderen Version endet ein Reset mit wirksamer Dragon-Policy bereits vor Evakuierung und Regeneration mit `UNSUPPORTED_DRAGON_VERSION`. Befehl und Serverlog nennen die erkannte und die freigegebene Version. Ein fälliger Termin bleibt bei Ablehnung fällig.
+
+Fehlt `post-reset.end`, überlässt ein regulärer End-Reset den Kampf Vanilla. Ein ausdrückliches `--dragon` bereitet in diesem Fall auf der freigegebenen Version den Erstkampf in der neu geladenen Welt vor. Die DragonBattle-Datei wird dafür beim Entladen nicht ersetzt.
+
+Auch ohne vorherigen Reset prüfen Spawn-Guard und Portalreparatur die konkrete geladene Endfarm. Die erste geladene Welt und die drei Vanilla-Dimensionskeys sind geschützt. Wird die End-Policy vor einer geplanten Portalreparatur geändert oder die Welt ersetzt, verfällt die Reparatur.
 
 ### `dragon: false`
 
@@ -372,7 +376,7 @@ Die Endfarm-Policy ist versionssensitiv und wird nach der Worlds-Regeneration an
 - `--dragon` verändert `dragon: false` in der Config nicht dauerhaft.
 - Bei konfiguriertem `dragon: false` bleibt die einmalige Spawn-Freigabe nur bis zum tatsächlichen Vanilla-Spawn bestehen; danach greift wieder die konfigurierte Suppression.
 
-Nach jedem Minecraft-/Folia-Upgrade müssen beide Varianten einschließlich Bossbar, Portal, Kristall-Respawn und Drachenei auf einem isolierten Testserver abgenommen werden.
+Eine Freigabe für Folia 26.3 setzt die Prüfung der internen Zugriffe und die reale Abnahme beider Varianten einschließlich Bossbar, Portal, Kristall-Respawn und Drachenei voraus.
 
 ## Betrieb des Ressourcenmonitors
 

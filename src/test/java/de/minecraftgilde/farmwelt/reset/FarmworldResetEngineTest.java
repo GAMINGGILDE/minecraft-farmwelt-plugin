@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -27,6 +28,8 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class FarmworldResetEngineTest {
 
@@ -71,6 +74,7 @@ class FarmworldResetEngineTest {
             quietLogger()
     );
     private final FakePostResetInitializer postResetInitializer = new FakePostResetInitializer(calls);
+    private String minecraftVersion = "26.1.2";
     private final FarmworldResetEngine engine = new FarmworldResetEngine(
             resetService,
             worldOperations,
@@ -78,7 +82,8 @@ class FarmworldResetEngineTest {
             postResetInitializer,
             new DirectScheduler(),
             notificationService,
-            quietLogger()
+            quietLogger(),
+            new EndDragonFightCompatibility(() -> minecraftVersion)
     );
 
     @BeforeEach
@@ -779,6 +784,47 @@ class FarmworldResetEngineTest {
         );
     }
 
+    @ParameterizedTest
+    @CsvSource({"26.3,false,false", "26.3,true,false", "26.3,,true", "99.1,,true"})
+    void unsupportedFightStopsBeforeScopeEvacuationAndWorlds(
+            String version, Boolean dragon, boolean override
+    ) {
+        minecraftVersion = version;
+        configureEnd(dragon);
+        FarmworldResetState previous = resetService.getState("end").orElseThrow();
+
+        ResetResult result = engine.reset("end", new ResetOptions(override)).join();
+
+        assertEquals(ResetStatus.UNSUPPORTED_DRAGON_VERSION, result.status());
+        assertTrue(result.message().contains(version));
+        assertTrue(result.message().contains("26.1.2"));
+        assertTrue(calls.isEmpty(), calls::toString);
+        assertFalse(postResetInitializer.scopeStarted);
+        assertEquals(previous, resetService.getState("end").orElseThrow());
+        assertFalse(engine.isResetRunning("end"));
+    }
+
+    @Test
+    void unsupportedVersionCanRegenerateEndWithoutDragonPolicy() {
+        minecraftVersion = "26.3";
+        configureEnd(null);
+
+        assertEquals(ResetStatus.SUCCESS, engine.reset("end").join().status());
+        assertFalse(lifecycleService.receivedOptions.resetsEndDragonFightData());
+    }
+
+    private void configureEnd(Boolean dragon) {
+        World original = world("endfarm", World.Environment.THE_END, "old-endfarm", OLD_SEED);
+        World regenerated = world("endfarm", World.Environment.THE_END, "new-endfarm", NEW_SEED);
+        resetService.reload(List.of(new FarmworldResetConfig("end", "endfarm", true,
+                Duration.ofDays(60), FarmworldType.END, new PostResetConfig(Map.of(),
+                Optional.empty(), Optional.ofNullable(dragon).map(EndPostResetConfig::new)))));
+        calls.clear();
+        worldOperations.initialInspection = WorldInspection.loaded(original, FarmworldType.END, false);
+        worldOperations.regeneratedInspection = WorldInspection.loaded(regenerated, FarmworldType.END, false);
+        lifecycleService.result = CompletableFuture.completedFuture(regenerated);
+    }
+
     @Test
     void dragonDisabledEndResetRequestsFightDataResetFromLifecycle() {
         World originalEnd = world("endfarm", World.Environment.THE_END, "old-endfarm", OLD_SEED);
@@ -1281,6 +1327,7 @@ class FarmworldResetEngineTest {
                 CompletableFuture.completedFuture(PostResetResult.success());
         private FarmworldResetConfig receivedConfig;
         private ResetOptions receivedOptions;
+        private boolean scopeStarted;
         private boolean resetScopeClosed;
         private RuntimeException beginFailure;
         private RuntimeException closeFailure;
@@ -1292,6 +1339,7 @@ class FarmworldResetEngineTest {
 
         @Override
         public ResetScope beginReset(FarmworldResetConfig config, ResetOptions options) {
+            scopeStarted = true;
             if (beginFailure != null) {
                 throw beginFailure;
             }

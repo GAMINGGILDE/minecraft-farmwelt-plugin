@@ -27,7 +27,7 @@ Das Plugin ist kein Claim- oder allgemeines Anti-Grief-System. GriefPrevention k
 - Post-Reset-Gamerules, WorldBorder und eine ausdrücklich konfigurierte Enderdragon-Policy.
 - Folia-gerechte Ausführung, Diagnosebefehle und ein echter automatisierter Folia-/Worlds-Smoke-Test.
 
-Die Endfarm unterstützt sowohl einen dragonlosen Zustand mit aktivem Ausgangsportal als auch einen einmaligen frischen Erstkampf über `--dragon`. Die Betriebsdetails stehen im [Admin Guide](docs/ADMIN_GUIDE.md).
+Die Endfarm unterstützt einen dragonlosen Zustand mit aktivem Ausgangsportal und einen einmaligen Erstkampf über `--dragon`. Beide benötigen Minecraft 26.1.2. Farmwelt prüft die Freigabe vor der Evakuierung. Spawn-Guard und Portalreparatur greifen ausschließlich in einer geladenen, separaten Endfarm mit wirksamer Dragon-Policy. Die Betriebsdetails stehen im [Admin Guide](docs/ADMIN_GUIDE.md).
 
 Spieler sehen unter `/farmwelt` beim jeweiligen Welt-Item den geplanten Reset in der Server-Zeitzone und die ungefähre Restzeit. Die Anzeige wird bei jedem Öffnen aktualisiert; bei höchstens einer Stunde Restzeit ist sie gelb, bei höchstens fünf Minuten rot. Der Info-Kompass erklärt, dass platzierte Blöcke und gelagerte Items beim Reset verloren gehen. Dafür genügt die bestehende Permission `farmwelt.use`.
 

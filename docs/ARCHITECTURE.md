@@ -156,7 +156,8 @@ FarmworldResetEngine
 Die produktive Pipeline lautet:
 
 ```text
-Config-Snapshot / Dragon-Scope und Reset-Lock
+Reset-Lock und Config-Snapshot
+    -> effektive Dragon-Policy bestimmen, erforderliche Versionsfreigabe prüfen, Dragon-Scope öffnen
     -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz validieren
     -> Spieler evakuieren und erfolgreiche Einzelteleports persönlich benachrichtigen
     -> Welt erneut auf Leerstand prüfen
@@ -179,6 +180,10 @@ Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `n
 Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Countdown-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` ohne zusätzlichen Lifecycle-Broadcast behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie, erhalten über dieselbe Engine aber dieselben Start-/Erfolgs-/Fehlermeldungen wie automatische und Startup-Resets.
 
 ## Endfarm- und DragonBattle-Vertrag
+
+Die Engine prüft die wirksame Policy vor Eröffnung des Reset-Scopes. Regeneration und Initialisierung verwenden dieselbe Policy-Funktion mit dem unveränderlichen Reset-Snapshot und dem einmaligen Override. Ohne End-Abschnitt benötigt nur `--dragon` die Versionsfreigabe für den geladenen Kampf. Der Worlds-Adapter schreibt in diesem Fall keine DragonBattle-Saved-Data. Bei konfigurierter Policy prüft er beim Staging im Unload-Event nochmals die Freigabe und die registrierte Weltinstanz.
+
+Beim Pluginstart und in den Welt-Lifecycle-Events veröffentlicht der Initialisierer die tatsächlichen Instanzen der geladenen separaten Endwelten. Die Prüfung verwendet denselben Hauptweltschutz wie die Reset-Engine. Regions- und Entity-Callbacks können so ihre Weltidentität ohne regionsfremde Inspektion der Bukkit-Weltliste prüfen. Der Portal-Callback prüft zusätzlich die Policy-Revision und bezieht den aktuellen DragonBattle in der End-Ursprungsregion. Ein bereits abgebrochenes `DragonEggFormEvent` erreicht weiterhin die Portalreparatur. Die bestehende globale Inspektion aktiver Drachen nach dem Reset ist separat unter FW-005 zu prüfen.
 
 Die Endfarm verwendet bewusst versionsgebundene Bukkit-/CraftBukkit-/Minecraft-Zugriffe. `EndDragonFightCompatibility` begrenzt die freigegebene Serverversion, `EndDragonFightRuntimeAccess` kapselt DragonBattle-Zustand und Bossbar, und `EndDragonFightDataStore` staged die betroffenen Saved-Data-Änderungen mit Commit/Rollback. `BukkitFarmworldPostResetInitializer` koordiniert außerdem Spawn-Guard, Portal-Erzeugung und spätere Portal-Verifikation in der zuständigen Region.
 

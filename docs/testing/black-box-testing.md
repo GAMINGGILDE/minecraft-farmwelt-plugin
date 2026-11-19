@@ -113,6 +113,10 @@ Mit `post-reset.end.dragon: false` einen normalen End-Reset ohne `--dragon` ausf
 - die einmalige Freigabe verändert `dragon: false` in der Config nicht,
 - ein späterer normaler oder automatischer Reset verwendet wieder die konfigurierte dragonlose Policy.
 
+Für die Abnahme von FW-001 auf 26.1.2 Test F auch ohne `post-reset.end` ausführen und den verzögerten Erstspawn nach Betreten der Endfarm prüfen. In einer isolierten Testwelt zusätzlich bei aktivierter End-Policy den Vanilla-End als Ziel eintragen und ohne Farmwelt-Reset einen Vanilla-Kampf beobachten. Spawn, Ei und Portal müssen Vanilla folgen. Serverlog und Weltzustand vor und nach dem Kampf erfassen.
+
+Folia 26.3 benötigt vor einer späteren Freigabe eine Prüfung des internen Datenlayouts und die reale Wiederholung von Test E und F einschließlich Bossbar, Portal, Ei und Vier-Kristall-Respawn.
+
 ## Test G – Reload-Intervall
 
 1. Mit `interval: "30d"` einen festen zukünftigen `next-reset` notieren.
