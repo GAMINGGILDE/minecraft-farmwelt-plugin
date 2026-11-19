@@ -13,7 +13,9 @@ import java.io.DataInputStream;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,12 +28,20 @@ import net.kyori.adventure.key.Key;
 import net.thenextlvl.worlds.Level;
 import net.thenextlvl.worlds.WorldsAccess;
 import net.thenextlvl.worlds.event.WorldRegenerateEvent;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 
 class WorldsFarmworldLifecycleServiceTest {
+
+    private final Map<String, World> loaded = new LinkedHashMap<>();
+
+    WorldsFarmworldLifecycleServiceTest() {
+        world("world");
+    }
 
     @Test
     void delegatesRegenerationWithOnlyRandomSeedCustomization() {
@@ -198,6 +208,7 @@ class WorldsFarmworldLifecycleServiceTest {
             return CompletableFuture.completedFuture(world);
         });
         WorldsFarmworldLifecycleService service = new WorldsFarmworldLifecycleService(
+                server(),
                 worldsAccess,
                 new EndDragonFightDataStore(4790),
                 new EndDragonFightCompatibility(() -> "26.2"),
@@ -272,6 +283,26 @@ class WorldsFarmworldLifecycleServiceTest {
         assertTrue(Files.isDirectory(invalidFightData));
     }
 
+    @Test
+    void rechecksRegisteredInstanceBeforeStaging(@TempDir Path tempDir) throws Exception {
+        World original = world("endfarm", tempDir);
+        Path data = createFightData(tempDir, "alter Kampf");
+        AtomicReference<WorldsFarmworldLifecycleService> service = new AtomicReference<>();
+        service.set(service(worldsAccess((world, customization) -> {
+            service.get().resetEndDragonFightData(new WorldRegenerateEvent(world));
+            loaded.remove("endfarm");
+            World replacement = world("endfarm", tempDir.resolve("new"));
+            WorldUnloadEvent unload = new WorldUnloadEvent(original);
+            service.get().prepareEndDragonFightData(unload);
+            assertTrue(unload.isCancelled());
+            return CompletableFuture.completedFuture(replacement);
+        })));
+
+        assertThrows(CompletionException.class, () -> service.get()
+                .regenerate(original, new FarmworldRegenerationOptions(SUPPRESSED)).join());
+        assertEquals("alter Kampf", Files.readString(data));
+    }
+
     private static WorldsAccess worldsAccess(Regeneration regeneration) {
         return (WorldsAccess) Proxy.newProxyInstance(
                 WorldsAccess.class.getClassLoader(),
@@ -293,16 +324,18 @@ class WorldsFarmworldLifecycleServiceTest {
         );
     }
 
-    private static World world(String name) {
+    private World world(String name) {
         return world(name, null);
     }
 
-    private static World world(String name, Path worldFolder) {
-        return (World) Proxy.newProxyInstance(
+    private World world(String name, Path worldFolder) {
+        World world = (World) Proxy.newProxyInstance(
                 World.class.getClassLoader(),
                 new Class<?>[]{World.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getName" -> name;
+                    case "getEnvironment" -> World.Environment.THE_END;
+                    case "getKey" -> new NamespacedKey("worlds", name);
                     case "getWorldFolder" -> worldFolder == null ? null : worldFolder.toFile();
                     case "toString" -> "FakeWorld[" + name + "]";
                     case "hashCode" -> System.identityHashCode(proxy);
@@ -310,6 +343,17 @@ class WorldsFarmworldLifecycleServiceTest {
                     default -> defaultValue(method.getReturnType());
                 }
         );
+        loaded.putIfAbsent(name, world);
+        return world;
+    }
+
+    private Server server() {
+        return (Server) Proxy.newProxyInstance(Server.class.getClassLoader(), new Class<?>[]{Server.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getWorld" -> loaded.get(args[0]);
+                    case "getWorlds" -> List.copyOf(loaded.values());
+                    default -> defaultValue(method.getReturnType());
+                });
     }
 
     private static Path createFightData(Path worldFolder, String content) throws Exception {
@@ -364,8 +408,9 @@ class WorldsFarmworldLifecycleServiceTest {
         assertEquals(expectedValue ? 1 : 0, data.readUnsignedByte());
     }
 
-    private static WorldsFarmworldLifecycleService service(WorldsAccess worldsAccess) {
+    private WorldsFarmworldLifecycleService service(WorldsAccess worldsAccess) {
         return new WorldsFarmworldLifecycleService(
+                server(),
                 worldsAccess,
                 new EndDragonFightDataStore(4790),
                 new EndDragonFightCompatibility(() -> "26.1.2"),

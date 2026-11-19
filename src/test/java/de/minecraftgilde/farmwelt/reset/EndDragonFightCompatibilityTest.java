@@ -19,6 +19,15 @@ class EndDragonFightCompatibilityTest {
     }
 
     @Test
+    void absentVersionCannotAuthorizeInternalAccess() {
+        var compatibility = new EndDragonFightCompatibility(() -> null);
+
+        assertFalse(compatibility.isSupported());
+        assertTrue(assertThrows(IllegalStateException.class, compatibility::requireSupported)
+                .getMessage().contains("unbekannt"));
+    }
+
+    @Test
     void unknownMinecraftVersionIsRejectedWithClearMessage() {
         EndDragonFightCompatibility compatibility =
                 new EndDragonFightCompatibility(() -> "26.2");

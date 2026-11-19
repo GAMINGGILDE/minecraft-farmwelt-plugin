@@ -156,7 +156,8 @@ FarmworldResetEngine
 Die produktive Pipeline lautet:
 
 ```text
-Config-Snapshot / Dragon-Scope und Reset-Lock
+Reset-Lock und Config-Snapshot
+    -> effektive Dragon-Policy bestimmen, erforderliche Versionsfreigabe prüfen, Dragon-Scope öffnen
     -> geladene Bukkit-Welt, Name, Dimension und Hauptweltschutz validieren
     -> Spieler evakuieren und erfolgreiche Einzelteleports persönlich benachrichtigen
     -> Welt erneut auf Leerstand prüfen
@@ -179,6 +180,12 @@ Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `n
 Erst nach Ende dieser Catch-up-Kette startet `AutomaticResetScheduler` genau einen periodischen globalen Folia-Task. Er prüft danach alle 60 Sekunden zuerst Countdown-Warnungen und anschließend die persistenten `nextReset`-Zeitpunkte gegen dasselbe aktuelle `Instant`. Notification-Fehler werden pro Farmwelt beziehungsweise Broadcast geloggt und können weder den Due-Check noch den Start eines fälligen Resets verhindern. Für `now >= nextReset` gibt der Countdown-Pfad nichts aus. Nur bei `DUE` ruft der Scheduler nicht-blockierend `FarmworldResetExecutor.reset(farmworldKey)` auf; dadurch gelten die normalen `ResetOptions` ohne Dragon-Override. Mehrere im regulären Tick fällige Welten werden weiterhin unabhängig angestoßen. Die Engine bleibt mit ihrem `runningResets`-Lock die einzige Schutzinstanz gegen parallele Resets derselben Farmwelt, weshalb `ALREADY_RUNNING` ohne zusätzlichen Lifecycle-Broadcast behandelt wird. Erfolg und echte Fehler werden kompakt geloggt; synchrone Startfehler und exceptional Futures beenden weder den periodischen Task noch die Verarbeitung anderer Farmwelten. Nur die Engine aktualisiert nach vollständigem Erfolg `lastReset` und `nextReset`; bei Fehlern bleibt der fällige State unverändert. Manuelle Force-Resets umgehen den Scheduler weiterhin und erzeugen daher keine Countdown-Serie, erhalten über dieselbe Engine aber dieselben Start-/Erfolgs-/Fehlermeldungen wie automatische und Startup-Resets.
 
 ## Endfarm- und DragonBattle-Vertrag
+
+Die Engine prüft die wirksame Policy vor Eröffnung des Reset-Scopes. Regeneration und Initialisierung verwenden dieselbe Policy-Funktion mit dem unveränderlichen Reset-Snapshot und dem einmaligen Override. Ohne End-Abschnitt benötigt nur `--dragon` die Versionsfreigabe für den geladenen Kampf. Der Worlds-Adapter schreibt in diesem Fall keine DragonBattle-Saved-Data. Bei konfigurierter Policy prüft er beim Staging im Unload-Event nochmals die Freigabe und die registrierte Weltinstanz.
+
+Beim Start und auf der Globalregion prüft der Initialisierer die geordnete Bukkit-Weltliste mit demselben Hauptweltschutz wie die Reset-Engine. Ein Unload-Event entzieht der betroffenen Instanz zunächst die Freigabe. Worlds 4.4.0 kann danach noch asynchron speichern oder beim Entfernen scheitern. Der Abgleich im nächsten globalen Tick übernimmt deshalb den tatsächlichen Registrierungsstand. Eine noch offene einmalige Spawn-Freigabe gehört weiterhin ausschließlich derselben Weltinstanz.
+
+Vor einem Eingriff prüfen die Callbacks zusätzlich über den Dimensionskey, ob die validierte Instanz und mindestens eine ihr zuvor vorangehende Welt noch registriert sind. So bleibt auch eine erst später zur Hauptwelt aufgerückte Endfarm geschützt. Der Key-Lookup verwendet auf 26.1.2 die Level-Tabelle des Servers. Regions- und Entity-Callbacks lesen keine Bukkit-Weltliste. Der Portal-Callback prüft außerdem die Policy-Revision und bezieht den aktuellen DragonBattle in der End-Ursprungsregion. Auch ein bereits abgebrochenes `DragonEggFormEvent` erreicht die Portalreparatur. Die globale Inspektion aktiver Drachen nach dem Reset gehört zu FW-005.
 
 Die Endfarm verwendet bewusst versionsgebundene Bukkit-/CraftBukkit-/Minecraft-Zugriffe. `EndDragonFightCompatibility` begrenzt die freigegebene Serverversion, `EndDragonFightRuntimeAccess` kapselt DragonBattle-Zustand und Bossbar, und `EndDragonFightDataStore` staged die betroffenen Saved-Data-Änderungen mit Commit/Rollback. `BukkitFarmworldPostResetInitializer` koordiniert außerdem Spawn-Guard, Portal-Erzeugung und spätere Portal-Verifikation in der zuständigen Region.
 

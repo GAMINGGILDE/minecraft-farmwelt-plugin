@@ -49,7 +49,7 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
         return WorldInspection.loaded(
                 world,
                 toFarmworldType(world.getEnvironment()),
-                isProtectedMainWorld(plugin.getServer(), world)
+                isProtectedMainWorld(plugin.getServer().getWorlds(), world)
         );
     }
 
@@ -157,8 +157,9 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
             }
         }
 
-        for (World world : server.getWorlds()) {
-            if (isProtectedMainWorld(server, world) && isSafeDestination(world, resetWorld)) {
+        List<World> loadedWorlds = server.getWorlds();
+        for (World world : loadedWorlds) {
+            if (isProtectedMainWorld(loadedWorlds, world) && isSafeDestination(world, resetWorld)) {
                 return world;
             }
         }
@@ -177,10 +178,15 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
                 && !resetWorldNames.get().contains(world.getName());
     }
 
-    private boolean isProtectedMainWorld(Server server, World world) {
-        List<World> loadedWorlds = server.getWorlds();
-        return (!loadedWorlds.isEmpty() && loadedWorlds.getFirst() == world)
-                || VANILLA_MAIN_DIMENSION_KEYS.contains(world.getKey());
+    static boolean isRegisteredEndFarm(Server server, List<World> loadedWorlds, World world) {
+        return world.getEnvironment() == World.Environment.THE_END
+                && server.getWorld(world.getName()) == world
+                && !isProtectedMainWorld(loadedWorlds, world);
+    }
+
+    private static boolean isProtectedMainWorld(List<World> loadedWorlds, World world) {
+        return loadedWorlds.isEmpty() || loadedWorlds.getFirst() == world
+                || world.getKey() == null || VANILLA_MAIN_DIMENSION_KEYS.contains(world.getKey());
     }
 
     private FarmworldType toFarmworldType(World.Environment environment) {

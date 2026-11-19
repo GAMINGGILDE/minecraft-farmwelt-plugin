@@ -22,6 +22,14 @@ class ResetCommandMessagesTest {
         assertTrue(messages.stream().anyMatch(message -> message.contains(expectedText)), messages::toString);
     }
 
+    @org.junit.jupiter.api.Test
+    void reportsActualAndSupportedMinecraftVersionToAdmin() {
+        String detail = "Minecraft-Version '26.3' nicht freigegeben. Unterstützte Version: 26.1.2";
+        var result = new ResetResult("end", "endfarm", ResetStatus.UNSUPPORTED_DRAGON_VERSION, detail, null);
+
+        assertTrue(ResetCommandMessages.forResult(result).stream().anyMatch(message -> message.contains(detail)));
+    }
+
     private static Stream<Arguments> mappedStatuses() {
         return Stream.of(
                 Arguments.of(ResetStatus.SUCCESS, "erfolgreich zurückgesetzt"),

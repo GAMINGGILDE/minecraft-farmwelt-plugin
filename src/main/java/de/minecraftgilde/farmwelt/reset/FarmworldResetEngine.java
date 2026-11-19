@@ -23,6 +23,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private final FarmweltScheduler scheduler;
     private final ResetNotificationService notificationService;
     private final Logger logger;
+    private final EndDragonFightCompatibility dragonCompatibility;
     private final Set<String> runningResets = ConcurrentHashMap.newKeySet();
 
     public FarmworldResetEngine(
@@ -34,6 +35,21 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ResetNotificationService notificationService,
             Logger logger
     ) {
+        this(resetService, worldOperations, lifecycleService, postResetInitializer, scheduler,
+                notificationService, logger, EndDragonFightCompatibility.runningServer());
+    }
+
+    FarmworldResetEngine(
+            FarmworldResetService resetService,
+            FarmworldWorldOperations worldOperations,
+            FarmworldLifecycleService lifecycleService,
+            FarmworldPostResetInitializer postResetInitializer,
+            FarmweltScheduler scheduler,
+            ResetNotificationService notificationService,
+            Logger logger,
+            EndDragonFightCompatibility dragonCompatibility
+    ) {
+        this.dragonCompatibility = Objects.requireNonNull(dragonCompatibility, "dragonCompatibility");
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.worldOperations = Objects.requireNonNull(worldOperations, "worldOperations");
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService");
@@ -106,6 +122,15 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
         final FarmworldPostResetInitializer.ResetScope resetScope;
         try {
+            if (FarmworldRegenerationOptions.effectiveDragonPolicy(resetConfig, options)
+                    != FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE) {
+                try {
+                    dragonCompatibility.requireSupported();
+                } catch (RuntimeException exception) {
+                    throw new ResetPipelineException(ResetStatus.UNSUPPORTED_DRAGON_VERSION,
+                            exception.getMessage(), exception);
+                }
+            }
             resetScope = Objects.requireNonNull(
                     postResetInitializer.beginReset(resetConfig, options),
                     "postResetInitializer.beginReset(...)"

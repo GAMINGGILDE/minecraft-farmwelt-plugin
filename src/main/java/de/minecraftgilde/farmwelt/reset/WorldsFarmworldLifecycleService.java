@@ -12,6 +12,7 @@ import java.util.logging.Logger;
 import net.thenextlvl.worlds.WorldsAccess;
 import net.thenextlvl.worlds.event.WorldRegenerateEvent;
 import org.bukkit.Bukkit;
+import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -22,6 +23,7 @@ import org.bukkit.event.world.WorldUnloadEvent;
 public final class WorldsFarmworldLifecycleService
         implements FarmworldLifecycleService, Listener {
 
+    private final Server server;
     private final WorldsAccess worldsAccess;
     private final EndDragonFightDataStore dragonFightDataStore;
     private final EndDragonFightCompatibility dragonFightCompatibility;
@@ -30,11 +32,13 @@ public final class WorldsFarmworldLifecycleService
             Collections.synchronizedMap(new IdentityHashMap<>());
 
     WorldsFarmworldLifecycleService(
+            Server server,
             WorldsAccess worldsAccess,
             EndDragonFightDataStore dragonFightDataStore,
             EndDragonFightCompatibility dragonFightCompatibility,
             Logger logger
     ) {
+        this.server = Objects.requireNonNull(server, "server");
         this.worldsAccess = Objects.requireNonNull(worldsAccess, "worldsAccess");
         this.dragonFightDataStore = Objects.requireNonNull(
                 dragonFightDataStore,
@@ -57,6 +61,7 @@ public final class WorldsFarmworldLifecycleService
             throw new IllegalStateException("Das Worlds-Plugin ist nicht aktiviert.");
         }
         return new WorldsFarmworldLifecycleService(
+                Bukkit.getServer(),
                 worldsAccess,
                 new EndDragonFightDataStore(Bukkit.getUnsafe().getDataVersion()),
                 EndDragonFightCompatibility.runningServer(),
@@ -140,6 +145,13 @@ public final class WorldsFarmworldLifecycleService
 
         pendingReset.unloadEventReceived = true;
         try {
+            World world = event.getWorld();
+            dragonFightCompatibility.requireSupported();
+            if (!BukkitFarmworldWorldOperations.isRegisteredEndFarm(
+                    server, server.getWorlds(), world)) {
+                throw new IllegalStateException("DragonBattle-Datenreset für '" + world.getName()
+                        + "' erfordert eine registrierte, separate Endfarm.");
+            }
             logger.info("DragonBattle-Saved-Data f\u00fcr '" + event.getWorld().getName()
                     + "' werden f\u00fcr Reset vorbereitet.");
             pendingReset.stagedData = dragonFightDataStore.stage(
