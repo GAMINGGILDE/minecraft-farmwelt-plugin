@@ -9,6 +9,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class ResetState:
     version: int
     last_reset: datetime | None
     next_reset: datetime
+    attempt_id: str | None
 
 
 def fail(message: str) -> "NoReturn":
@@ -45,7 +47,7 @@ def read_state(path: Path, world: str) -> ResetState:
         fail(f"{path}: version is missing or invalid")
 
     section_match = re.search(
-        rf"(?ms)^  {re.escape(world)}:\s*$\n((?:^    .*(?:\n|$))*)",
+        rf"(?m)^  {re.escape(world)}:[ \t]*\n((?:^    .*\n?)*)",
         text,
     )
     if section_match is None:
@@ -66,6 +68,7 @@ def read_state(path: Path, world: str) -> ResetState:
         version=int(version_match.group(1)),
         last_reset=parse_timestamp(last_raw, path, "last-reset") if last_raw else None,
         next_reset=parse_timestamp(next_raw, path, "next-reset"),
+        attempt_id=values.get("attempt-id"),
     )
 
 
@@ -74,6 +77,8 @@ def main() -> None:
     parser.add_argument("before", type=Path)
     parser.add_argument("after", type=Path)
     parser.add_argument("world")
+    parser.add_argument("journal", type=Path)
+    parser.add_argument("bukkit_name")
     args = parser.parse_args()
 
     before = read_state(args.before, args.world)
@@ -89,6 +94,18 @@ def main() -> None:
         fail("next-reset was not advanced by the reset")
     if after.next_reset <= after.last_reset:
         fail("next-reset is not later than last-reset")
+
+    journal = dict(line.split("=", 1) for line in args.journal.read_text().splitlines())
+    if (journal["version"], journal["phase"], journal["key"], journal["world"]) != (
+        "1", "POST_RESET_DONE", args.world, args.bukkit_name
+    ):
+        fail("Journalphase oder Weltidentität stimmt nicht")
+    if str(UUID(journal["id"])) != after.attempt_id or before.attempt_id == after.attempt_id:
+        fail("Versuchs-UUID stimmt nicht mit dem neuen Zeitplanbeleg überein")
+    if (parse_timestamp(journal["completed"], args.journal, "completed") != after.last_reset
+            or parse_timestamp(journal["next"], args.journal, "next") != after.next_reset):
+        fail("Journal und Zeitplan enthalten unterschiedliche Abschlusszeiten")
+    print(f"Bestätigter Versuch: {journal['id']} ({args.world}, {args.bukkit_name})")
 
     print(f"State before: last-reset={before.last_reset}, next-reset={before.next_reset}")
     print(f"State after:  last-reset={after.last_reset}, next-reset={after.next_reset}")

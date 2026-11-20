@@ -1,10 +1,12 @@
 # Automatisierter Folia-/Worlds-Smoke-Test
 
-Dieses Harness startet einen vollständig isolierten Folia-Testserver, installiert die Farmwelt-JAR aus dem aktuellen Build sowie das echte Worlds-Plugin und führt genau einen Overworld-Reset über die öffentliche Serverkonsole aus. Es ergänzt die Gradle-Tests und die [vollständige manuelle Black-Box-Anleitung](../../docs/testing/black-box-testing.md), ersetzt aber weder diese noch einen anhand der [V2-Abnahmevorlage BB-01 bis BB-26](../../docs/testing/v2-acceptance-template.md) dokumentierten manuellen Testlauf.
+Dieses Harness startet einen vollständig isolierten Folia-Testserver, installiert die Farmwelt-JAR aus dem aktuellen Build sowie das echte Worlds-Plugin und führt je Lauf genau einen Overworld- oder Nether-Reset über die öffentliche Serverkonsole aus. Es ergänzt die Gradle-Tests und die [vollständige manuelle Black-Box-Anleitung](../../docs/testing/black-box-testing.md), ersetzt aber weder diese noch einen anhand der [V2-Abnahmevorlage BB-01 bis BB-26](../../docs/testing/v2-acceptance-template.md) dokumentierten manuellen Testlauf.
+
+Vor jedem Reset prüft das Harness den physischen Hauptweltbaum auf Links, Hardlinks, Mounts und unlesbare Pfade. Lauf und Vorfahren müssen auf einem eindeutigen Pfad liegen. Der Runner benötigt exklusiven Schreibzugriff, einen frischen Serverordner und ausschließlich Testdaten. Die Betriebsgrenze ist im [FW-004-Befund](../../docs/testing/phase-2.2.md) beschrieben.
 
 ## Abgedeckter Ablauf
 
-Der Lauf verwendet Java 25, Folia 26.1.2 Build 8 und Worlds 4.4.0. Alle Downloads, Hashes und Testweltnamen stehen zentral in [`versions.env`](versions.env); das Harness gleicht die Java-, Minecraft-/Folia- und Worlds-Pins vor dem Start mit der technischen Source of Truth `build.gradle.kts` ab. Folia stammt aus dem offiziellen PaperMC-Download-Service; das vollständige Worlds-Plugin `worlds-4.4.0-all.jar` stammt aus dem offiziellen Modrinth-Projekt von TheNextLvl. Es werden keine `latest`-Links oder Secrets verwendet.
+Der Lauf verwendet Java 25, Folia 26.3 Build 26 STABLE und Worlds 4.5.1. Downloads und Hashes stehen zentral in [`versions.env`](versions.env); das Harness gleicht die Java-, Minecraft-/Folia- und Worlds-Pins vor dem Start mit der technischen Source of Truth `build.gradle.kts` ab. Folia stammt aus dem offiziellen PaperMC-Download-Service; das vollständige Worlds-Plugin `worlds-4.5.1-all.jar` stammt aus dem offiziellen Modrinth-Projekt von TheNextLvl. Es werden keine `latest`-Links oder Secrets verwendet.
 
 Das Harness:
 
@@ -12,11 +14,11 @@ Das Harness:
 2. erzeugt ein frisches temporäres Serververzeichnis unter `build/blackbox/`, einschließlich ausschließlich dort akzeptierter EULA und minimaler `server.properties`,
 3. lädt die gepinnten Binaries mit Download-Timeout und prüft SHA-256 beziehungsweise SHA-512,
 4. startet Folia ohne interaktive JLine-Schicht als Bash-Coprozess mit kontrollierter STDIN-Konsole und wartet logbasiert auf `Done (...)`, Worlds und Farmwelt,
-5. erzeugt über `world create test_farmwelt` die separate Worlds-Welt `worlds:test_farmwelt` mit dem Bukkit-Namen `worlds_test_farmwelt`,
-6. sendet `farmwelt status overworld` und `farmwelt reset force overworld`,
-7. wartet auf den eindeutigen `SUCCESS`-Logeintrag, vergleicht `reset-state.yml` vor und nach dem Reset und prüft `last-reset < next-reset`,
+5. erzeugt `worlds:test_farmwelt` oder `worlds:test_nether` mit expliziter Nether-Dimension,
+6. sendet `farmwelt status <welt>` und `farmwelt reset force <welt>`,
+7. wartet auf den eindeutigen `SUCCESS`-Logeintrag, vergleicht `reset-state.yml` vor und nach dem Reset und vergleicht UUID und Termine mit dem dimensionsbezogenen Journal,
 8. verlangt genau einen Farmwelt-Aufruf der Worlds-Regeneration und genau einen Worlds-Erfolg,
-9. weist die echte Regeneration durch das Verschwinden einer vorher im `region`-Bereich angelegten Markerdatei nach; unterschiedliche Seeds sind ein zusätzlicher, aber wegen der theoretisch möglichen Gleichheit nicht alleiniger Nachweis,
+9. weist die echte Regeneration durch das Verschwinden einer vorher im `region`-Bereich angelegten Markerdatei nach; zusätzlich müssen sich die Seeds unterscheiden und die Abfragen für Gamerule und WorldBorder die konfigurierten Werte liefern,
 10. sendet `stop`, wartet auf Prozessende und führt erst danach das vollständige Log-Gate aus.
 
 Das Log-Gate schlägt bei `SEVERE`/`ERROR`, Exception- und Stacktrace-Zeilen, ungefangenen Eventfehlern, relevanten Scheduler-/Lifecycle-Fehlern, Farmwelt-Selbstdeaktivierung, abgebrochenen oder doppelten Resets sowie kontextbezogenen Thread-/Region-Verstößen fehl. Die normalen Begriffe `Thread` oder `Region` reichen bewusst nicht aus. Die kleine [`log-allowlist.txt`](log-allowlist.txt) enthält ausschließlich bekannte Einzelmeldungen der isolierten Offline-Umgebung und des normalen Shutdowns.
@@ -25,7 +27,7 @@ GitHub-Runner können bei Worlds-Welterstellung und -Regeneration die Folia-Watc
 
 ## Lokale Ausführung
 
-Voraussetzungen sind Linux oder eine kompatible Bash, Java 25, Python 3, `curl`, Standard-GNU-Werkzeuge, ungefähr 2 GiB freier Arbeitsspeicher, ausreichend Plattenplatz und Netzwerkzugriff zu PaperMC und Modrinth.
+Voraussetzungen sind ein privater Linux-Runner mit `/proc/self/mountinfo` und Bash, Java 25, Python 3, `curl`, Standard-GNU-Werkzeuge, ungefähr 2 GiB freier Arbeitsspeicher, ausreichend Plattenplatz und Netzwerkzugriff zu PaperMC und Modrinth.
 
 ```bash
 ./gradlew clean test

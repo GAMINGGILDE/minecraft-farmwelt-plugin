@@ -218,9 +218,11 @@ Der Schreiber synchronisiert die temporäre Datei mit `SYNC` und fordert für da
 
 ## Endfarm- und DragonBattle-Vertrag
 
+Auf Folia 26.3 ist ausschließlich der `PRESERVE`-Pfad ohne Dragon-Eingriff verfügbar. Die nachfolgenden DragonBattle-Verträge beschreiben die interne Freigabe für 26.1.2.
+
 Die Engine prüft die wirksame Policy vor Eröffnung des Reset-Scopes. Regeneration und Initialisierung verwenden dieselbe Policy-Funktion mit dem unveränderlichen Reset-Snapshot und dem einmaligen Override. Ohne End-Abschnitt benötigt nur `--dragon` die Versionsfreigabe für den geladenen Kampf. Der Worlds-Adapter schreibt in diesem Fall keine DragonBattle-Saved-Data. Bei konfigurierter Policy prüft er beim Staging im Unload-Event nochmals die Freigabe und die registrierte Weltinstanz.
 
-Beim Start und auf der Globalregion prüft der Initialisierer die geordnete Bukkit-Weltliste mit demselben Hauptweltschutz wie die Reset-Engine. Ein Unload-Event entzieht der betroffenen Instanz zunächst die Freigabe. Worlds 4.4.0 kann danach noch asynchron speichern oder beim Entfernen scheitern. Der Abgleich im nächsten globalen Tick übernimmt deshalb den tatsächlichen Registrierungsstand. Eine noch offene einmalige Spawn-Freigabe gehört weiterhin ausschließlich derselben Weltinstanz.
+Beim Start und auf der Globalregion prüft der Initialisierer die geordnete Bukkit-Weltliste mit demselben Hauptweltschutz wie die Reset-Engine. Ein Unload-Event entzieht der betroffenen Instanz zunächst die Freigabe. Worlds 4.5.1 kann danach noch asynchron speichern oder beim Entfernen scheitern. Der Abgleich im nächsten globalen Tick übernimmt deshalb den tatsächlichen Registrierungsstand. Eine noch offene einmalige Spawn-Freigabe gehört weiterhin ausschließlich derselben Weltinstanz.
 
 Vor einem Eingriff prüfen die Callbacks zusätzlich über den Dimensionskey, ob die validierte Instanz und mindestens eine ihr zuvor vorangehende Welt noch registriert sind. So bleibt auch eine erst später zur Hauptwelt aufgerückte Endfarm geschützt. Der Key-Lookup verwendet auf 26.1.2 die Level-Tabelle des Servers. Regions- und Entity-Callbacks lesen keine Bukkit-Weltliste. Der Portal-Callback prüft außerdem die Policy-Revision und bezieht den aktuellen DragonBattle in der End-Ursprungsregion. Auch ein bereits abgebrochenes `DragonEggFormEvent` erreicht die Portalreparatur. Die globale Inspektion aktiver Drachen nach dem Reset gehört zu FW-005.
 
@@ -625,7 +627,7 @@ dependencies:
 Worlds:
 
 - Ist eine harte Runtime-Abhängigkeit für V2.
-- Wird als `compileOnly("net.thenextlvl:worlds:4.4.0")` aus `https://repo.thenextlvl.net/releases` kompiliert und nicht in die Farmwelt-JAR geshadet.
+- Wird als `compileOnly("net.thenextlvl:worlds:4.5.1")` aus `https://repo.thenextlvl.net/releases` kompiliert und nicht in die Farmwelt-JAR geshadet.
 - Stellt ausschließlich über den Adapter den dynamischen Lifecycle bereit.
 - Ohne aktive API-Instanz bricht Farmwelt den Plugin-Start ab; es gibt keinen stillen Bukkit-Fallback.
 

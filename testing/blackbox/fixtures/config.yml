@@ -1,5 +1,5 @@
 farmworlds:
-  overworld:
+  @FARMWORLD@:
     enabled: true
     display-name: "Black-Box-Farmwelt"
     icon: GRASS_BLOCK
@@ -8,8 +8,8 @@ farmworlds:
       - "Isolierte CI-Testwelt"
     reset:
       enabled: true
-      # Worlds bildet den Key worlds:test_farmwelt auf diesen Bukkit-Namen ab.
-      world: "worlds_test_farmwelt"
+      # Worlds bildet den Key worlds:@WORLD_ID@ auf diesen Bukkit-Namen ab.
+      world: "worlds_@WORLD_ID@"
       interval: "30d"
       notifications:
         enabled: false
@@ -21,12 +21,12 @@ farmworlds:
     teleport:
       type: command
       sender: console
-      command: "world teleport {player} worlds:test_farmwelt"
+      command: "world teleport {player} worlds:@WORLD_ID@"
 
 resource-monitor:
   enabled: false
   mode: audit
   monitored-worlds: []
   ignored-worlds:
-    - worlds_test_farmwelt
+    - worlds_@WORLD_ID@
   world-rules: {}

@@ -2,7 +2,7 @@
 
 Diese Datei ist die wiederverwendbare Vorlage für das Abnahmeprotokoll eines konkreten manuellen Release-Candidate-Testlaufs der vollständigen V2-Integration von Farmwelt, Folia, Minecraft und Worlds. Die Repository-Version bleibt absichtlich im Ausgangszustand `NOT RUN` und wird nicht als Testergebnis gepflegt. Für einen realen Testlauf ist eine Kopie beziehungsweise ein separates Abnahmeprotokoll anzulegen und auszufüllen. `NOT RUN` in dieser Template-Datei bedeutet nicht, dass das Repository oder die Implementierung unfertig ist.
 
-Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Der separate [automatisierte Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md) deckt einen echten Overworld-Reset ab, setzt die manuellen BB-01-bis-BB-26-Statuswerte aber nicht automatisch auf `PASS`.
+Die Durchführung und die vollständigen PASS-Kriterien stehen in [`black-box-testing.md`](black-box-testing.md). Der separate [automatisierte Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md) deckt je einen echten Overworld- und Nether-Reset ab, setzt die manuellen BB-01-bis-BB-26-Statuswerte aber nicht automatisch auf `PASS`.
 
 Die Statuswerte bedeuten:
 
@@ -14,6 +14,8 @@ Die Statuswerte bedeuten:
 | `BLOCKED` | Der Test war aus einem dokumentierten externen Grund nicht sicher oder vollständig ausführbar. |
 
 Ein Szenario darf nur `PASS` erhalten, wenn sein Serverlog frei von relevanten unerwarteten Folia-, Threading-, Scheduler- und Worlds-Lifecycle-Fehlern ist. Erwartete Meldungen eines bewusst injizierten Fehlerfalls müssen in der Notiz klar von unerwarteten Exceptions getrennt werden.
+
+Die positiven Endfarm-Szenarien BB-03 und BB-04 setzen die Freigabe aus Phase 2.4 voraus. Für Phase 2.2 gilt auf 26.3 die frühe Versionsablehnung.
 
 ## Matrix
 

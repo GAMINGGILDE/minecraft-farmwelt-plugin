@@ -26,7 +26,7 @@ Ein Release darf erst vorbereitet werden, wenn alle folgenden Gates erfüllt sin
 7. Version, Changelog/Release Notes, Dokumentation und Runtime-Abhängigkeiten sind nochmals gegengeprüft.
 8. Der abgenommene Release-Commit ist kontrolliert in den vorgesehenen Release-Branch übernommen; für reguläre Releases ist das `main`.
 
-Der automatisierte Smoke-Test startet einen isolierten Folia-Server, installiert Worlds und die Farmwelt-JAR des aktuellen Commits, erzeugt eine Testwelt und führt einen echten Force-Reset einschließlich State-, Regenerationsmarker-, Seed-, Log- und Shutdown-Prüfung aus. Er ist ein Release-Gate, ersetzt aber nicht die manuelle Black-Box-Abnahme.
+Der automatisierte Smoke-Test startet einen isolierten Folia-Server, installiert Worlds und die Farmwelt-JAR des aktuellen Commits, erzeugt je Lauf eine Overworld- bzw. Nether-Testwelt und führt pro Ziel einen echten Force-Reset einschließlich State-, Regenerationsmarker-, Seed-, Log- und Shutdown-Prüfung aus. Er ist ein Release-Gate, ersetzt aber nicht die manuelle Black-Box-Abnahme.
 
 ## Lokale Vorprüfung
 
@@ -62,6 +62,8 @@ Der lokale Release-Build ersetzt nicht die beiden GitHub-Workflows und nicht die
 `.github/workflows/build.yml` läuft bei Push, Pull Request und manueller Ausführung. Der Workflow verwendet Java 25, validiert den Gradle Wrapper, führt `./gradlew build --no-daemon` aus und lädt Testreports bei Fehlern hoch. Der Gradle-`build`-Lifecycle enthält die Unit- und Integrationstests.
 
 ### Folia-/Worlds-Smoke-Test
+
+Phase 2.2 ist ein Migrationsstand. FW-004, die technische DragonBattle-Abnahme und die Mehrspielerabnahme bleiben offene Release-Gates.
 
 `.github/workflows/blackbox.yml` läuft bei Pull Requests und manuell über `workflow_dispatch`. Er führt zuerst `clean test` und `build` aus, prüft Syntax und Log-Gate-Fixtures und startet danach das echte Harness unter [`testing/blackbox/`](../testing/blackbox/README.md). Diagnosen, Serverlogs, State vor/nach dem Reset und Worlds-Daten werden auch bei Fehlern als Artefakt hochgeladen.
 
