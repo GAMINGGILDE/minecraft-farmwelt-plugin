@@ -223,11 +223,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         return validateWorld(resetConfig, options)
                 .thenCompose(this::evacuatePlayers)
                 .thenCompose(this::confirmWorldIsEmpty)
-                .thenCompose(context -> checkpoint(() -> {
-                    resetService.prepare(resetConfig, attempt);
-                    return context;
-                }))
-                .thenCompose(this::recheckHandoff)
+                .thenCompose(context -> prepareHandoff(context, attempt))
                 .thenCompose(this::regenerateWorld)
                 .thenCompose(context -> checkpoint(() -> resetService.worldsReturned(resetConfig, attempt))
                         .thenCompose(confirmed -> initializeAndRecord(context, confirmed)))
@@ -357,6 +353,17 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             logger.info("Spieler aus '" + context.resetConfig().worldName() + "' evakuiert.");
             return CompletableFuture.completedFuture(context);
         });
+    }
+
+    private CompletableFuture<PipelineContext> prepareHandoff(PipelineContext context, ResetAttempt attempt) {
+        FarmworldResetConfig config = context.resetConfig();
+        return checkpoint(() -> resetService.prepare(config, attempt)).thenCompose(rollback ->
+                // Nur dieser Fehlerzweig liegt beweisbar vor dem Aufruf von regenerateWorld.
+                recheckHandoff(context).exceptionallyCompose(failure ->
+                        checkpoint(() -> {
+                            rollback.restorePrevious();
+                            return context;
+                        }).thenCompose(ignored -> CompletableFuture.failedFuture(failure))));
     }
 
     private CompletableFuture<PipelineContext> recheckHandoff(PipelineContext context) {

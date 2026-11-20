@@ -307,7 +307,7 @@ Farmwelt verwendet den persistenten `nextReset`-Termin. Nach abgeschlossenem Sta
 - Vor `nextReset` startet kein automatischer Reset.
 - Bei `now >= nextReset` wird die normale Pipeline ohne Dragon-Override angestoßen.
 - Der Scheduler blockiert nicht auf Reset-Futures und besitzt keinen zweiten Lock.
-- Ein Fehler vor der abgesicherten Worlds-Übergabe lässt einen neuen Versuch nach erneuter Prüfung zu. Ab der Übergabe setzt ein neuer Reset den Abschlussbeleg des vorherigen Versuchs voraus.
+- Kehrt während der Journal-Sicherung ein Spieler zurück oder hat sich die Zielwelt geändert, bricht die letzte Prüfung vor Worlds ab. Nach erfolgreicher Rücknahme des vorbereiteten Versuchs gilt der bisherige Zeitplan. Scheitert die Rücknahme, zeigt der Status die Recovery-Sperre. Bei einem Neustart bleibt ein vorgefundenes `WORLDS_PENDING` gesperrt.
 - Ein neuer `lastReset`/`nextReset` wird nur nach Regeneration, Validierung, Post-Reset und erfolgreichem Speichern veröffentlicht.
 
 ### Startup-Catch-up

@@ -440,7 +440,10 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.EVACUATION_FAILED, engine.reset("overworld").join().status());
         assertEquals(0, lifecycleService.invocations);
         assertFalse(engine.isResetRunning("overworld"));
-        assertEquals(ResetStatus.RECOVERY_BLOCKED, engine.reset("overworld").join().status());
+        worldOperations.playerArrivedDuringWrite = false;
+        worldOperations.inspectCount = 0;
+        assertEquals(ResetStatus.SUCCESS, engine.reset("overworld").join().status());
+        assertEquals(1, lifecycleService.invocations);
     }
 
     @Test

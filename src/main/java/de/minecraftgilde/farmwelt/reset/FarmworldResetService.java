@@ -179,13 +179,25 @@ public final class FarmworldResetService {
                 clock.instant(), ResetAttempt.Phase.WORLDS_PENDING, null, null);
     }
 
-    void prepare(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
+    @FunctionalInterface
+    interface HandoffRollback {
+        void restorePrevious() throws IOException;
+    }
+
+    HandoffRollback prepare(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
         synchronized (journal) {
             Optional<String> problem = recoveryProblem(config);
             if (problem.isPresent()) {
                 throw new IOException(problem.orElseThrow());
             }
-            journal.replace(config.farmworldType(), journal.current(config.farmworldType()), attempt);
+            FarmworldType type = config.farmworldType();
+            ResetAttempt previous = journal.current(type);
+            journal.replace(type, previous, attempt);
+            return () -> {
+                synchronized (journal) {
+                    journal.replace(type, attempt, previous);
+                }
+            };
         }
     }
 

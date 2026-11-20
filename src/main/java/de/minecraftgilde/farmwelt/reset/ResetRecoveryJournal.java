@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Je Dimension ein dauerhafter Platz. Nur die erste Installation darf freie Plätze anlegen. */
 final class ResetRecoveryJournal {
+    private static final String READY = "version=1\nphase=READY\n";
     private final Path directory;
     private final Map<FarmworldType, ResetAttempt> attempts = new ConcurrentHashMap<>();
     private final Map<FarmworldType, String> errors = new ConcurrentHashMap<>();
@@ -42,7 +43,7 @@ final class ResetRecoveryJournal {
                         StandardOpenOption.SYNC);
                 for (FarmworldType type : FarmworldType.values()) {
                     try {
-                        Files.writeString(file(type), "version=1\nphase=READY\n", StandardOpenOption.CREATE_NEW,
+                        Files.writeString(file(type), READY, StandardOpenOption.CREATE_NEW,
                                 StandardOpenOption.WRITE, StandardOpenOption.SYNC);
                     } catch (IOException e) {
                         errors.put(type, e.toString());
@@ -101,11 +102,16 @@ final class ResetRecoveryJournal {
             Path target = file(type);
             Path tmp = temporaryFile(type);
             // Ein alter temporärer Stand hat nie eine Freigabe erteilt. Nur der atomare Replace zählt.
-            Files.writeString(tmp, encode(update), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
-                    StandardOpenOption.WRITE, StandardOpenOption.SYNC, LinkOption.NOFOLLOW_LINKS);
+            Files.writeString(tmp, update == null ? READY : encode(update), StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.SYNC,
+                    LinkOption.NOFOLLOW_LINKS);
             Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             DurableResetFiles.syncDirectory(directory);
-            attempts.put(type, update);
+            if (update == null) {
+                attempts.remove(type);
+            } else {
+                attempts.put(type, update);
+            }
         } catch (IOException | RuntimeException e) {
             errors.put(type, (expected == null ? "" : expected.diagnosis() + " ") + e);
             throw e;
