@@ -2,6 +2,7 @@ package de.minecraftgilde.farmwelt.reset;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /** Zentrale API zum Starten der vollständigen Reset-Pipeline. */
@@ -20,6 +21,16 @@ public interface FarmworldResetExecutor extends FarmworldAvailabilityService {
     default CompletableFuture<ResetResult> resetIfDue(String farmworldKey, Instant evaluatedAt) {
         return reset(farmworldKey);
     }
+
+    default CompletableFuture<ResetResult> catchUpIfDue(String key, Instant evaluatedAt) {
+        return resetIfDue(key, evaluatedAt);
+    }
+
+    default Optional<String> runningDiagnosis(String key) {
+        return Optional.empty();
+    }
+
+    default void diagnoseRunningResets() {}
 
     boolean isResetRunning(String farmworldKey);
 }

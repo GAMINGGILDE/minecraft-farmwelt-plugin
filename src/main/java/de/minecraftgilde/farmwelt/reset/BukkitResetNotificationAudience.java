@@ -15,7 +15,10 @@ public final class BukkitResetNotificationAudience implements ResetNotificationA
 
     private final JavaPlugin plugin;
 
-    public BukkitResetNotificationAudience(JavaPlugin plugin) {
+    private final FoliaFarmweltScheduler scheduler;
+
+    public BukkitResetNotificationAudience(JavaPlugin plugin, FoliaFarmweltScheduler scheduler) {
+        this.scheduler = Objects.requireNonNull(scheduler);
         this.plugin = Objects.requireNonNull(plugin, "plugin");
     }
 
@@ -24,24 +27,20 @@ public final class BukkitResetNotificationAudience implements ResetNotificationA
         Component component = LEGACY_AMPERSAND.deserialize(
                 Objects.requireNonNull(message, "message")
         );
-        RuntimeException firstFailure = null;
-        for (Player player : List.copyOf(plugin.getServer().getOnlinePlayers())) {
-            try {
-                player.getScheduler().execute(
-                        plugin,
-                        () -> player.sendMessage(component),
-                        () -> { },
-                        1L
-                );
-            } catch (RuntimeException exception) {
-                // Ein einzelner ungültiger Entity-Scheduler darf andere Spieler nicht auslassen.
-                if (firstFailure == null) {
-                    firstFailure = exception;
-                }
+        scheduler.runGlobal(() -> {
+            for (Player player : List.copyOf(plugin.getServer().getOnlinePlayers())) {
+                scheduler.runEntity(player, () -> {
+                    player.sendMessage(component);
+                    return null;
+                }, accepted -> null).whenComplete((ignored, failure) -> reportFailure(failure));
             }
-        }
-        if (firstFailure != null) {
-            throw firstFailure;
+            return null;
+        }).whenComplete((ignored, failure) -> reportFailure(failure));
+    }
+
+    private void reportFailure(Throwable failure) {
+        if (failure != null && plugin.isEnabled()) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Reset-Broadcast konnte nicht zugestellt werden.", failure);
         }
     }
 }

@@ -25,6 +25,8 @@ public final class StartupResetCoordinator {
     private boolean started;
     private long lifecycleGeneration;
     private ScheduledTask startupTask;
+    private ScheduledTask observationTask;
+    private CompletableFuture<Void> observation;
 
     public StartupResetCoordinator(
             Plugin plugin,
@@ -61,7 +63,7 @@ public final class StartupResetCoordinator {
                     ),
                     "globalRegionScheduler.runDelayed(...)"
             );
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             started = false;
             lifecycleGeneration++;
             throw exception;
@@ -81,7 +83,7 @@ public final class StartupResetCoordinator {
             startupTask = null;
             try {
                 task.cancel();
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | LinkageError exception) {
                 logger.log(
                         Level.SEVERE,
                         "Verzögerter Startup-Reset-Task konnte nicht sauber gestoppt werden.",
@@ -89,6 +91,7 @@ public final class StartupResetCoordinator {
                 );
             }
         }
+        if (observation != null) observation.complete(null);
         automaticResetScheduler.stop();
     }
 
@@ -110,7 +113,7 @@ public final class StartupResetCoordinator {
                     .filter(entry -> entry.getValue() == ResetDueState.DUE)
                     .map(Map.Entry::getKey)
                     .toList();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Automatische Reset-Nachholung konnte nicht vorbereitet werden.",
@@ -151,7 +154,7 @@ public final class StartupResetCoordinator {
         try {
             dueState = automaticResetScheduler.evaluateDueStates(clock.instant())
                     .getOrDefault(farmworldKey, ResetDueState.DISABLED);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Fälligkeit für Startup-Nachholung der Farmwelt '" + farmworldKey
@@ -172,12 +175,48 @@ public final class StartupResetCoordinator {
             }
             logger.info("Überfälliger Reset für Farmwelt '" + farmworldKey
                     + "' wird nachgeholt.");
-            resetFuture = automaticResetScheduler.startReset(farmworldKey);
+            resetFuture = automaticResetScheduler.startReset(farmworldKey, true);
         }
 
         // Fehler sind bereits durch Scheduler beziehungsweise Engine protokolliert und
         // dürfen die Nachholung der folgenden Farmwelten nicht verhindern.
-        return resetFuture.handle((result, failure) -> null);
+        return observeStartupReset(farmworldKey, generation, resetFuture);
+    }
+
+    private synchronized CompletableFuture<Void> observeStartupReset(String key, long generation,
+                                                                      CompletableFuture<ResetResult> reset) {
+        if (reset.isDone() || !isCurrentLifecycle(generation)) return CompletableFuture.completedFuture(null);
+        var observed = new CompletableFuture<Void>();
+        observation = observed;
+        try {
+            observationTask = Objects.requireNonNull(globalRegionScheduler.runDelayed(plugin, ignored -> {
+                synchronized (this) {
+                    if (observation != observed || !isCurrentLifecycle(generation)) return;
+                    logger.warning("Startup-Beobachtungsfrist für " + key
+                            + " erreicht. Die Nachholung prüft weitere Welten. Der Reset bleibt beim Besitzer.");
+                    observed.complete(null);
+                }
+            }, FarmworldResetEngine.OBSERVATION_INTERVAL.toSeconds() * 20));
+        } catch (RuntimeException | LinkageError failure) {
+            logger.log(Level.WARNING, "Startup-Beobachtung konnte nicht geplant werden.", failure);
+            observation = null;
+            return CompletableFuture.completedFuture(null);
+        }
+        var cleaned = observed.whenComplete((ignored, error) -> {
+            synchronized (this) {
+                if (observation != observed) return;
+                observation = null;
+                var timer = observationTask;
+                observationTask = null;
+                try {
+                    if (timer != null) timer.cancel();
+                } catch (RuntimeException | LinkageError failure) {
+                    logger.log(Level.WARNING, "Startup-Beobachtung konnte nicht abgemeldet werden.", failure);
+                }
+            }
+        });
+        reset.whenComplete((result, failure) -> observed.complete(null));
+        return cleaned;
     }
 
     private void finishStartupCatchUp(long generation, Throwable failure) {
@@ -193,7 +232,13 @@ public final class StartupResetCoordinator {
             if (!isCurrentLifecycle(generation)) {
                 return;
             }
-            automaticResetScheduler.start();
+            try {
+                automaticResetScheduler.start();
+            } catch (RuntimeException | LinkageError error) {
+                started = false;
+                lifecycleGeneration++;
+                logger.log(Level.SEVERE, "Periodischer Reset-Scheduler konnte nicht gestartet werden.", error);
+            }
         }
     }
 

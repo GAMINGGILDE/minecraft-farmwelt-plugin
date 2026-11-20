@@ -16,6 +16,8 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BukkitFarmworldWorldOperationsTest {
 
@@ -88,11 +90,55 @@ class BukkitFarmworldWorldOperationsTest {
         CompletableFuture<FarmworldEvacuationResult> evacuation =
                 operations.evacuatePlayers(resetWorld.world);
         player.runRetiredTask();
+        player.runScheduledTask();
         FarmworldEvacuationResult result = evacuation.join();
 
         assertFalse(result.successful());
         assertEquals(List.of(), result.evacuatedPlayers());
         assertEquals(0, player.teleportAttempts);
+    }
+
+    @Test
+    void synchronousTeleportFailureInDeferredEntityCallbackFinishesEvacuation() {
+        var farm = new TestWorld("farmwelt", NamespacedKey.fromString("worlds:farmwelt"));
+        var safe = new TestWorld("world", NamespacedKey.minecraft("overworld"));
+        var player = new TestPlayer("Alex", farm.world, true, false);
+        farm.players.add(player);
+        player.teleportFailure = new IllegalStateException("Teleport abgelehnt");
+        var evacuation = operations(farm, safe).evacuatePlayers(farm.world);
+        player.runScheduledTask();
+        assertTrue(evacuation.isDone());
+        assertEquals(player.teleportFailure, evacuation.join().failure().orElseThrow());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"exception", "cancelled", "null", "open", "rejected"})
+    void independentEntityAndTeleportOutcomes(String outcome) {
+        var farm = new TestWorld("farmwelt", NamespacedKey.fromString("worlds:farmwelt"));
+        var safe = new TestWorld("world", NamespacedKey.minecraft("overworld"));
+        var player = new TestPlayer("Alex", farm.world, true, false);
+        farm.players.add(player);
+        var external = new CompletableFuture<Boolean>();
+        player.teleportResult = outcome.equals("null") ? () -> null : () -> external;
+        player.accepted = !outcome.equals("rejected");
+        var result = operations(farm, safe).evacuatePlayers(farm.world);
+        if (player.accepted) player.runScheduledTask();
+        switch (outcome) {
+            case "open" -> {
+                assertFalse(result.isDone());
+                player.runRetiredTask();
+                assertFalse(result.isDone());
+                assertFalse(external.isCancelled());
+                external.complete(true);
+            }
+            case "exception" -> external.completeExceptionally(new IllegalStateException("Teleportfehler"));
+            case "cancelled" -> external.cancel(false);
+        }
+        assertTrue(result.isDone());
+        assertEquals(outcome.equals("open"), result.join().successful());
+        assertEquals(outcome.equals("rejected") ? 0 : 1, player.teleportAttempts);
+        assertEquals(outcome.equals("cancelled") || outcome.equals("null"),
+                result.join().failure().orElse(null) instanceof FarmworldEvacuationResult.UnconfirmedTeleportException);
     }
 
     private static BukkitFarmworldWorldOperations operations(
@@ -189,6 +235,9 @@ class BukkitFarmworldWorldOperationsTest {
         private World currentWorld;
         private Runnable scheduledTask;
         private Runnable retiredTask;
+        private RuntimeException teleportFailure;
+        private boolean accepted = true;
+        private java.util.function.Supplier<CompletableFuture<Boolean>> teleportResult;
         private int teleportAttempts;
 
         private TestPlayer(
@@ -208,7 +257,7 @@ class BukkitFarmworldWorldOperationsTest {
                             if (runImmediately) {
                                 scheduledTask.run();
                             }
-                            return true;
+                            return accepted;
                         }
                         return defaultValue(method.getReturnType());
                     }
@@ -222,6 +271,8 @@ class BukkitFarmworldWorldOperationsTest {
                         case "getScheduler" -> scheduler;
                         case "teleportAsync" -> {
                             teleportAttempts++;
+                            if (teleportFailure != null) throw teleportFailure;
+                            if (teleportResult != null) yield teleportResult.get();
                             if (teleportSuccessful) {
                                 this.currentWorld = ((Location) arguments[0]).getWorld();
                             }

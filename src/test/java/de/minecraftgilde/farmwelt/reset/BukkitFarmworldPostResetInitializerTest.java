@@ -1050,6 +1050,7 @@ class BukkitFarmworldPostResetInitializerTest {
         return new BukkitFarmworldPostResetInitializer(
                 pluginWithWorldRegistry(),
                 scheduler,
+                new FoliaFarmweltScheduler(pluginWithWorldRegistry()),
                 quietLogger(),
                 new GameruleValueConverter(),
                 gameRuleAccess,

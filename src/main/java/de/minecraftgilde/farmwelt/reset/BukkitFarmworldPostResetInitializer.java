@@ -62,6 +62,7 @@ public final class BukkitFarmworldPostResetInitializer
 
     private final Plugin plugin;
     private final FarmweltScheduler scheduler;
+    private final FoliaFarmweltScheduler entityScheduler;
     private final Logger logger;
     private final GameruleValueConverter valueConverter;
     private final GameRuleAccess gameRuleAccess;
@@ -85,11 +86,12 @@ public final class BukkitFarmworldPostResetInitializer
 
     public BukkitFarmworldPostResetInitializer(
             Plugin plugin,
-            FarmweltScheduler scheduler,
+            FoliaFarmweltScheduler scheduler,
             Logger logger
     ) {
         this(
                 plugin,
+                scheduler,
                 scheduler,
                 logger,
                 new GameruleValueConverter(),
@@ -102,12 +104,14 @@ public final class BukkitFarmworldPostResetInitializer
     BukkitFarmworldPostResetInitializer(
             Plugin plugin,
             FarmweltScheduler scheduler,
+            FoliaFarmweltScheduler entityScheduler,
             Logger logger,
             GameruleValueConverter valueConverter,
             GameRuleAccess gameRuleAccess,
             EndDragonFightCompatibility dragonCompatibility,
             EndDragonFightRuntimeAccess dragonFightRuntimeAccess
     ) {
+        this.entityScheduler = Objects.requireNonNull(entityScheduler);
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.logger = Objects.requireNonNull(logger, "logger");
@@ -433,7 +437,7 @@ public final class BukkitFarmworldPostResetInitializer
         Objects.requireNonNull(regeneratedWorld, "regeneratedWorld");
         Objects.requireNonNull(options, "options");
 
-        logger.info("Post-Reset-Initialisierung f\u00fcr '" + regeneratedWorld.getName()
+        logger.info("Post-Reset-Initialisierung f\u00fcr '" + config.worldName()
                 + "' gestartet.");
 
         EndDragonFightDataMode policy = effectiveDragonPolicy(config, options);
@@ -455,7 +459,7 @@ public final class BukkitFarmworldPostResetInitializer
             if (throwable != null) {
                 return failure(config, unwrap(throwable));
             }
-            logger.info("Post-Reset-Initialisierung f\u00fcr '" + regeneratedWorld.getName()
+            logger.info("Post-Reset-Initialisierung f\u00fcr '" + config.worldName()
                     + "' abgeschlossen.");
             return PostResetResult.success();
         });
@@ -796,33 +800,14 @@ public final class BukkitFarmworldPostResetInitializer
     }
 
     private CompletableFuture<Void> removeEnderDragon(World world, EnderDragon dragon) {
-        CompletableFuture<Void> removal = new CompletableFuture<>();
-        try {
-            boolean scheduled = dragon.getScheduler().execute(
-                    plugin,
-                    () -> {
-                        try {
-                            if (dragon.getWorld() != world || !isAllowedEndWorld(world)) {
-                                throw new IllegalStateException("Der Drache gehört nicht mehr zur freigegebenen Endfarm.");
-                            }
-                            dragon.remove();
-                            logger.info("Enderdrache entfernt.");
-                            removal.complete(null);
-                        } catch (RuntimeException exception) {
-                            removal.completeExceptionally(exception);
-                        }
-                    },
-                    () -> removal.complete(null),
-                    1L
-            );
-            if (!scheduled) {
-                // A retired entity is no longer an active dragon and already satisfies the policy.
-                removal.complete(null);
+        return entityScheduler.runEntity(dragon, () -> {
+            if (dragon.getWorld() != world || !isAllowedEndWorld(world)) {
+                throw new IllegalStateException("Der Drache gehört nicht mehr zur freigegebenen Endfarm.");
             }
-        } catch (RuntimeException exception) {
-            removal.completeExceptionally(exception);
-        }
-        return removal;
+            dragon.remove();
+            logger.info("Enderdrache entfernt.");
+            return null;
+        }, accepted -> null);
     }
 
     private record DragonPolicySnapshot(

@@ -25,14 +25,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import net.thenextlvl.worlds.WorldOperationException;
 import net.thenextlvl.worlds.WorldsAccess;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -533,6 +540,278 @@ class ResetWorkflowIntegrationTest {
 
         harness.globalScheduler.tick();
         assertEquals(List.of("overworld", "nether", "end"), harness.runtime.regenerationKeys);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void openWorldsAttemptSurvivesStartupObservationAndLateCompletion(boolean shutdown) throws IOException {
+        diskWithDueStates("overworld", "nether");
+        var configs = List.of(config("overworld", THIRTY_DAYS), config("nether", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var pending = h.runtime.defer("overworld");
+        h.startupCoordinator.start();
+        h.globalScheduler.runStartupTask();
+        var before = h.resetService.getState("overworld");
+        var journal = dataDirectory.resolve("reset-recovery-overworld.journal");
+        String evidence = Files.readString(journal);
+        assertTrue(evidence.contains("WORLDS_PENDING"));
+        // Im Test wird der nächste verzögerte Callback ohne echte Wartezeit ausgelöst.
+        h.clock.setInstant(NOW.plus(Duration.ofMinutes(10)));
+        h.globalScheduler.observation.run();
+        assertEquals(1, h.globalScheduler.periodicTasks);
+        assertEquals(ResetStatus.ALREADY_RUNNING, h.engine.reset("OVERWORLD").join().status());
+        assertTrue(h.resetService.reload(configs));
+        h.globalScheduler.tick();
+        h.globalScheduler.tick();
+        assertEquals(before, h.resetService.getState("overworld"));
+        assertEquals(evidence, Files.readString(journal));
+        assertFalse(pending.isDone());
+        assertEquals(List.of("overworld"), h.runtime.regenerationKeys);
+        assertEquals(ResetStatus.WORLDS_HANDOFF_DEFERRED, h.engine.reset("nether").join().status());
+        assertEquals(1, h.runtime.evacuations);
+        assertEquals(1, h.runtime.openedScopes);
+        assertEquals(0, h.runtime.closedScopes);
+        assertEquals(1, java.util.Collections.frequency(h.runtime.regenerationKeys, "overworld"));
+        if (shutdown) {
+            h.engine.stop();
+            h.startupCoordinator.stop();
+        }
+        h.runtime.complete("overworld", pending);
+        assertEquals(1, h.globalScheduler.periodicTasks);
+        if (shutdown) {
+            assertEquals(evidence, Files.readString(journal));
+            assertTrue(h.runtime.postResetOptions.isEmpty());
+            assertEquals(1, h.runtime.closedScopes);
+            assertEquals(1, calls.get());
+            var restarted = diskHarness(configs, calls);
+            assertEquals(ResetStatus.RECOVERY_BLOCKED, restarted.engine.reset("overworld").join().status());
+        } else {
+            var receipt = h.resetService.getState("overworld").orElseThrow().attemptId().orElseThrow();
+            assertTrue(evidence.contains(receipt.toString()));
+            assertTrue(Files.readString(journal).contains("POST_RESET_DONE"));
+            h.globalScheduler.tick();
+            assertEquals(2, calls.get());
+            assertEquals(2, h.runtime.openedScopes);
+            assertEquals(2, h.runtime.closedScopes);
+            assertEquals(2, h.runtime.evacuations);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void stalledEvacuationAllowsIndependentCatchUp(boolean shutdown) throws IOException {
+        diskWithDueStates("overworld", "nether");
+        var configs = List.of(config("overworld", THIRTY_DAYS), config("nether", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var teleport = new CompletableFuture<FarmworldEvacuationResult>();
+        h.runtime.nextEvacuation = teleport;
+        h.startupCoordinator.start();
+        h.globalScheduler.runStartupTask();
+        h.clock.setInstant(NOW.plus(Duration.ofMinutes(10)));
+        h.globalScheduler.observation.run();
+        h.globalScheduler.tick();
+        assertEquals(List.of("nether"), h.runtime.regenerationKeys);
+        assertEquals(1, h.globalScheduler.periodicTasks);
+        assertEquals(ResetStatus.ALREADY_RUNNING, h.engine.reset("OVERWORLD").join().status());
+        if (shutdown) {
+            h.engine.stop();
+            h.startupCoordinator.stop();
+        }
+        teleport.complete(FarmworldEvacuationResult.completed(List.of()));
+        assertEquals(shutdown ? 1 : 2, calls.get());
+        assertEquals(2, h.runtime.closedScopes);
+        assertEquals(1, h.globalScheduler.periodicTasks);
+    }
+
+    @Test
+    void unobservableTeleportKeepsBothReservations() throws IOException {
+        var configs = List.of(config("overworld", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        h.runtime.nextEvacuation = CompletableFuture.completedFuture(FarmworldEvacuationResult.failed(List.of(),
+                new FarmworldEvacuationResult.UnconfirmedTeleportException("Teleportende unbekannt", null)));
+        assertEquals(ResetStatus.EVACUATION_FAILED, h.engine.reset("overworld").join().status());
+        assertTrue(h.engine.isResetRunning("OVERWORLD"));
+        assertTrue(h.resetService.reload(List.of(new FarmworldResetConfig("nether", configs.getFirst().worldName(),
+                true, THIRTY_DAYS))));
+        assertEquals(ResetStatus.ALREADY_RUNNING, h.engine.reset("nether").join().status());
+        assertEquals(0, calls.get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void shutdownImmediatelyBeforeOrAfterBindingWorldsHandoff(boolean accepted) throws Exception {
+        var disk = diskWithDueStates("overworld", "nether");
+        var configs = List.of(config("overworld", THIRTY_DAYS), config("nether", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var boundary = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        Runnable pause = () -> {
+            boundary.countDown();
+            try {
+                assertTrue(resume.await(10, TimeUnit.SECONDS));
+            } catch (InterruptedException failure) {
+                throw new AssertionError(failure);
+            }
+        };
+        if (accepted) {
+            // Bereits im Lifecycle-Adapter, unmittelbar vor dem Aufruf des echten API-Einstiegspunkts.
+            h.logger.setLevel(Level.INFO);
+            h.logger.setFilter(record -> {
+                if (record.getMessage().startsWith("Regeneration von '")) pause.run();
+                return false;
+            });
+        } else {
+            var inspections = new AtomicInteger();
+            h.runtime.beforeInspection = () -> {
+                if (inspections.incrementAndGet() == 2) pause.run();
+            };
+        }
+        var external = h.runtime.defer("overworld");
+        var journal = dataDirectory.resolve("reset-recovery-overworld.journal");
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var reset = workers.submit(() -> h.engine.reset("overworld"));
+            String evidence;
+            try {
+                assertTrue(boundary.await(5, TimeUnit.SECONDS));
+                evidence = Files.readString(journal);
+                assertTrue(evidence.contains("WORLDS_PENDING"));
+                workers.submit(h.engine::stop).get(5, TimeUnit.SECONDS);
+                assertEquals(0, calls.get());
+                assertEquals(ResetStatus.DISABLED, h.engine.reset("nether").join().status());
+            } finally {
+                resume.countDown();
+            }
+            var result = reset.get(5, TimeUnit.SECONDS);
+            if (accepted) {
+                assertFalse(result.isDone());
+                assertFalse(external.isDone());
+                h.runtime.complete("overworld", external);
+            }
+            assertEquals(ResetStatus.DISABLED, result.get(5, TimeUnit.SECONDS).status());
+            assertEquals(accepted ? 1 : 0, calls.get());
+            assertEquals(evidence, Files.readString(journal));
+            assertEquals(dueStates("overworld", "nether"), disk.load());
+            assertTrue(h.runtime.postResetOptions.isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cancel", "wrappedCancel", "throw", "nullFuture", "observerFailure", "timeout"})
+    void lostWorldsCompletionDefersNewAndPreparedHandoffs(String fault) throws IOException {
+        var disk = diskWithDueStates("overworld", "nether");
+        var configs = List.of(config("overworld", THIRTY_DAYS), config("nether", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var evacuation = new CompletableFuture<FarmworldEvacuationResult>();
+        h.runtime.nextEvacuation = evacuation;
+        var nether = h.engine.reset("nether");
+        var external = new CompletableFuture<World>();
+        h.runtime.nextWorldsCall = () -> switch (fault) {
+            case "throw" -> throw new IllegalStateException("Aufruf ohne Abschlussbeleg");
+            case "nullFuture" -> null;
+            case "observerFailure" -> new CompletableFuture<World>() {
+                @Override
+                public <U> CompletableFuture<U> handle(BiFunction<? super World, Throwable, ? extends U> action) {
+                    throw new IllegalStateException("Beobachter abgelehnt");
+                }
+            };
+            default -> external;
+        };
+        var reset = h.engine.reset("overworld");
+        switch (fault) {
+            case "cancel" -> assertTrue(external.cancel(false));
+            case "wrappedCancel" -> external.completeExceptionally(new CompletionException(new CancellationException()));
+            case "timeout" -> external.completeExceptionally(new TimeoutException());
+        }
+        assertEquals(ResetStatus.REGENERATE_FAILED, reset.join().status());
+        assertTrue(h.engine.runningDiagnosis("overworld").orElseThrow().contains("Worlds-Abschluss ungeklärt"));
+        var journal = dataDirectory.resolve("reset-recovery-overworld.journal");
+        String evidence = Files.readString(journal);
+        assertTrue(evidence.contains("WORLDS_PENDING"));
+        evacuation.complete(FarmworldEvacuationResult.completed(List.of()));
+        assertEquals(ResetStatus.WORLDS_HANDOFF_DEFERRED, nether.join().status());
+        assertTrue(h.resetService.recoveryProblem(configs.get(1)).isEmpty());
+        assertEquals(ResetStatus.WORLDS_HANDOFF_DEFERRED, h.engine.reset("nether").join().status());
+        h.clock.setInstant(NOW.plus(Duration.ofDays(1)));
+        assertTrue(h.resetService.reload(configs));
+        h.startupCoordinator.start();
+        h.globalScheduler.runStartupTask();
+        h.globalScheduler.tick();
+        assertEquals(ResetStatus.ALREADY_RUNNING, h.engine.reset("OVERWORLD").join().status());
+        assertEquals(evidence, Files.readString(journal));
+        assertEquals(dueStates("overworld", "nether"), disk.load());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void worldsEventVetoIsTerminalAndAllowsIndependentHandoff() throws IOException {
+        diskWithDueStates("overworld", "nether");
+        var configs = List.of(config("overworld", THIRTY_DAYS), config("nether", THIRTY_DAYS));
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var external = new CompletableFuture<World>();
+        h.runtime.nextWorldsCall = () -> external;
+        var reset = h.engine.catchUpIfDue("overworld", NOW);
+        assertEquals(ResetStatus.WORLDS_HANDOFF_DEFERRED, h.engine.reset("nether").join().status());
+        var failure = new WorldOperationException(WorldOperationException.Reason.EVENT_CANCELLED);
+        external.completeExceptionally(failure);
+        assertEquals(ResetStatus.REGENERATE_FAILED, reset.join().status());
+        assertEquals(failure, reset.join().cause());
+        assertEquals(ResetStatus.RECOVERY_BLOCKED, h.engine.reset("overworld").join().status());
+        assertEquals(1, calls.get());
+        assertEquals(ResetStatus.SUCCESS, h.engine.reset("nether").join().status());
+        assertEquals(List.of("overworld", "nether"), h.runtime.regenerationKeys);
+        assertEquals(2, calls.get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"journal", "lastCheck", "afterWorlds", "afterPost", "state"})
+    void shutdownAtCheckpointPreservesExactlyTheDurableEvidence(String point) throws IOException {
+        var disk = diskWithDueStates("overworld");
+        var config = config("overworld", THIRTY_DAYS);
+        var configs = List.of(config);
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var writes = new AtomicInteger();
+        var inspections = new AtomicInteger();
+        int stopAfterWrite = switch (point) {
+            case "journal" -> 1;
+            case "afterWorlds" -> 2;
+            case "afterPost" -> 3;
+            case "state" -> 4;
+            default -> -1;
+        };
+        h.scheduler.afterAsyncWork = () -> {
+            if (writes.incrementAndGet() == stopAfterWrite) h.engine.stop();
+        };
+        h.runtime.beforeInspection = () -> {
+            if (inspections.incrementAndGet() == 2 && point.equals("lastCheck")) h.engine.stop();
+        };
+        var result = h.engine.reset("overworld");
+        assertTrue(result.isDone());
+        assertEquals(ResetStatus.DISABLED, h.engine.reset("overworld").join().status());
+        int expectedCalls = point.equals("journal") || point.equals("lastCheck") ? 0 : 1;
+        assertEquals(expectedCalls, calls.get());
+        assertEquals(1, h.runtime.closedScopes);
+        var restart = diskHarness(configs, calls);
+        if (point.equals("state")) {
+            assertEquals(ResetStatus.SUCCESS, result.join().status());
+            assertTrue(disk.load().get("overworld").attemptId().isPresent());
+            assertTrue(restart.resetService.recoveryProblem(config).isEmpty());
+        } else {
+            String phase = switch (point) {
+                case "afterPost" -> "POST_RESET_DONE";
+                case "afterWorlds" -> "WORLDS_RETURNED";
+                default -> "WORLDS_PENDING";
+            };
+            assertTrue(restart.engine.reset("overworld").join().message().contains(phase));
+            assertTrue(disk.load().get("overworld").attemptId().isEmpty());
+        }
+        assertEquals(expectedCalls, calls.get());
     }
 
     @Test
@@ -1209,8 +1488,10 @@ class ResetWorkflowIntegrationTest {
 
     private final class WorkflowHarness {
 
+        private final Logger logger = quietLogger();
         private final MutableClock clock;
         private final FarmworldResetService resetService;
+        private final DirectScheduler scheduler = new DirectScheduler();
         private final FakeMinecraftRuntime runtime;
         private final FarmworldResetEngine engine;
         private final RecordingGlobalRegionScheduler globalScheduler;
@@ -1233,7 +1514,6 @@ class ResetWorkflowIntegrationTest {
                 MutableClock clock, AtomicInteger worldsCalls
         ) {
             this.clock = clock;
-            Logger logger = quietLogger();
             this.resetService = new FarmworldResetService(repository, dataDirectory, clock, logger);
             assertTrue(resetService.reload(configurations));
             this.runtime = new FakeMinecraftRuntime(configurations);
@@ -1255,12 +1535,13 @@ class ResetWorkflowIntegrationTest {
             this.engine = new FarmworldResetEngine(
                     resetService,
                     runtime,
-                    worldsCalls == null ? runtime : countingWorldsAdapter(runtime, worldsCalls),
+                    worldsCalls == null ? runtime : countingWorldsAdapter(runtime, worldsCalls, logger),
                     runtime,
-                    new DirectScheduler(),
+                    scheduler,
                     notificationService,
                     logger,
-                    new EndDragonFightCompatibility(() -> "26.1.2")
+                    new EndDragonFightCompatibility(() -> "26.1.2"),
+                    () -> Duration.between(NOW, clock.instant()).toNanos()
             );
             this.globalScheduler = new RecordingGlobalRegionScheduler();
             Plugin plugin = plugin(logger);
@@ -1281,7 +1562,8 @@ class ResetWorkflowIntegrationTest {
         }
     }
 
-    private static WorldsFarmworldLifecycleService countingWorldsAdapter(FakeMinecraftRuntime runtime, AtomicInteger calls) {
+    private static WorldsFarmworldLifecycleService countingWorldsAdapter(FakeMinecraftRuntime runtime, AtomicInteger calls,
+                                                                        Logger logger) {
         WorldsAccess access = (WorldsAccess) Proxy.newProxyInstance(WorldsAccess.class.getClassLoader(),
                 new Class<?>[]{WorldsAccess.class}, (proxy, method, args) -> {
                     if (!method.getName().equals("regenerate")) {
@@ -1293,7 +1575,7 @@ class ResetWorkflowIntegrationTest {
         Server server = (Server) Proxy.newProxyInstance(Server.class.getClassLoader(), new Class<?>[]{Server.class},
                 (proxy, method, args) -> { throw new AssertionError(method.getName()); });
         return new WorldsFarmworldLifecycleService(server, access, new EndDragonFightDataStore(4790),
-                new EndDragonFightCompatibility(() -> "26.1.2"), quietLogger());
+                new EndDragonFightCompatibility(() -> "26.1.2"), logger);
     }
 
     private record RegenerationCall(
@@ -1318,7 +1600,9 @@ class ResetWorkflowIntegrationTest {
         private final List<RegenerationCall> regenerationCalls = new ArrayList<>();
         private final List<ResetOptions> postResetOptions = new ArrayList<>();
         private Runnable beforeInspection = () -> {};
+        private Supplier<CompletableFuture<World>> nextWorldsCall;
         private String preflightFailure = "";
+        private CompletableFuture<FarmworldEvacuationResult> nextEvacuation;
         private int evacuations;
         private int openedScopes;
         private int closedScopes;
@@ -1373,6 +1657,11 @@ class ResetWorkflowIntegrationTest {
         @Override
         public CompletableFuture<FarmworldEvacuationResult> evacuatePlayers(World resetWorld) {
             evacuations++;
+            if (nextEvacuation != null) {
+                var result = nextEvacuation;
+                nextEvacuation = null;
+                return result;
+            }
             return CompletableFuture.completedFuture(
                     preflightFailure.equals("evacuation") ? FarmworldEvacuationResult.failed(List.of(), null)
                             : FarmworldEvacuationResult.completed(evacuationPlayers)
@@ -1398,6 +1687,11 @@ class ResetWorkflowIntegrationTest {
             String farmworldKey = farmworldKeys.get(world);
             regenerationKeys.add(farmworldKey);
             regenerationCalls.add(new RegenerationCall(farmworldKey, options));
+            if (nextWorldsCall != null) {
+                var call = nextWorldsCall;
+                nextWorldsCall = null;
+                return call.get();
+            }
             if (alwaysFailing.contains(farmworldKey)) {
                 return CompletableFuture.failedFuture(
                         new IllegalStateException("simulierter Worlds-Fehler")
@@ -1441,6 +1735,7 @@ class ResetWorkflowIntegrationTest {
     }
 
     private static final class DirectScheduler implements FarmweltScheduler {
+        private Runnable afterAsyncWork = () -> {};
 
         @Override
         public <T> CompletableFuture<T> runGlobal(CheckedSupplier<T> operation) {
@@ -1478,7 +1773,9 @@ class ResetWorkflowIntegrationTest {
 
         @Override
         public <T> CompletableFuture<T> runAsync(CheckedSupplier<T> operation) {
-            return execute(operation);
+            var result = execute(operation);
+            afterAsyncWork.run();
+            return result;
         }
 
         private <T> CompletableFuture<T> execute(CheckedSupplier<T> operation) {
@@ -1543,6 +1840,7 @@ class ResetWorkflowIntegrationTest {
 
     private static final class RecordingGlobalRegionScheduler implements GlobalRegionScheduler {
 
+        private Runnable observation = () -> {};
         private long startupDelay;
         private int periodicTasks;
         private Consumer<ScheduledTask> startupAction;
@@ -1566,6 +1864,11 @@ class ResetWorkflowIntegrationTest {
                 Consumer<ScheduledTask> task,
                 long delayTicks
         ) {
+            if (delayTicks != StartupResetCoordinator.STARTUP_DELAY_TICKS) {
+                var timer = new RecordingScheduledTask(plugin, false);
+                observation = () -> task.accept(timer);
+                return timer;
+            }
             startupDelay = delayTicks;
             startupAction = task;
             startupTask = new RecordingScheduledTask(plugin, false);

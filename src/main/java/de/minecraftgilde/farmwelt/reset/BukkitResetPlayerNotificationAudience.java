@@ -14,10 +14,14 @@ public final class BukkitResetPlayerNotificationAudience
     private static final LegacyComponentSerializer LEGACY_AMPERSAND =
             LegacyComponentSerializer.legacyAmpersand();
 
-    private final Plugin plugin;
+    private final FoliaFarmweltScheduler scheduler;
 
     public BukkitResetPlayerNotificationAudience(Plugin plugin) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this(new FoliaFarmweltScheduler(plugin));
+    }
+
+    public BukkitResetPlayerNotificationAudience(FoliaFarmweltScheduler scheduler) {
+        this.scheduler = Objects.requireNonNull(scheduler);
     }
 
     @Override
@@ -26,37 +30,12 @@ public final class BukkitResetPlayerNotificationAudience
         Component component = LEGACY_AMPERSAND.deserialize(
                 Objects.requireNonNull(message, "message")
         );
-        CompletableFuture<Void> delivery = new CompletableFuture<>();
-        try {
-            boolean scheduled = player.getScheduler().execute(
-                    plugin,
-                    () -> deliver(player, component, delivery),
-                    () -> delivery.complete(null),
-                    1L
-            );
-            if (!scheduled) {
-                delivery.completeExceptionally(new IllegalStateException(
-                        "Der Entity-Scheduler hat die Spielernachricht abgelehnt."
-                ));
-            }
-        } catch (RuntimeException exception) {
-            delivery.completeExceptionally(exception);
-        }
-        return delivery;
-    }
-
-    private void deliver(
-            Player player,
-            Component component,
-            CompletableFuture<Void> delivery
-    ) {
-        try {
-            if (player.isOnline()) {
-                player.sendMessage(component);
-            }
-            delivery.complete(null);
-        } catch (RuntimeException exception) {
-            delivery.completeExceptionally(exception);
-        }
+        return scheduler.runEntity(player, () -> {
+            if (player.isOnline()) player.sendMessage(component);
+            return null;
+        }, accepted -> {
+            if (!accepted) throw new IllegalStateException("Der Entity-Scheduler hat die Spielernachricht abgelehnt.");
+            return null;
+        });
     }
 }

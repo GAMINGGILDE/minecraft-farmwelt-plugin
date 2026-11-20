@@ -483,7 +483,7 @@ class FarmworldResetEngineTest {
     }
 
     @Test
-    void synchronousWorldsExceptionIsMappedAndReleasesLock() {
+    void synchronousWorldsExceptionKeepsReservationWithoutCompletionEvidence() {
         FarmworldResetState previousState = resetService.getState("overworld").orElseThrow();
         IllegalStateException worldsFailure = new IllegalStateException("synchronous failure");
         lifecycleService.synchronousFailure = worldsFailure;
@@ -494,7 +494,7 @@ class FarmworldResetEngineTest {
         assertSame(worldsFailure, result.cause());
         assertEquals(previousState, resetService.getState("overworld").orElseThrow());
         assertFalse(calls.contains("state"));
-        assertFalse(engine.isResetRunning("overworld"));
+        assertTrue(engine.isResetRunning("overworld"));
     }
 
     @Test
@@ -507,7 +507,7 @@ class FarmworldResetEngineTest {
         assertEquals(ResetStatus.REGENERATE_FAILED, result.status());
         assertEquals(previousState, resetService.getState("overworld").orElseThrow());
         assertFalse(calls.contains("state"));
-        assertFalse(engine.isResetRunning("overworld"));
+        assertTrue(engine.isResetRunning("overworld"));
     }
 
     @Test

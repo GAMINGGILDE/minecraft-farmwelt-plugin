@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.HashSet;
@@ -10,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -19,6 +21,9 @@ import org.bukkit.entity.Player;
 /** Executes one complete, asynchronous reset pipeline for a configured farmworld. */
 public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
+    static final Duration OBSERVATION_INTERVAL = Duration.ofMinutes(10);
+    private final LongSupplier nanoTime;
+    private volatile boolean stopped;
     private final FarmworldResetService resetService;
     private final FarmworldWorldOperations worldOperations;
     private final FarmworldLifecycleService lifecycleService;
@@ -52,6 +57,21 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             Logger logger,
             EndDragonFightCompatibility dragonCompatibility
     ) {
+        this(resetService, worldOperations, lifecycleService, postResetInitializer, scheduler, notificationService,
+                logger, dragonCompatibility, System::nanoTime);
+    }
+
+    FarmworldResetEngine(
+            FarmworldResetService resetService,
+            FarmworldWorldOperations worldOperations,
+            FarmworldLifecycleService lifecycleService,
+            FarmworldPostResetInitializer postResetInitializer,
+            FarmweltScheduler scheduler,
+            ResetNotificationService notificationService,
+            Logger logger,
+            EndDragonFightCompatibility dragonCompatibility, LongSupplier nanoTime
+    ) {
+        this.nanoTime = Objects.requireNonNull(nanoTime);
         this.dragonCompatibility = Objects.requireNonNull(dragonCompatibility, "dragonCompatibility");
         this.resetService = Objects.requireNonNull(resetService, "resetService");
         this.worldOperations = Objects.requireNonNull(worldOperations, "worldOperations");
@@ -71,15 +91,21 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     @Override
     public CompletableFuture<ResetResult> reset(String farmworldKey, ResetOptions options) {
-        return startReset(farmworldKey, options, null);
+        return startReset(farmworldKey, options, null, false);
     }
 
     @Override
     public CompletableFuture<ResetResult> resetIfDue(String farmworldKey, Instant evaluatedAt) {
-        return startReset(farmworldKey, ResetOptions.defaults(), Objects.requireNonNull(evaluatedAt));
+        return startReset(farmworldKey, ResetOptions.defaults(), Objects.requireNonNull(evaluatedAt), false);
     }
 
-    private CompletableFuture<ResetResult> startReset(String farmworldKey, ResetOptions options, Instant dueAt) {
+    @Override
+    public CompletableFuture<ResetResult> catchUpIfDue(String key, Instant evaluatedAt) {
+        return startReset(key, ResetOptions.defaults(), Objects.requireNonNull(evaluatedAt), true);
+    }
+
+    private CompletableFuture<ResetResult> startReset(String farmworldKey, ResetOptions options, Instant dueAt,
+                                                       boolean startup) {
         Objects.requireNonNull(options, "options");
         FarmworldType type = FarmworldType.fromFarmworldKey(farmworldKey).orElse(null);
         final Reservation reservation;
@@ -88,6 +114,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         synchronized (resetService) {
             resetConfig = resetService.getConfig(farmworldKey).orElse(null);
             String world = resetConfig == null ? "" : resetConfig.worldName();
+            if (stopped) return rejected(farmworldKey, world, ResetStatus.DISABLED, "Farmwelt wird deaktiviert.");
             if (type == null) {
                 return rejected(Objects.toString(farmworldKey, ""), world, ResetStatus.NOT_CONFIGURED,
                         "Die Farmwelt ist nicht konfiguriert.");
@@ -101,13 +128,15 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             if (!resetConfig.enabled()) {
                 return rejected(type.key(), world, ResetStatus.DISABLED, "Der Reset ist für diese Farmwelt deaktiviert.");
             }
-            reservation = new Reservation(world);
+            var blocker = conflictingHandoff(startup);
+            if (blocker.isPresent()) return rejected(type.key(), world, ResetStatus.WORLDS_HANDOFF_DEFERRED, blocker.get());
+            reservation = new Reservation(world, nanoTime.getAsLong(), startup);
             runningResets.put(type, reservation);
         }
 
         try {
             // Nur die interne Pipeline gibt ihre Reservierung frei, auch wenn ein Beobachter abbricht.
-            return runReserved(resetConfig, options, dueAt)
+            return runReserved(resetConfig, options, dueAt, reservation)
                     .whenComplete((result, failure) -> release(type, reservation)).copy();
         } catch (RuntimeException | Error failure) {
             release(type, reservation);
@@ -116,7 +145,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<ResetResult> runReserved(FarmworldResetConfig resetConfig, ResetOptions options,
-                                                        Instant dueAt) {
+                                                        Instant dueAt, Reservation reservation) {
         String key = resetConfig.farmworldKey();
         Optional<String> recovery = resetService.recoveryProblem(resetConfig);
         if (recovery.isPresent()) {
@@ -130,29 +159,31 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
         final FarmworldPostResetInitializer.ResetScope resetScope;
         try {
+            requireActive();
             logger.info("Reset für Farmwelt '" + key + "' (" + resetConfig.worldName() + ") gestartet.");
             notificationService.broadcastResetStart(resetConfig);
             if (FarmworldRegenerationOptions.effectiveDragonPolicy(resetConfig, options)
                     != FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE) {
                 try {
                     dragonCompatibility.requireSupported();
-                } catch (RuntimeException exception) {
+                } catch (RuntimeException | LinkageError exception) {
                     throw new ResetPipelineException(ResetStatus.UNSUPPORTED_DRAGON_VERSION,
                             exception.getMessage(), exception);
                 }
             }
+            requireActive();
             resetScope = Objects.requireNonNull(
                     postResetInitializer.beginReset(resetConfig, options),
                     "postResetInitializer.beginReset(...)"
             );
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             return CompletableFuture.completedFuture(finishAndNotify(resetConfig, null, exception));
         }
 
         CompletableFuture<ResetResult> resetFuture;
         try {
-            resetFuture = execute(resetConfig, options);
-        } catch (RuntimeException exception) {
+            resetFuture = execute(resetConfig, options, reservation);
+        } catch (RuntimeException | LinkageError exception) {
             resetFuture = CompletableFuture.failedFuture(exception);
         }
 
@@ -163,7 +194,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private void closeScope(FarmworldResetConfig resetConfig, FarmworldPostResetInitializer.ResetScope resetScope) {
         try {
             resetScope.close();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(Level.SEVERE, "Temporäre Dragon-Policy für '" + resetConfig.worldName()
                     + "' konnte nicht bereinigt werden.", exception);
         }
@@ -173,18 +204,90 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         return CompletableFuture.completedFuture(new ResetResult(key, world, status, message, null));
     }
 
-    private record Reservation(String worldName) {}
+    private static final class Reservation {
+        final String worldName;
+        final long started;
+        final boolean startup;
+        volatile String phase = "Weltprüfung (Global)";
+        volatile ResetAttempt attempt;
+        volatile WorldsHandoff worlds = WorldsHandoff.NOT_STARTED;
+        volatile boolean teleportUnconfirmed;
+        boolean warned;
+
+        Reservation(String worldName, long started, boolean startup) {
+            this.startup = startup;
+            this.worldName = worldName;
+            this.started = started;
+        }
+    }
+
+    private enum WorldsHandoff {
+        NOT_STARTED, ACCEPTED, RETURNED, UNCONFIRMED;
+
+        boolean lacksCompletion() {
+            return this == ACCEPTED || this == UNCONFIRMED;
+        }
+    }
+
+    public void stop() {
+        synchronized (resetService) {
+            stopped = true;
+        }
+    }
+
+    private Optional<String> conflictingHandoff(boolean startup) {
+        long now = nanoTime.getAsLong();
+        return runningResets.values().stream()
+                .filter(r -> r.worlds == WorldsHandoff.UNCONFIRMED || (r.worlds == WorldsHandoff.ACCEPTED
+                        && (startup || r.startup || now - r.started >= OBSERVATION_INTERVAL.toNanos())))
+                .map(r -> "Worlds-Ergebnis für " + r.worldName + " offen. Weitere Übergaben zurückgestellt.")
+                .findFirst();
+    }
+
+    @Override
+    public Optional<String> runningDiagnosis(String key) {
+        synchronized (resetService) {
+            return FarmworldType.fromFarmworldKey(key).map(runningResets::get).map(this::diagnosis)
+                    .or(() -> conflictingHandoff(false));
+        }
+    }
+
+    private String diagnosis(Reservation r) {
+        long seconds = Duration.ofNanos(nanoTime.getAsLong() - r.started).toSeconds();
+        return r.worldName + ", Versuch " + (r.attempt == null ? "in Vorbereitung" : r.attempt.id())
+                + ", seit " + seconds + " s. Phase: " + r.phase + ". Reservierung bleibt bestehen.";
+    }
+
+    @Override
+    public void diagnoseRunningResets() {
+        synchronized (resetService) {
+            long now = nanoTime.getAsLong();
+            for (var entry : runningResets.entrySet()) {
+                var r = entry.getValue();
+                long elapsed = now - r.started;
+                if (elapsed < OBSERVATION_INTERVAL.toNanos() || r.warned) continue;
+                r.warned = true;
+                logger.warning("Reset " + entry.getKey().key() + ": " + diagnosis(r) + (r.worlds.lacksCompletion()
+                        ? " Weitere Worlds-Übergaben warten auf das Ergebnis." : ""));
+            }
+        }
+    }
+
+    private void requireActive() {
+        if (stopped) throw new ResetPipelineException(ResetStatus.DISABLED, "Farmwelt wird deaktiviert.", null);
+    }
 
     private void release(FarmworldType type, Reservation owner) {
         synchronized (resetService) {
-            if (runningResets.get(type) == owner) {
+            if (runningResets.get(type) == owner && !owner.teleportUnconfirmed
+                    && !owner.worlds.lacksCompletion()) {
                 runningResets.remove(type);
             }
         }
     }
 
     private boolean targetReserved(String worldName) {
-        return runningResets.values().stream().anyMatch(r -> r.worldName().equalsIgnoreCase(worldName));
+        return runningResets.values().stream().anyMatch(r -> r.worldName.equalsIgnoreCase(worldName));
     }
 
     public boolean isResetRunning(String farmworldKey) {
@@ -206,7 +309,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         synchronized (resetService) {
             Set<String> names = new HashSet<>();
             resetService.getConfiguredWorlds().forEach(config -> names.add(config.worldName()));
-            runningResets.values().forEach(reservation -> names.add(reservation.worldName()));
+            runningResets.values().forEach(reservation -> names.add(reservation.worldName));
             return Set.copyOf(names);
         }
     }
@@ -218,17 +321,26 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<ResetResult> execute(
             FarmworldResetConfig resetConfig,
-            ResetOptions options
+            ResetOptions options, Reservation reservation
     ) {
         ResetAttempt attempt = resetService.newAttempt(resetConfig);
+        reservation.attempt = attempt;
         return validateWorld(resetConfig, options)
-                .thenCompose(this::evacuatePlayers)
+                .thenCompose(context -> {
+                    reservation.phase = "Evakuierung (Entity/teleportAsync)";
+                    return evacuatePlayers(context, reservation);
+                })
                 .thenCompose(this::confirmWorldIsEmpty)
-                .thenCompose(context -> prepareHandoff(context, attempt))
-                .thenCompose(this::regenerateWorld)
+                .thenCompose(context -> {
+                    reservation.phase = "Journal und letzte Leerprüfung (Async/Global)";
+                    return prepareHandoff(context, attempt, reservation);
+                })
                 .thenCompose(context -> checkpoint(() -> resetService.worldsReturned(resetConfig, attempt))
                         .thenCompose(confirmed -> initializeAndRecord(context, confirmed)))
-                .thenCompose(completed -> persistState(resetConfig, completed))
+                .thenCompose(completed -> {
+                    reservation.phase = "Zeitplan speichern (Async)";
+                    return persistState(resetConfig, completed);
+                })
                 .thenApply(state -> new ResetResult(
                         resetConfig.farmworldKey(),
                         resetConfig.worldName(),
@@ -242,62 +354,62 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             FarmworldResetConfig resetConfig,
             ResetOptions options
     ) {
-        return mapOperationFailure(
-                () -> scheduler.runGlobal(() -> worldOperations.inspect(resetConfig)),
-                ResetStatus.INVALID_CONFIGURATION,
-                "Die konfigurierte Welt konnte nicht geprüft werden."
-        ).thenCompose(inspection -> {
-            if (inspection == null) {
-                return failed(
-                        ResetStatus.INVALID_CONFIGURATION,
-                        "Die Prüfung der konfigurierten Welt hat kein Ergebnis geliefert.",
-                        null
-                );
-            }
-            if (!inspection.loaded()) {
-                return failed(
-                        ResetStatus.WORLD_NOT_LOADED,
-                        "Die Farmwelt ist derzeit nicht geladen und kann nicht sicher zurückgesetzt werden.",
-                        null
-                );
-            }
-
-            World world = inspection.loadedWorld().orElseThrow();
-            if (!world.getName().equals(resetConfig.worldName())) {
-                return failed(
-                        ResetStatus.INVALID_CONFIGURATION,
-                        "Der tatsächliche Bukkit-Weltname stimmt nicht mit der Reset-Konfiguration überein.",
-                        null
-                );
-            }
-            if (inspection.protectedMainWorld()) {
-                return failed(
-                        ResetStatus.PROTECTED_WORLD,
-                        "Die konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden.",
-                        null
-                );
-            }
-            if (inspection.loadedWorldType().orElseThrow() != resetConfig.farmworldType()) {
-                return failed(
-                        ResetStatus.INVALID_CONFIGURATION,
-                        "Die Dimension der geladenen Welt passt nicht zur logischen Farmwelt-ID.",
-                        null
-                );
-            }
-
-            logger.info("Geladene Bukkit-Welt '" + world.getName() + "' gefunden.");
-            long oldSeed = world.getSeed();
-            logger.info("Alter Seed: " + oldSeed);
-            return CompletableFuture.completedFuture(new PipelineContext(
-                    resetConfig,
-                    options,
-                    world,
-                    oldSeed
-            ));
-        });
+        return mapOperationFailure(() -> scheduler.runGlobal(() -> inspectOriginal(resetConfig, options)),
+                ResetStatus.INVALID_CONFIGURATION, "Die konfigurierte Welt konnte nicht geprüft werden.");
     }
 
-    private CompletableFuture<PipelineContext> evacuatePlayers(PipelineContext context) {
+    private PipelineContext inspectOriginal(FarmworldResetConfig resetConfig, ResetOptions options) {
+        WorldInspection inspection = worldOperations.inspect(resetConfig);
+        if (inspection == null) {
+            throw new ResetPipelineException(
+                    ResetStatus.INVALID_CONFIGURATION,
+                    "Die Prüfung der konfigurierten Welt hat kein Ergebnis geliefert.",
+                    null
+            );
+        }
+        if (!inspection.loaded()) {
+            throw new ResetPipelineException(
+                    ResetStatus.WORLD_NOT_LOADED,
+                    "Die Farmwelt ist derzeit nicht geladen und kann nicht sicher zurückgesetzt werden.",
+                    null
+            );
+        }
+
+        World world = inspection.loadedWorld().orElseThrow();
+        if (!world.getName().equals(resetConfig.worldName())) {
+            throw new ResetPipelineException(
+                    ResetStatus.INVALID_CONFIGURATION,
+                    "Der tatsächliche Bukkit-Weltname stimmt nicht mit der Reset-Konfiguration überein.",
+                    null
+            );
+        }
+        if (inspection.protectedMainWorld()) {
+            throw new ResetPipelineException(
+                    ResetStatus.PROTECTED_WORLD,
+                    "Die konfigurierte Welt ist als Hauptwelt geschützt und darf nicht zurückgesetzt werden.",
+                    null
+            );
+        }
+        if (inspection.loadedWorldType().orElseThrow() != resetConfig.farmworldType()) {
+            throw new ResetPipelineException(
+                    ResetStatus.INVALID_CONFIGURATION,
+                    "Die Dimension der geladenen Welt passt nicht zur logischen Farmwelt-ID.",
+                    null
+            );
+        }
+
+        logger.info("Geladene Bukkit-Welt '" + world.getName() + "' gefunden.");
+        long oldSeed = world.getSeed();
+        logger.info("Alter Seed: " + oldSeed);
+        return new PipelineContext(
+                resetConfig,
+                options,
+                world,
+                oldSeed
+        );
+    }
+
+    private CompletableFuture<PipelineContext> evacuatePlayers(PipelineContext context, Reservation reservation) {
         CompletableFuture<FarmworldEvacuationResult> evacuation = mapOperationFailure(
                 () -> scheduler.runGlobal(
                                 () -> worldOperations.evacuatePlayers(context.originalWorld())
@@ -315,6 +427,11 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                         null
                 );
             }
+            if (result.failure().orElse(null) instanceof FarmworldEvacuationResult.UnconfirmedTeleportException) {
+                reservation.teleportUnconfirmed = true;
+                reservation.phase = "Teleportende ungeklärt. Ziel bleibt bis zum Serverneustart reserviert";
+            }
+            requireActive();
             for (Player player : result.evacuatedPlayers()) {
                 notificationService.sendEvacuationMessage(context.resetConfig(), player);
             }
@@ -356,15 +473,19 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         });
     }
 
-    private CompletableFuture<PipelineContext> prepareHandoff(PipelineContext context, ResetAttempt attempt) {
+    private CompletableFuture<RegeneratedContext> prepareHandoff(PipelineContext context, ResetAttempt attempt, Reservation reservation) {
         FarmworldResetConfig config = context.resetConfig();
         return checkpoint(() -> resetService.prepare(config, attempt)).thenCompose(rollback ->
-                // Nur dieser Fehlerzweig liegt beweisbar vor dem Aufruf von regenerateWorld.
-                recheckHandoff(context).exceptionallyCompose(failure ->
-                        checkpoint(() -> {
-                            rollback.restorePrevious();
-                            return context;
-                        }).thenCompose(ignored -> CompletableFuture.failedFuture(failure))));
+                recheckHandoff(context).thenCompose(checked -> regenerateWorld(checked, reservation))
+                        .exceptionallyCompose(failure -> {
+                            if (reservation.worlds != WorldsHandoff.NOT_STARTED) {
+                                return CompletableFuture.failedFuture(failure);
+                            }
+                            return checkpoint(() -> {
+                                rollback.restorePrevious();
+                                return context;
+                            }).thenCompose(ignored -> CompletableFuture.failedFuture(failure));
+                        }));
     }
 
     private CompletableFuture<PipelineContext> recheckHandoff(PipelineContext context) {
@@ -385,22 +506,28 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         }), ResetStatus.INVALID_CONFIGURATION, "Die letzte Prüfung vor der Worlds-Übergabe ist fehlgeschlagen.");
     }
 
-    private CompletableFuture<RegeneratedContext> regenerateWorld(PipelineContext context) {
-        logger.info("Regeneration von '" + context.resetConfig().worldName()
-                + "' über Worlds mit zufälligem Seed gestartet.");
-
-        return mapOperationFailure(
-                // Worlds owns Folia/global scheduling for its complete lifecycle operation.
-                () -> lifecycleService.regenerate(
-                        context.originalWorld(),
-                        FarmworldRegenerationOptions.forReset(
-                                context.resetConfig(),
-                                context.options()
-                        )
-                ),
-                ResetStatus.REGENERATE_FAILED,
-                "Worlds konnte die Farmwelt nicht regenerieren."
-        ).thenCompose(regeneratedWorld -> {
+    private CompletableFuture<RegeneratedContext> regenerateWorld(PipelineContext context, Reservation reservation) {
+        var options = FarmworldRegenerationOptions.forReset(context.resetConfig(), context.options());
+        synchronized (resetService) {
+            requireActive();
+            conflictingHandoff(reservation.startup).ifPresent(reason -> {
+                throw new ResetPipelineException(ResetStatus.WORLDS_HANDOFF_DEFERRED, reason, null);
+            });
+            // Wer vor stop() gewinnt, besitzt genau diesen Aufruf unwiderruflich.
+            reservation.phase = "Worlds.regenerate";
+            reservation.worlds = WorldsHandoff.ACCEPTED;
+        }
+        final CompletableFuture<World> observed;
+        try {
+            var worlds = Objects.requireNonNull(lifecycleService.regenerate(context.originalWorld(), options),
+                    "Worlds hat kein Future geliefert.");
+            observed = Objects.requireNonNull(worlds.handle((world, failure) ->
+                    observeWorldsResult(reservation, world, failure)), "Worlds-Beobachter fehlt.");
+        } catch (RuntimeException | LinkageError failure) {
+            return CompletableFuture.failedFuture(unconfirmedWorlds(reservation, failure));
+        }
+        return observed.thenCompose(regeneratedWorld -> {
+            requireActive();
             if (regeneratedWorld == null) {
                 return failed(
                         ResetStatus.REGENERATE_FAILED,
@@ -425,6 +552,32 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     regeneratedWorld
             ));
         });
+    }
+
+    private World observeWorldsResult(Reservation reservation, World world, Throwable failure) {
+        if (FarmworldLifecycleService.observationLost(failure)) {
+            throw unconfirmedWorlds(reservation, unwrap(failure));
+        }
+        synchronized (resetService) {
+            if (reservation.worlds == WorldsHandoff.ACCEPTED) {
+                reservation.phase = "Worlds-Rückkehr, Validierung und Post-Reset";
+                reservation.worlds = WorldsHandoff.RETURNED;
+            }
+        }
+        if (failure != null) {
+            throw new ResetPipelineException(ResetStatus.REGENERATE_FAILED,
+                    "Worlds konnte die Farmwelt nicht regenerieren.", unwrap(failure));
+        }
+        return world;
+    }
+
+    private ResetPipelineException unconfirmedWorlds(Reservation reservation, Throwable cause) {
+        String message = "Worlds-Abschluss ungeklärt. Weitere Übergaben bis zum Serverneustart gesperrt.";
+        synchronized (resetService) {
+            reservation.phase = message;
+            reservation.worlds = WorldsHandoff.UNCONFIRMED;
+        }
+        return new ResetPipelineException(ResetStatus.REGENERATE_FAILED, message, cause);
     }
 
     private CompletableFuture<RegeneratedContext> applyPostReset(RegeneratedContext context) {
@@ -458,70 +611,66 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private CompletableFuture<RegeneratedContext> validateRegeneratedWorld(
             RegeneratedContext context
     ) {
-        return mapOperationFailure(
-                () -> scheduler.runGlobal(() -> new RegeneratedInspection(
-                        worldOperations.inspect(context.resetConfig()),
-                        context.regeneratedWorld().getWorldFolder().getAbsolutePath()
-                )),
-                ResetStatus.REGENERATE_FAILED,
-                "Die von Worlds regenerierte Bukkit-Welt konnte nicht geprüft werden."
-        ).thenCompose(regeneratedInspection -> {
-            if (regeneratedInspection == null || regeneratedInspection.inspection() == null) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die Prüfung der regenerierten Bukkit-Welt hat kein Ergebnis geliefert.",
-                        null
-                );
-            }
-            WorldInspection inspection = regeneratedInspection.inspection();
-            if (!inspection.loaded()) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die von Worlds regenerierte Welt ist über Bukkit nicht geladen.",
-                        null
-                );
-            }
+        return mapOperationFailure(() -> scheduler.runGlobal(() -> inspectRegenerated(context)),
+                ResetStatus.REGENERATE_FAILED, "Die von Worlds regenerierte Bukkit-Welt konnte nicht geprüft werden.");
+    }
 
-            World bukkitWorld = inspection.loadedWorld().orElseThrow();
-            if (bukkitWorld != context.regeneratedWorld()) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die von Worlds gelieferte Welt ist nicht die über Bukkit erreichbare Weltinstanz.",
-                        null
-                );
-            }
-            if (!bukkitWorld.getName().equals(context.resetConfig().worldName())) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die regenerierte Bukkit-Welt hat einen unerwarteten Namen.",
-                        null
-                );
-            }
-            if (inspection.protectedMainWorld()) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die regenerierte Welt wurde unerwartet als geschützte Hauptwelt erkannt.",
-                        null
-                );
-            }
-            if (inspection.loadedWorldType().orElseThrow()
-                    != context.resetConfig().farmworldType()) {
-                return failed(
-                        ResetStatus.REGENERATE_FAILED,
-                        "Die regenerierte Bukkit-Welt hat eine unerwartete Dimension.",
-                        null
-                );
-            }
+    private RegeneratedContext inspectRegenerated(RegeneratedContext context) {
+        WorldInspection inspection = worldOperations.inspect(context.resetConfig());
+        if (inspection == null) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die Prüfung der regenerierten Bukkit-Welt hat kein Ergebnis geliefert.",
+                    null
+            );
+        }
+        if (!inspection.loaded()) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die von Worlds regenerierte Welt ist über Bukkit nicht geladen.",
+                    null
+            );
+        }
 
-            logger.info("Neue Bukkit-Welt '" + bukkitWorld.getName() + "' validiert.");
-            long newSeed = context.regeneratedWorld().getSeed();
-            logger.info("Neuer Seed: " + newSeed);
-            if (context.oldSeed() == newSeed) {
-                logger.warning("Der zufällig erzeugte Seed entspricht dem vorherigen Seed.");
-            }
-            logger.info("Neuer Weltordner: " + regeneratedInspection.worldFolder());
-            return CompletableFuture.completedFuture(context);
-        });
+        World bukkitWorld = inspection.loadedWorld().orElseThrow();
+        if (bukkitWorld != context.regeneratedWorld()) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die von Worlds gelieferte Welt ist nicht die über Bukkit erreichbare Weltinstanz.",
+                    null
+            );
+        }
+        if (!bukkitWorld.getName().equals(context.resetConfig().worldName())) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die regenerierte Bukkit-Welt hat einen unerwarteten Namen.",
+                    null
+            );
+        }
+        if (inspection.protectedMainWorld()) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die regenerierte Welt wurde unerwartet als geschützte Hauptwelt erkannt.",
+                    null
+            );
+        }
+        if (inspection.loadedWorldType().orElseThrow()
+                != context.resetConfig().farmworldType()) {
+            throw new ResetPipelineException(
+                    ResetStatus.REGENERATE_FAILED,
+                    "Die regenerierte Bukkit-Welt hat eine unerwartete Dimension.",
+                    null
+            );
+        }
+
+        logger.info("Neue Bukkit-Welt '" + bukkitWorld.getName() + "' validiert.");
+        long newSeed = context.regeneratedWorld().getSeed();
+        logger.info("Neuer Seed: " + newSeed);
+        if (context.oldSeed() == newSeed) {
+            logger.warning("Der zufällig erzeugte Seed entspricht dem vorherigen Seed.");
+        }
+        logger.info("Neuer Weltordner: " + bukkitWorld.getWorldFolder().getAbsolutePath());
+        return context;
     }
 
     private CompletableFuture<ResetAttempt> initializeAndRecord(RegeneratedContext context, ResetAttempt confirmed) {
@@ -564,11 +713,13 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     ) {
         final CompletableFuture<T> operation;
         try {
+            requireActive();
             operation = Objects.requireNonNull(
                     operationSupplier.get(),
                     "Externe Operation hat kein Future geliefert."
             );
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
+            if (exception instanceof ResetPipelineException pipeline) return CompletableFuture.failedFuture(pipeline);
             return failed(status, message, exception);
         }
 
@@ -644,7 +795,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             Throwable failure
     ) {
         ResetResult completedResult = finish(resetConfig, result, failure);
-        notificationService.broadcastResetResult(resetConfig, completedResult);
+        if (!stopped) notificationService.broadcastResetResult(resetConfig, completedResult);
         return completedResult;
     }
 
@@ -671,12 +822,6 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ResetOptions options,
             long oldSeed,
             World regeneratedWorld
-    ) {
-    }
-
-    private record RegeneratedInspection(
-            WorldInspection inspection,
-            String worldFolder
     ) {
     }
 

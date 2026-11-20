@@ -70,7 +70,7 @@ public final class AutomaticResetScheduler {
                     ),
                     "globalRegionScheduler.runAtFixedRate(...)"
             );
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             lifecycleGeneration++;
             throw exception;
         }
@@ -86,7 +86,7 @@ public final class AutomaticResetScheduler {
         lifecycleGeneration++;
         try {
             task.cancel();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Periodischer Reset-Scheduler konnte nicht sauber gestoppt werden.",
@@ -97,6 +97,7 @@ public final class AutomaticResetScheduler {
 
     Map<String, ResetDueState> evaluateDueStates(Instant now) {
         Objects.requireNonNull(now, "now");
+        resetExecutor.diagnoseRunningResets();
         Map<String, ResetDueState> dueStates = new LinkedHashMap<>();
         for (FarmworldResetConfig configuration : resetService.getConfiguredWorlds()) {
             String key = configuration.farmworldKey();
@@ -114,7 +115,7 @@ public final class AutomaticResetScheduler {
             if (entry.getValue() != ResetDueState.DUE) {
                 continue;
             }
-            startReset(entry.getKey());
+            startReset(entry.getKey(), false);
         }
     }
 
@@ -126,7 +127,7 @@ public final class AutomaticResetScheduler {
         final Instant now;
         try {
             now = clock.instant();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Zeitpunkt für automatische Reset-Prüfung konnte nicht ermittelt werden.",
@@ -137,7 +138,7 @@ public final class AutomaticResetScheduler {
 
         try {
             notificationService.broadcastDueWarnings(now);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Countdown-Warnungen konnten nicht vollständig geprüft werden.",
@@ -151,7 +152,7 @@ public final class AutomaticResetScheduler {
 
         try {
             startDueResets(now, generation);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Automatische Reset-Fälligkeiten konnten nicht vollständig geprüft werden.",
@@ -170,7 +171,7 @@ public final class AutomaticResetScheduler {
                 if (!isCurrentLifecycle(generation)) {
                     return;
                 }
-                startReset(entry.getKey());
+                startReset(entry.getKey(), false);
             }
         }
     }
@@ -179,10 +180,11 @@ public final class AutomaticResetScheduler {
         return scheduledTask != null && lifecycleGeneration == generation;
     }
 
-    CompletableFuture<ResetResult> startReset(String farmworldKey) {
+    CompletableFuture<ResetResult> startReset(String farmworldKey, boolean startup) {
         try {
             CompletableFuture<ResetResult> resetFuture = Objects.requireNonNull(
-                    resetExecutor.resetIfDue(farmworldKey, clock.instant()),
+                    startup ? resetExecutor.catchUpIfDue(farmworldKey, clock.instant())
+                            : resetExecutor.resetIfDue(farmworldKey, clock.instant()),
                     "resetExecutor.reset(...)"
             );
             return resetFuture.whenComplete((result, failure) -> handleResult(
@@ -190,7 +192,7 @@ public final class AutomaticResetScheduler {
                     result,
                     failure
             ));
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     "Automatischer Reset für Farmwelt '" + farmworldKey
@@ -222,7 +224,8 @@ public final class AutomaticResetScheduler {
                     + "' erfolgreich abgeschlossen.");
             return;
         }
-        if (result.status() == ResetStatus.ALREADY_RUNNING || result.status() == ResetStatus.NOT_DUE) {
+        if (result.status() == ResetStatus.ALREADY_RUNNING || result.status() == ResetStatus.WORLDS_HANDOFF_DEFERRED
+                || result.status() == ResetStatus.NOT_DUE) {
             return;
         }
 

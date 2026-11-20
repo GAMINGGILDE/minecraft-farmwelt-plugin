@@ -25,6 +25,13 @@ public record FarmworldEvacuationResult(
         }
     }
 
+    /** Der Teleport wurde aufgerufen, sein tatsächliches Ende ist nicht mehr beobachtbar. */
+    static final class UnconfirmedTeleportException extends IllegalStateException {
+        UnconfirmedTeleportException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     public static FarmworldEvacuationResult completed(
             Collection<? extends Player> evacuatedPlayers
     ) {

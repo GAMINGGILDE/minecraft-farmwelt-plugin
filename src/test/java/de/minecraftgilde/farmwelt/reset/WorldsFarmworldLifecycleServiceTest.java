@@ -34,6 +34,8 @@ import org.bukkit.World;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class WorldsFarmworldLifecycleServiceTest {
 
@@ -155,6 +157,46 @@ class WorldsFarmworldLifecycleServiceTest {
 
         assertSame(failure, exception.getCause());
         assertEquals("old fight", Files.readString(fightData));
+    }
+
+    @Test
+    void cancellationPreservesStagedDragonDataAndBackup(@TempDir Path tempDir) throws Exception {
+        var external = new CompletableFuture<World>();
+        Path data = createFightData(tempDir, "alter Kampf");
+        World world = world("endfarm", tempDir);
+        var service = service(worldsAccess((original, customize) -> external));
+        var result = service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED));
+        publishRegenerationEvents(service, world);
+        external.cancel(false);
+        assertThrows(CompletionException.class, result::join);
+        assertStagedWithBackup(data);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void missingWorldsFuturePreservesStagedDragonDataAndBackup(boolean throwsDuringCall, @TempDir Path tempDir)
+            throws Exception {
+        Path data = createFightData(tempDir, "alter Kampf");
+        World world = world("endfarm", tempDir);
+        var owner = new AtomicReference<WorldsFarmworldLifecycleService>();
+        var service = service(worldsAccess((original, customize) -> {
+            publishRegenerationEvents(owner.get(), original);
+            if (throwsDuringCall) throw new IllegalStateException("Kein Abschlussbeleg");
+            return null;
+        }));
+        owner.set(service);
+        Class<? extends RuntimeException> expected = throwsDuringCall ? IllegalStateException.class : NullPointerException.class;
+        assertThrows(expected, () -> service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED)));
+        assertStagedWithBackup(data);
+    }
+
+    private static void assertStagedWithBackup(Path data) throws Exception {
+        assertPreparedFightData(data, SUPPRESSED);
+        try (var files = Files.list(data.getParent())) {
+            var backups = files.filter(path -> path.getFileName().toString().contains(".farmwelt-reset-")).toList();
+            assertEquals(1, backups.size());
+            assertEquals("alter Kampf", Files.readString(backups.getFirst()));
+        }
     }
 
     @Test

@@ -31,7 +31,10 @@ final class BukkitCommandAudience implements AdminCommandAudience {
     @Override
     public void sendMessages(List<String> messages) {
         List<String> immutableMessages = List.copyOf(messages);
-        Runnable sendOperation = () -> immutableMessages.forEach(sender::sendMessage);
+        if (!plugin.isEnabled()) return;
+        Runnable sendOperation = () -> {
+            if (plugin.isEnabled()) immutableMessages.forEach(sender::sendMessage);
+        };
         if (sender instanceof Player player) {
             player.getScheduler().execute(plugin, sendOperation, () -> { }, 1L);
             return;
