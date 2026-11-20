@@ -175,7 +175,7 @@ public final class BukkitFarmworldWorldOperations implements FarmworldWorldOpera
     private boolean isSafeDestination(World world, World resetWorld) {
         return world.getEnvironment() == World.Environment.NORMAL
                 && world != resetWorld
-                && !resetWorldNames.get().contains(world.getName());
+                && resetWorldNames.get().stream().noneMatch(world.getName()::equalsIgnoreCase);
     }
 
     static boolean isRegisteredEndFarm(Server server, List<World> loadedWorlds, World world) {

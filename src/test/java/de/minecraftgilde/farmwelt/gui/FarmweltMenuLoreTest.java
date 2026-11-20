@@ -50,7 +50,7 @@ class FarmweltMenuLoreTest {
     @Test
     void appendsPersistedDateAndRemainingTimeWithoutChangingConfiguredLore() {
         load("overworld", true, NOW.plus(Duration.ofDays(3)).plus(Duration.ofHours(4)));
-        FarmweltMenuItem item = item("overworld", List.of("Normale Farmwelt", "Eigene Beschreibung"));
+        FarmweltMenuItem item = item("Overworld", List.of("Normale Farmwelt", "Eigene Beschreibung"));
 
         assertEquals(List.of(
                 "Normale Farmwelt",

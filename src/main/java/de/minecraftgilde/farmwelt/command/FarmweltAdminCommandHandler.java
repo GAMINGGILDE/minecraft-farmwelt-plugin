@@ -256,9 +256,7 @@ public final class FarmweltAdminCommandHandler {
     }
 
     private Optional<FarmworldResetConfig> findConfig(String requestedKey) {
-        return resetService.getConfiguredWorlds().stream()
-                .filter(config -> config.farmworldKey().equalsIgnoreCase(requestedKey))
-                .findFirst();
+        return resetService.getConfig(requestedKey);
     }
 
     private List<String> configuredKeys() {

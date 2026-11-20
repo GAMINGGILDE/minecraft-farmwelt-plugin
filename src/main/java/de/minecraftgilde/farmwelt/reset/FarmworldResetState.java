@@ -25,6 +25,7 @@ public record FarmworldResetState(
             throw new IllegalArgumentException("farmworldKey darf nicht leer sein.");
         }
 
+        farmworldKey = FarmworldType.canonicalKey(farmworldKey);
         lastReset = Objects.requireNonNull(lastReset, "lastReset");
         nextReset = Objects.requireNonNull(nextReset, "nextReset");
     }

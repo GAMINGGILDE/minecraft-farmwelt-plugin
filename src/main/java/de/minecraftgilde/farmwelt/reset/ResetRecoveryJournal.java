@@ -8,7 +8,6 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -25,7 +24,7 @@ final class ResetRecoveryJournal {
         this.directory = directory;
     }
 
-    void load(Map<String, FarmworldResetState> schedules) {
+    void load(Map<String, FarmworldResetState> schedules, boolean conflictingReceipt) {
         Path marker = directory.resolve("reset-recovery.version");
         try {
             if (Files.notExists(marker, LinkOption.NOFOLLOW_LINKS)) {
@@ -36,7 +35,7 @@ final class ResetRecoveryJournal {
                         throw new IOException("Recovery-Versionsmarker fehlt bei vorhandenen Journalen.");
                     }
                 }
-                if (schedules.values().stream().anyMatch(s -> s.attemptId().isPresent())) {
+                if (conflictingReceipt || schedules.values().stream().anyMatch(s -> s.attemptId().isPresent())) {
                     throw new IOException("Recovery-Dateien fehlen zu einem bestätigten Reset.");
                 }
                 Files.writeString(marker, "1\n", StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
@@ -70,15 +69,19 @@ final class ResetRecoveryJournal {
         }
     }
 
-    Optional<String> problem(FarmworldResetConfig config, Map<String, FarmworldResetState> schedules) {
+    Optional<String> problem(FarmworldResetConfig config, Map<String, FarmworldResetState> schedules,
+                             Map<FarmworldType, String> conflicts) {
         FarmworldType type = config.farmworldType();
+        if (conflicts.containsKey(type)) {
+            return Optional.of(conflicts.get(type));
+        }
         if (errors.containsKey(type)) {
             return Optional.of("Recovery-Journal für " + type + " ungeklärt. " + errors.get(type));
         }
         for (var entry : attempts.entrySet()) {
             ResetAttempt other = entry.getValue();
             if (entry.getKey() != type && other.world().equalsIgnoreCase(config.worldName())
-                    && !other.confirmedBy(schedules.get(other.key()))) {
+                    && (conflicts.containsKey(entry.getKey()) || !other.confirmedBy(schedules.get(entry.getKey().key())))) {
                 return Optional.of(other.diagnosis());
             }
         }
@@ -129,7 +132,7 @@ final class ResetRecoveryJournal {
     }
 
     private Path file(FarmworldType type) {
-        return directory.resolve("reset-recovery-" + type.name().toLowerCase(Locale.ROOT) + ".journal");
+        return directory.resolve("reset-recovery-" + type.key() + ".journal");
     }
 
     private Path temporaryFile(FarmworldType type) {

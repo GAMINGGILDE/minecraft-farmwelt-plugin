@@ -1,15 +1,20 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import de.minecraftgilde.farmwelt.config.FarmworldYamlKeys;
 import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -19,6 +24,11 @@ import java.util.logging.Logger;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.error.YAMLException;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.ScalarNode;
 
 public final class YamlResetStateRepository implements ResetStateRepository {
 
@@ -26,6 +36,7 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
     private final Path stateFile;
     private final Logger logger;
+    private Map<FarmworldType, List<NodeTuple>> preserved = Map.of();
 
     public YamlResetStateRepository(Path stateFile, Logger logger) {
         this.stateFile = Objects.requireNonNull(stateFile, "stateFile");
@@ -35,20 +46,28 @@ public final class YamlResetStateRepository implements ResetStateRepository {
     @Override
     public Map<String, FarmworldResetState> load() throws IOException {
         if (Files.notExists(stateFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            preserved = Map.of();
             return Map.of();
         }
 
         YamlConfiguration yaml = new YamlConfiguration();
+        String contents = Files.readString(stateFile);
         try {
-            yaml.load(stateFile.toFile());
+            yaml.loadFromString(contents);
         } catch (InvalidConfigurationException exception) {
             logger.warning("Reset-State-Datei '" + stateFile.getFileName()
                     + "' ist kein gültiges YAML. Die betroffenen States werden neu initialisiert: "
                     + exception.getMessage());
+            preserved = Map.of();
             return Map.of();
         }
 
         validateVersion(yaml);
+        try {
+            preserved = FarmworldYamlKeys.duplicates(contents, "worlds");
+        } catch (YAMLException exception) {
+            throw new IllegalArgumentException("YAML-Identitäten im Zeitplan konnten nicht geprüft werden.", exception);
+        }
 
         ConfigurationSection worldsSection = yaml.getConfigurationSection("worlds");
         if (worldsSection == null) {
@@ -60,6 +79,9 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
         Map<String, FarmworldResetState> states = new LinkedHashMap<>();
         for (String farmworldKey : worldsSection.getKeys(false)) {
+            if (FarmworldType.fromFarmworldKey(farmworldKey).filter(preserved::containsKey).isPresent()) {
+                continue;
+            }
             ConfigurationSection stateSection = worldsSection.getConfigurationSection(farmworldKey);
             if (stateSection == null) {
                 warnInvalidState(farmworldKey, "der Eintrag ist kein YAML-Bereich");
@@ -67,10 +89,26 @@ public final class YamlResetStateRepository implements ResetStateRepository {
             }
 
             Optional<FarmworldResetState> state = loadState(farmworldKey, stateSection);
-            state.ifPresent(value -> states.put(farmworldKey, value));
+            state.ifPresent(value -> states.put(value.farmworldKey(), value));
         }
 
         return Collections.unmodifiableMap(states);
+    }
+
+    @Override
+    public Map<FarmworldType, String> identityConflicts() {
+        var problems = new EnumMap<FarmworldType, String>(FarmworldType.class);
+        preserved.forEach((type, entries) -> problems.put(type,
+                "reset-state.yml: " + FarmworldYamlKeys.diagnosis(entries)));
+        return Map.copyOf(problems);
+    }
+
+    @Override
+    public boolean hasConflictingReceipt() {
+        return preserved.values().stream().flatMap(List::stream)
+                .map(NodeTuple::getValueNode).filter(MappingNode.class::isInstance).map(MappingNode.class::cast)
+                .anyMatch(node -> node.isMerged() || node.getValue().stream().anyMatch(entry ->
+                        entry.getKeyNode() instanceof ScalarNode key && key.getValue().equals("attempt-id")));
     }
 
     @Override
@@ -83,7 +121,11 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
         for (Map.Entry<String, FarmworldResetState> entry : new TreeMap<>(states).entrySet()) {
             FarmworldResetState state = entry.getValue();
-            ConfigurationSection stateSection = worldsSection.createSection(entry.getKey());
+            if (!entry.getKey().equals(state.farmworldKey())
+                    || FarmworldType.fromFarmworldKey(entry.getKey()).filter(preserved::containsKey).isPresent()) {
+                throw new IOException("Nicht eindeutiger Zeitplan für '" + entry.getKey() + "'.");
+            }
+            ConfigurationSection stateSection = worldsSection.createSection(state.farmworldKey());
             state.attemptId().ifPresent(id -> stateSection.set("attempt-id", id.toString()));
             state.lastReset().ifPresent(lastReset -> stateSection.set("last-reset", lastReset.toString()));
             stateSection.set("next-reset", state.nextReset().toString());
@@ -96,7 +138,7 @@ public final class YamlResetStateRepository implements ResetStateRepository {
 
         Path temporaryFile = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
         try {
-            Files.writeString(temporaryFile, yaml.saveToString(), StandardOpenOption.CREATE,
+            Files.writeString(temporaryFile, serialize(yaml), StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.SYNC);
             replaceStateFile(temporaryFile);
             DurableResetFiles.syncDirectory(parent);
@@ -108,6 +150,21 @@ public final class YamlResetStateRepository implements ResetStateRepository {
                         + exception.getMessage());
             }
         }
+    }
+
+    private String serialize(YamlConfiguration schedules) {
+        String contents = schedules.saveToString();
+        if (preserved.isEmpty()) {
+            return contents;
+        }
+        // Auch gleich geschriebene oder beschädigte Teilbäume beim Speichern gesunder Welten erhalten.
+        var yaml = new Yaml();
+        var root = yaml.compose(new StringReader(contents));
+        var worlds = FarmworldYamlKeys.section(root, "worlds");
+        preserved.values().forEach(worlds.getValue()::addAll);
+        var output = new StringWriter();
+        yaml.serialize(root, output);
+        return output.toString();
     }
 
     private void validateVersion(YamlConfiguration yaml) throws IOException {

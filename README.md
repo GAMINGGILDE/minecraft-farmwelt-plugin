@@ -73,6 +73,8 @@ Vor dem ersten produktiven Reset die [Betriebs- und Testanleitung](docs/ADMIN_GU
 
 ## Konfiguration
 
+Die Reset-IDs heißen `overworld`, `nether` und `end`. Config und Befehle akzeptieren auch `Overworld` oder `OVERWORLD`. Alle Schreibweisen teilen sich Zeitplan, Reset-Sperre und Recovery-Journal. Jede ID und jeder physische Zielname darf nur einmal konfiguriert sein, auch bei deaktivierten Plänen. Der Bukkit-Weltname in `reset.world` muss exakt zur geladenen Welt passen.
+
 Minimales Beispiel für einen GUI-Eintrag mit aktivem Reset-Plan:
 
 ```yaml

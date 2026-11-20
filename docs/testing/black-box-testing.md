@@ -182,7 +182,7 @@ Diese Tests sind kritische Integration-Smoke-Tests; die detaillierten Unit-Tests
 
 ### Doppelreset derselben Farmwelt
 
-Während `/farmwelt reset force overworld` sichtbar läuft, denselben Command unmittelbar ein zweites Mal absenden. Es darf nur eine Worlds-Regeneration und nur ein Reset-Lifecycle starten. Der zweite Aufruf muss kontrolliert als `ALREADY_RUNNING` abgewiesen werden und darf keine globale Fehler- oder Startmeldung erzeugen. Nach Abschluss muss `/farmwelt status overworld` keinen aktiven Reset mehr zeigen und ein späterer Force-Reset wieder möglich sein.
+Während `/farmwelt reset force overworld` sichtbar läuft, den Reset mit `/farmwelt reset force OVERWORLD` erneut anfordern. Erwartet werden ein Worlds-Aufruf und eine Evakuierung. Der zweite Aufruf meldet `ALREADY_RUNNING`. Bei einem Reload während der offenen Pipeline zusätzlich die Config-ID in `Overworld` ändern und den physischen Namen beibehalten. Status und GUI müssen dieselbe Sperre zeigen. Nach Abschluss müssen Journal und Zeitplan denselben Versuch bestätigen und die Sperre muss aufgehoben sein.
 
 ### Teleport während eines Reset-Locks
 

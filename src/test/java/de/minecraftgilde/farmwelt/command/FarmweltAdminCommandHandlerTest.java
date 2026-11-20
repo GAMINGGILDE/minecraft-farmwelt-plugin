@@ -82,7 +82,7 @@ class FarmweltAdminCommandHandlerTest {
         assertTrue(audience.contains("Status: §aGeplant"));
 
         audience.clear();
-        assertTrue(handler.handle(audience, new String[]{"status", "overworld"}));
+        assertTrue(handler.handle(audience, new String[]{"status", "OVERWORLD"}));
         assertTrue(audience.contains("Reset-Status: §eoverworld"));
         assertTrue(audience.contains("Status: §aGeplant"));
         assertTrue(audience.contains("Weltname: §ftest_farmwelt"));
@@ -93,7 +93,7 @@ class FarmweltAdminCommandHandlerTest {
         assertTrue(audience.contains("wurde neu geladen"));
 
         audience.clear();
-        assertTrue(handler.handle(audience, new String[]{"reset", "force", "overworld"}));
+        assertTrue(handler.handle(audience, new String[]{"reset", "force", "Overworld"}));
         assertEquals("overworld", resetExecutor.lastKey);
         assertTrue(audience.contains("wurde angefordert"));
     }

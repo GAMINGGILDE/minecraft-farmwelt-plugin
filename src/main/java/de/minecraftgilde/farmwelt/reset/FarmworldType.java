@@ -1,6 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -12,16 +13,24 @@ public enum FarmworldType {
     NETHER,
     END;
 
+    private final String key = name().toLowerCase(Locale.ROOT);
+    private static final Map<String, FarmworldType> BY_KEY = Map.of(
+            OVERWORLD.key, OVERWORLD, NETHER.key, NETHER, END.key, END);
+
+    public String key() {
+        return key;
+    }
+
+    /** Unbekannte Menü-IDs und archivierte Zeitpläne behalten ihren externen Namen. */
+    public static String canonicalKey(String key) {
+        return fromFarmworldKey(key).map(FarmworldType::key).orElse(key);
+    }
+
     public static Optional<FarmworldType> fromFarmworldKey(String farmworldKey) {
         if (farmworldKey == null) {
             return Optional.empty();
         }
 
-        return switch (farmworldKey.toLowerCase(Locale.ROOT)) {
-            case "overworld" -> Optional.of(OVERWORLD);
-            case "nether" -> Optional.of(NETHER);
-            case "end" -> Optional.of(END);
-            default -> Optional.empty();
-        };
+        return Optional.ofNullable(BY_KEY.get(farmworldKey.toLowerCase(Locale.ROOT)));
     }
 }

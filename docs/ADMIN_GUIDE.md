@@ -111,6 +111,12 @@ Der Info-Kompass erklärt zusätzlich, dass beim Erneuern der Farmwelten dort pl
 
 ### Reset-Plan
 
+Unter `farmworlds` erhält jede logische ID genau einen geschachtelten YAML-Abschnitt. Das gilt auch für die ID unter `worlds` im Zeitplan. In einzelnen Schlüssel geschriebenen Punktpfaden wie `worlds.OVERWORLD.next-reset` lässt sich die Abschnittsgrenze nicht eindeutig entnehmen. Groß- und Kleinschreibung ist bei `overworld`, `nether` und `end` frei. Menü, Status, Countdown und Force verwenden dieselbe ID. Der Anzeigename bleibt frei wählbar. Bei `reset.world` zählt die genaue Schreibweise des registrierten Bukkit-Namens.
+
+Zwei Abschnitte für dieselbe ID oder zwei Pläne mit demselben Zielnamen führen zur Ablehnung der gesamten neuen Reset-Konfiguration. Das gilt auch bei deaktivierten Einträgen und bei Zielnamen wie `Farm` und `farm`. Beim Reload läuft der bisherige gültige Plan weiter. Beim ersten Start verhindert der Fehler den Start des Reset-Systems. Die Fehlermeldung nennt die betroffenen Einträge.
+
+Ein laufender Reset reserviert seine ID und den ursprünglichen Zielnamen bis zum Abschluss der Bereinigung. Umbenennen, Entfernen, Deaktivieren oder Neuzuordnen im Reload gibt diese Reservierung nicht frei. Unabhängige Ziele können parallel zurückgesetzt werden.
+
 Pfad: `farmworlds.<id>.reset`
 
 | Schlüssel | Auslieferung | Vertrag |
@@ -352,6 +358,10 @@ Bei einem noch nie erfolgreich zurückgesetzten Plan kann `last-reset` fehlen. I
 Die Datei niemals während eines laufenden Servers manuell bearbeiten. Für isolierte Tests nur bei vollständig gestopptem Server, nach Backup und ausschließlich am gezielt benötigten Weltabschnitt arbeiten. Die Datei nicht pauschal löschen: Dadurch gingen die persistenten Termine aller Farmwelten verloren und würden neu initialisiert.
 
 ### Recovery nach einem unterbrochenen Reset
+
+Ein einzelner älterer Abschnitt wie `worlds.OVERWORLD` gilt für `overworld`. Der nächste reguläre Schreibvorgang speichert eindeutige IDs kleingeschrieben. Termine und Versuchs-UUID bleiben erhalten. Ein Journal mit `key=OVERWORLD` kann den Abschluss mit demselben Beleg bestätigen. Dazu müssen Phase, Versuchs-UUID, Abschlusszeit und Folgetermin übereinstimmen. Eine Migration der Journaldateien ist dafür entbehrlich.
+
+Bei mehreren Zeitplanabschnitten derselben ID zeigt der Status eine Recovery-Sperre. Farmwelt bewahrt sämtliche betroffenen Einträge auch beim Speichern gesunder Welten auf. Zur Klärung den Server stoppen und den unten beschriebenen Sicherungssatz anlegen. Anhand von Journal, Logs und Sicherung den gültigen Beleg bestimmen und genau einen passenden Abschnitt wiederherstellen. Die Reihenfolge der Abschnitte und das Alter eines Termins sind keine Abschlussbelege. Bei einem mehrfachen übergeordneten `worlds`-Bereich ist die Zuordnung der gesamten Datei ungeklärt.
 
 **Ein ungeklärter Reset-Zustand ist ein Sicherheitszustand. Er bleibt über das nächste Zeitintervall, Reload und Serverneustart hinweg gesperrt.** Ein Force-Aufruf respektiert die Sperre ebenfalls. Andere Farmwelten mit eigenem, eindeutigem Zustand können ihren Plan weiter abarbeiten. Die GUI zeigt „Reset bis zur Klärung gesperrt“. Der Spielerteleport folgt weiterhin dem Laufzeit-Lock.
 

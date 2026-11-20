@@ -7,11 +7,13 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -33,6 +35,7 @@ public final class FarmworldResetService {
 
     private Map<String, FarmworldResetConfig> configurations = Map.of();
     private volatile Map<String, FarmworldResetState> states = Map.of();
+    private Map<FarmworldType, String> stateConflicts = Map.of();
 
     public FarmworldResetService(ResetStateRepository stateRepository, Path dataDirectory, Clock clock, Logger logger) {
         this.stateRepository = Objects.requireNonNull(stateRepository, "stateRepository");
@@ -50,31 +53,52 @@ public final class FarmworldResetService {
     private boolean loadSchedules(Collection<FarmworldResetConfig> resetConfigurations) {
         Objects.requireNonNull(resetConfigurations, "resetConfigurations");
 
-        Map<String, FarmworldResetConfig> loadedConfigurations = indexConfigurations(resetConfigurations);
-        Map<String, FarmworldResetState> loadedStates;
+        Map<String, FarmworldResetConfig> loadedConfigurations = new LinkedHashMap<>();
+        var targets = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        for (FarmworldResetConfig config : resetConfigurations) {
+            if (loadedConfigurations.putIfAbsent(config.farmworldKey(), config) != null
+                    || !targets.add(config.worldName())) {
+                logger.severe("Mehrdeutige Reset-Konfiguration für '" + config.farmworldKey()
+                        + "' mit Ziel '" + config.worldName() + "'.");
+                return false;
+            }
+        }
+        Map<String, FarmworldResetState> loadedStates = new LinkedHashMap<>();
         try {
-            loadedStates = new LinkedHashMap<>(stateRepository.load());
+            for (var entry : stateRepository.load().entrySet()) {
+                String key = FarmworldType.canonicalKey(entry.getKey());
+                if (loadedStates.putIfAbsent(key, entry.getValue()) != null) {
+                    throw new IllegalArgumentException("Mehrere Zeitpläne für die Farmwelt-ID '" + key + "'.");
+                }
+            }
+        } catch (IllegalArgumentException exception) {
+            blockScheduleWrites(exception);
+            return false;
         } catch (IOException exception) {
             logger.log(Level.SEVERE, "Reset-States konnten nicht geladen werden. Bestehende Reset-Konfiguration und In-Memory-States bleiben erhalten.", exception);
             return false;
         }
 
+        var conflicts = stateRepository.identityConflicts();
         boolean firstLoad = !journalLoaded;
         if (firstLoad) {
-            journal.load(loadedStates);
+            journal.load(loadedStates, stateRepository.hasConflictingReceipt());
             journalLoaded = true;
         }
         for (FarmworldResetConfig config : loadedConfigurations.values()) {
             if (firstLoad || recoveryProblem(config).isEmpty()) {
-                journal.problem(config, loadedStates).ifPresent(reason ->
+                journal.problem(config, loadedStates, conflicts).ifPresent(reason ->
                         logger.severe("Reset-Sperre für '" + config.farmworldKey() + "'. " + reason));
             }
         }
-        boolean stateChanged = initializeMissingStates(loadedConfigurations, loadedStates);
+        boolean stateChanged = initializeMissingStates(loadedConfigurations, loadedStates, conflicts);
         if (stateChanged) {
             try {
                 stateRepository.save(Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates)));
             } catch (IOException exception) {
+                if (!conflicts.isEmpty() || !stateConflicts.isEmpty()) {
+                    blockScheduleWrites(exception);
+                }
                 logger.log(Level.SEVERE, "Neu initialisierte Reset-States konnten nicht gespeichert werden.", exception);
                 return false;
             }
@@ -83,19 +107,17 @@ public final class FarmworldResetService {
         synchronized (this) {
             configurations = Collections.unmodifiableMap(loadedConfigurations);
             states = Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates));
+            stateConflicts = conflicts;
         }
         return true;
     }
 
     public synchronized Optional<FarmworldResetConfig> getConfig(String farmworldKey) {
-        return Optional.ofNullable(configurations.get(farmworldKey));
+        return FarmworldType.fromFarmworldKey(farmworldKey).map(type -> configurations.get(type.key()));
     }
 
     public synchronized Optional<FarmworldResetState> getState(String farmworldKey) {
-        if (!configurations.containsKey(farmworldKey)) {
-            return Optional.empty();
-        }
-        return Optional.ofNullable(states.get(farmworldKey));
+        return getConfig(farmworldKey).map(config -> states.get(config.farmworldKey()));
     }
 
     public synchronized Collection<FarmworldResetConfig> getConfiguredWorlds() {
@@ -108,7 +130,7 @@ public final class FarmworldResetService {
      */
     public FarmworldResetState completeReset(String farmworldKey) throws IOException {
         synchronized (scheduleWriter) {
-            FarmworldResetConfig configuration = configurations.get(farmworldKey);
+            FarmworldResetConfig configuration = getConfig(farmworldKey).orElse(null);
             if (configuration == null) {
                 throw new IllegalArgumentException("Farmwelt '" + farmworldKey + "' ist nicht konfiguriert.");
             }
@@ -143,6 +165,10 @@ public final class FarmworldResetService {
                                                Optional<UUID> attemptId) throws IOException {
         Objects.requireNonNull(configurationSnapshot, "configurationSnapshot");
         Objects.requireNonNull(completedAt, "completedAt");
+        String conflict = stateConflicts.get(configurationSnapshot.farmworldType());
+        if (conflict != null) {
+            throw new IOException(conflict);
+        }
         if (!configurationSnapshot.enabled()) {
             throw new IllegalStateException("Farmwelt '" + configurationSnapshot.farmworldKey()
                     + "' ist für Resets deaktiviert.");
@@ -170,8 +196,17 @@ public final class FarmworldResetService {
         return completedState;
     }
 
-    public Optional<String> recoveryProblem(FarmworldResetConfig config) {
-        return journal.problem(config, states);
+    public synchronized Optional<String> recoveryProblem(FarmworldResetConfig config) {
+        return journal.problem(config, states, stateConflicts);
+    }
+
+    private synchronized void blockScheduleWrites(Exception exception) {
+        var problems = new EnumMap<FarmworldType, String>(FarmworldType.class);
+        for (FarmworldType type : FarmworldType.values()) {
+            problems.put(type, "Zeitplandatei bis zum erfolgreichen Reload gesperrt. " + exception.getMessage());
+        }
+        stateConflicts = Map.copyOf(problems);
+        logger.log(Level.SEVERE, "Mehrdeutige Zeitplandatei konnte nicht übernommen werden.", exception);
     }
 
     ResetAttempt newAttempt(FarmworldResetConfig config) {
@@ -228,30 +263,17 @@ public final class FarmworldResetService {
         }
     }
 
-    private Map<String, FarmworldResetConfig> indexConfigurations(
-            Collection<FarmworldResetConfig> resetConfigurations
-    ) {
-        Map<String, FarmworldResetConfig> indexedConfigurations = new LinkedHashMap<>();
-        for (FarmworldResetConfig configuration : resetConfigurations) {
-            FarmworldResetConfig existing = indexedConfigurations.put(configuration.farmworldKey(), configuration);
-            if (existing != null) {
-                logger.warning("Doppelte Reset-Konfiguration für Farmwelt '"
-                        + configuration.farmworldKey() + "' wurde überschrieben.");
-            }
-        }
-        return indexedConfigurations;
-    }
-
     private boolean initializeMissingStates(
             Map<String, FarmworldResetConfig> resetConfigurations,
-            Map<String, FarmworldResetState> loadedStates
+            Map<String, FarmworldResetState> loadedStates,
+            Map<FarmworldType, String> conflicts
     ) {
         boolean stateChanged = false;
         Instant now = clock.instant();
 
         for (FarmworldResetConfig configuration : resetConfigurations.values()) {
             if (!configuration.enabled() || loadedStates.containsKey(configuration.farmworldKey())
-                    || journal.problem(configuration, loadedStates).isPresent()) {
+                    || journal.problem(configuration, loadedStates, conflicts).isPresent()) {
                 continue;
             }
 

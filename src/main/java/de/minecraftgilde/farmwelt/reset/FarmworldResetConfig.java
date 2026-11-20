@@ -112,13 +112,10 @@ public record FarmworldResetConfig(
         Objects.requireNonNull(farmworldType, "farmworldType");
         Objects.requireNonNull(postReset, "postReset");
         Objects.requireNonNull(notifications, "notifications");
-        FarmworldType.fromFarmworldKey(farmworldKey).ifPresent(expectedType -> {
-            if (expectedType != farmworldType) {
-                throw new IllegalArgumentException(
-                        "farmworldType passt nicht zur logischen Farmwelt-ID '" + farmworldKey + "'."
-                );
-            }
-        });
+        if (FarmworldType.fromFarmworldKey(farmworldKey).orElse(null) != farmworldType) {
+            throw new IllegalArgumentException("Unbekannte oder unpassende Farmwelt-ID '" + farmworldKey + "'.");
+        }
+        farmworldKey = farmworldType.key();
         if (interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("interval muss positiv sein.");
         }

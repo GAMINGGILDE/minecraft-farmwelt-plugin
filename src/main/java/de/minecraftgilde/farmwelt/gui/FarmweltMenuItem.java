@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.gui;
 
+import de.minecraftgilde.farmwelt.reset.FarmworldType;
 import java.util.List;
 import org.bukkit.Material;
 
@@ -11,4 +12,7 @@ public record FarmweltMenuItem(
         List<String> lore,
         TeleportAction teleportAction
 ) {
+    public FarmweltMenuItem {
+        id = FarmworldType.canonicalKey(id);
+    }
 }
