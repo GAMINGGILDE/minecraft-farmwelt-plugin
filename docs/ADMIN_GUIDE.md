@@ -320,9 +320,17 @@ Farmwelt verwendet den persistenten `nextReset`-Termin. Nach abgeschlossenem Sta
 
 ### Startup-Catch-up
 
-Nach dem vollständigen Pluginstart wartet Farmwelt einmalig 60 Sekunden. Danach werden aktuell fällige Welten in stabiler Config-Reihenfolge vollständig nacheinander verarbeitet. Vor jeder Welt wird erneut geprüft, ob sie noch fällig ist. Ein Fehler oder ein zwischenzeitlich laufender Reset blockiert die folgenden Farmwelten nicht.
+Nach dem vollständigen Pluginstart wartet Farmwelt einmalig 60 Sekunden. Danach werden aktuell fällige Welten in stabiler Config-Reihenfolge zunächst nacheinander verarbeitet. Vor jeder Welt wird erneut geprüft, ob sie noch fällig ist. Ein Fehler oder ein zwischenzeitlich laufender Reset blockiert die folgenden Farmwelten nicht.
 
 Ein sehr alter Termin erzeugt keinen Reset pro verpasstem Intervall. Es gibt während des Startup-Catch-up höchstens einen Versuch je gefundener fälliger Farmwelt. Nach der Sequenz übernimmt genau ein regulärer 60-Sekunden-Scheduler.
+
+**Wenn eine Farmwelt länger wartet.** Pro ausstehendem Startup-Versuch plant Farmwelt eine Beobachtung nach 12 000 globalen Ticks (bei 20 TPS zehn Minuten). Danach laufen Nachholung und periodische Fälligkeitsprüfung weiter. Eine überschrittene Beobachtungsfrist beendet keine Worlds-Regeneration und gibt keine Reset-Reservierung frei.
+
+Bei einem ausstehenden Teleport kann der Nether bereits nachgeholt werden. Wartet der Startup-Versuch auf Worlds, bleiben weitere Regenerationen zurückgestellt. Der Scheduler bewertet den Nether alle 60 Sekunden und holt ihn nach, sobald der Konflikt entfällt. Auch eine außerhalb des Starts ungewöhnlich lange laufende Worlds-Übergabe schützt Farmwelt so.
+
+Mit `/farmwelt status <welt>` Ziel, Versuch, Laufzeit, Phase und Recovery-Meldung prüfen. Die Konsole warnt einmal pro ungewöhnlich langem Versuch. Bei einem extern abgebrochenen Teleport-Future oder fehlendem Rückgabewert ist das Teleportende ungeklärt. Das Ziel bleibt dann bis zum Serverneustart reserviert. Ein offenes Worlds-Journal überlebt den Neustart.
+
+Beim Stop verwirft Farmwelt noch wartende eigene Aufgaben. Begonnene Dateioperationen dürfen ihren Beleg fertigschreiben. Meldet Worlds erst nach der Deaktivierung Erfolg, entfällt der Post-Reset und der letzte dauerhafte Journalstand entscheidet beim nächsten Start.
 
 ### Reload
 

@@ -16,6 +16,7 @@ final class ResetCommandMessages {
             case NOT_DUE -> List.of("§eEs liegt kein fälliger Reset-Termin vor.");
             case DISABLED -> List.of("§cDer Reset ist für diese Farmwelt deaktiviert.");
             case ALREADY_RUNNING -> List.of("§eFür diese Farmwelt läuft bereits ein Reset.");
+            case WORLDS_HANDOFF_DEFERRED -> List.of("§e" + result.message());
             case RECOVERY_BLOCKED -> List.of("§c" + result.message(),
                     "§e/farmwelt status " + farmworldKey + " und Serverlog prüfen.");
             case INVALID_CONFIGURATION -> List.of(

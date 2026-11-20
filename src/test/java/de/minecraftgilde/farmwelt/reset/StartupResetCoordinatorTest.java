@@ -612,6 +612,9 @@ class StartupResetCoordinatorTest {
                 Consumer<ScheduledTask> task,
                 long delayTicks
         ) {
+            if (delayTicks != StartupResetCoordinator.STARTUP_DELAY_TICKS) {
+                return new RecordingScheduledTask(plugin, false);
+            }
             delayedTasks++;
             startupDelay = delayTicks;
             startupAction = task;

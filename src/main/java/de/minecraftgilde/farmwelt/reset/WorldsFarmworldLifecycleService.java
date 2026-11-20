@@ -106,7 +106,7 @@ public final class WorldsFarmworldLifecycleService
                     worldsAccess.regenerate(world, builder -> builder.seed(null)),
                     "WorldsAccess.regenerate(...) hat null geliefert."
             );
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             removePendingReset(world, pendingReset);
             if (pendingReset != null) {
                 rollbackDataReset(world, pendingReset, exception);

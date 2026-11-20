@@ -79,6 +79,8 @@ Ein weiterer Scheduler-Tick vor dem neuen Termin darf keinen zweiten Reset start
 
 Ein sehr alter Termin löst nur einen Catch-up-Versuch aus, nicht einen Reset pro verpasstem Intervall.
 
+FW-007 prüft verlorene Callbacks, Retirement, Rejections, offene externe Futures und Shutdown an Journalgrenzen mit steuerbaren JUnit-Doubles. Der Workflow-Test verwendet echte Journal- und Zeitplandateien. Im isolierten Smoke-Test bleiben genau ein erfolgreicher Worlds-Handoff, Instanz-, Seed-, Marker-, Post-Reset- und Belegprüfung je Lauf verbindlich. Ein absichtlich unterbrochener Worlds-Schreibvorgang liefert keinen zuverlässigen Nachweis für die Callback-Rennen. Spieler-Disconnects im Mehrspielerbetrieb und die Endfarm bleiben Gegenstand der manuellen Abnahme.
+
 ## Test D – Mehrere fällige Welten
 
 Overworld, Nether und End auf dem Testserver gleichzeitig auf `DUE` vorbereiten. Nach der Startup-Verzögerung muss die vollständige Pipeline in Konfigurationsreihenfolge laufen:

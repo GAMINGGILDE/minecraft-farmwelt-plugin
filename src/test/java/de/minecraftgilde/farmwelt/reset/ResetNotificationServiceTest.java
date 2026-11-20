@@ -337,6 +337,7 @@ class ResetNotificationServiceTest {
             } else if (status == ResetStatus.NOT_CONFIGURED
                     || status == ResetStatus.NOT_DUE
                     || status == ResetStatus.DISABLED
+                    || status == ResetStatus.WORLDS_HANDOFF_DEFERRED
                     || status == ResetStatus.ALREADY_RUNNING) {
                 assertEquals(List.of(), messages);
             } else {

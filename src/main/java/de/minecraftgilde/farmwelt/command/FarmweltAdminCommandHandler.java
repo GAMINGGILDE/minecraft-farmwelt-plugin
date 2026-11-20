@@ -139,7 +139,9 @@ public final class FarmweltAdminCommandHandler {
             ));
             return;
         }
-        audience.sendMessages(statusFormatter.formatDetails(snapshot(config.orElseThrow())));
+        var details = new java.util.ArrayList<>(statusFormatter.formatDetails(snapshot(config.orElseThrow())));
+        resetExecutor.runningDiagnosis(config.orElseThrow().farmworldKey()).ifPresent(details::add);
+        audience.sendMessages(details);
     }
 
     private void handleReload(AdminCommandAudience audience, String[] args) {

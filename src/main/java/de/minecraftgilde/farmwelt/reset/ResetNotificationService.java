@@ -62,7 +62,7 @@ public final class ResetNotificationService {
             }
             try {
                 broadcastDueWarnings(configuration, now);
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | LinkageError exception) {
                 logger.log(
                         Level.SEVERE,
                         "Countdown-Warnungen für Farmwelt '"
@@ -131,7 +131,7 @@ public final class ResetNotificationService {
                     logEvacuationFailure(configuration, unwrap(failure));
                 }
             });
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logEvacuationFailure(configuration, exception);
         }
     }
@@ -148,7 +148,7 @@ public final class ResetNotificationService {
         Objects.requireNonNull(result, "result");
         switch (result.status()) {
             case SUCCESS -> broadcastResetSuccess(configuration);
-            case NOT_CONFIGURED, DISABLED, NOT_DUE, ALREADY_RUNNING -> {
+            case NOT_CONFIGURED, DISABLED, NOT_DUE, ALREADY_RUNNING, WORLDS_HANDOFF_DEFERRED -> {
                 // Diese Status entstehen vor dem eigentlichen Reset-Start.
             }
             default -> broadcastResetFailure(configuration);
@@ -182,7 +182,7 @@ public final class ResetNotificationService {
             );
             try {
                 audience.broadcast(message);
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | LinkageError exception) {
                 logger.log(
                         Level.SEVERE,
                         "Countdown-Warnung '" + warning + "' für Farmwelt '"
@@ -214,7 +214,7 @@ public final class ResetNotificationService {
                     nextReset
             );
             audience.broadcast(message);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             logger.log(
                     Level.SEVERE,
                     messageType + " für Farmwelt '" + configuration.farmworldKey()

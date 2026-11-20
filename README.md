@@ -94,6 +94,8 @@ farmworlds:
       command: "betterrtp:rtp world farmwelt"
 ```
 
+Bei verzögerten Resets zeigt `/farmwelt status <welt>` Ziel, Versuch und letzte Pipeline-Phase. Nach zehn Minuten prüft die Startup-Nachholung weitere Welten. Eine weiterhin offene Worlds-Übergabe kann weitere Regenerationen zurückstellen.
+
 Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle verfügbaren Konfigurationsbereiche und konservative Defaults. Eine kommentierte Schlüsselreferenz, Notifications, `reset-state.yml`, Scheduler, Reload, Ressourcenmonitor und Endfarm-Betrieb sind im [Admin Guide](docs/ADMIN_GUIDE.md) dokumentiert.
 
 ## Dokumentation
