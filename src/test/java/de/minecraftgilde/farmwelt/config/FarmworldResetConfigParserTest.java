@@ -2,6 +2,7 @@ package de.minecraftgilde.farmwelt.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
@@ -9,6 +10,7 @@ import de.minecraftgilde.farmwelt.reset.FarmworldType;
 import de.minecraftgilde.farmwelt.reset.ResetNotificationConfig;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -21,6 +23,68 @@ class FarmworldResetConfigParserTest {
 
     private final FarmworldResetConfigParser parser =
             new FarmworldResetConfigParser(quietLogger());
+
+    @Test
+    void rejectsIdenticalYamlKeysBeforeBukkitMergesThem() {
+        var failure = assertThrows(IllegalArgumentException.class, () -> parser.parse("""
+                farmworlds:
+                  end: {reset: {enabled: true, world: First, interval: 60d}}
+                  end: {reset: {enabled: false, world: Second, interval: 30d}}
+                """, null));
+        assertTrue(failure.getMessage().contains("[end, end]"));
+    }
+
+    @Test
+    void alsoCountsIdentityDeclarationsInheritedThroughYamlMerge() {
+        var failure = assertThrows(IllegalArgumentException.class, () -> parser.parse("""
+                plans: &plans
+                  overworld: {reset: {world: Farm, interval: 30d}}
+                farmworlds:
+                  <<: *plans
+                  Overworld: {reset: {world: Other, interval: 60d}}
+                """, null));
+        assertTrue(failure.getMessage().contains("overworld"));
+        assertTrue(failure.getMessage().contains("Overworld"));
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.LOCALE)
+    void defaultLocaleDoesNotAffectIdentity() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            for (FarmworldType type : FarmworldType.values()) {
+                assertEquals(type, FarmworldType.fromFarmworldKey(type.name()).orElseThrow());
+                assertEquals(type.name().toLowerCase(Locale.ROOT), FarmworldType.canonicalKey(type.name()));
+            }
+            assertTrue(FarmworldType.fromFarmworldKey("UNKNOWN").isEmpty());
+        } finally {
+            Locale.setDefault(previous);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"overworld,overworld", "OVERWORLD,overworld", "Overworld,overworld", "Nether,nether", "END,end"})
+    void canonicalizesOnlyTheLogicalId(String external, String canonical) throws Exception {
+        var config = parse(singleFarmworld("world: MiXeD\n      interval: 30d\n")
+                .replace("overworld:", external + ":")).getFirst();
+        assertEquals(canonical, config.farmworldKey());
+        assertEquals("MiXeD", config.worldName());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"OVERWORLD,Other,false", "Overworld,Farm,true", "nether,fARM,false"})
+    void rejectsAmbiguousEntriesIncludingDisabledPlans(String second, String world, boolean enabled) {
+        var failure = assertThrows(IllegalArgumentException.class, () -> parse("""
+                farmworlds:
+                  overworld:
+                    reset: {enabled: true, world: Farm, interval: 30d}
+                  %s:
+                    reset: {enabled: %s, world: %s, interval: 60d}
+                """.formatted(second, enabled, world)));
+        assertTrue(failure.getMessage().contains("overworld"));
+        assertTrue(failure.getMessage().contains(second));
+    }
 
     @Test
     void parsesValidOverworldConfiguration() throws Exception {

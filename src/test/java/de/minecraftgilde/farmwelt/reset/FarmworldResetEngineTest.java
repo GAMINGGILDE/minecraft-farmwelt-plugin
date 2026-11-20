@@ -136,6 +136,24 @@ class FarmworldResetEngineTest {
     }
 
     @Test
+    void reservationAlsoCoversScheduleWriteAndScopeCleanup() {
+        var checks = new ArrayList<String>();
+        repository.beforeSave = () -> {
+            assertEquals(ResetStatus.ALREADY_RUNNING, engine.reset("OVERWORLD").join().status());
+            checks.add("save");
+        };
+        postResetInitializer.beforeClose = () -> {
+            assertFalse(engine.isFarmworldAvailable("Overworld"));
+            assertEquals(ResetStatus.ALREADY_RUNNING, engine.reset("OVERWORLD").join().status());
+            checks.add("close");
+        };
+        assertEquals(ResetStatus.SUCCESS, engine.reset("OverWorld").join().status());
+        assertEquals(List.of("save", "close"), checks);
+        assertEquals(1, lifecycleService.invocations);
+        assertTrue(engine.getRunningResets().isEmpty());
+    }
+
+    @Test
     void cleanupExceptionDoesNotChangeSuccessOrLeaveLockBehind() {
         postResetInitializer.closeFailure = new IllegalStateException("cleanup failed");
 
@@ -1349,6 +1367,7 @@ class FarmworldResetEngineTest {
         private FarmworldResetConfig receivedConfig;
         private ResetOptions receivedOptions;
         private boolean scopeStarted;
+        private Runnable beforeClose = () -> {};
         private boolean resetScopeClosed;
         private RuntimeException beginFailure;
         private RuntimeException closeFailure;
@@ -1366,6 +1385,7 @@ class FarmworldResetEngineTest {
             }
             resetScopeClosed = false;
             return () -> {
+                beforeClose.run();
                 resetScopeClosed = true;
                 if (closeFailure != null) {
                     throw closeFailure;
@@ -1394,6 +1414,7 @@ class FarmworldResetEngineTest {
         private final List<String> calls;
         private Map<String, FarmworldResetState> states = new LinkedHashMap<>();
         private boolean failSaves;
+        private Runnable beforeSave = () -> {};
 
         private TestResetStateRepository(List<String> calls) {
             this.calls = calls;
@@ -1407,6 +1428,7 @@ class FarmworldResetEngineTest {
         @Override
         public void save(Map<String, FarmworldResetState> states) throws IOException {
             calls.add("state");
+            beforeSave.run();
             if (failSaves) {
                 throw new IOException("state failed");
             }

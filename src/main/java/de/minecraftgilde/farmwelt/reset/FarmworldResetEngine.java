@@ -1,12 +1,14 @@
 package de.minecraftgilde.farmwelt.reset;
 
 import java.time.Instant;
+import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -25,7 +27,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private final ResetNotificationService notificationService;
     private final Logger logger;
     private final EndDragonFightCompatibility dragonCompatibility;
-    private final Set<String> runningResets = ConcurrentHashMap.newKeySet();
+    private final Map<FarmworldType, Reservation> runningResets = new EnumMap<>(FarmworldType.class);
 
     public FarmworldResetEngine(
             FarmworldResetService resetService,
@@ -79,74 +81,57 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private CompletableFuture<ResetResult> startReset(String farmworldKey, ResetOptions options, Instant dueAt) {
         Objects.requireNonNull(options, "options");
-        if (farmworldKey == null || farmworldKey.isBlank()) {
-            return CompletableFuture.completedFuture(new ResetResult(
-                    farmworldKey == null ? "" : farmworldKey,
-                    "",
-                    ResetStatus.NOT_CONFIGURED,
-                    "Die Farmwelt ist nicht konfiguriert.",
-                    null
-            ));
+        FarmworldType type = FarmworldType.fromFarmworldKey(farmworldKey).orElse(null);
+        final Reservation reservation;
+        final FarmworldResetConfig resetConfig;
+        // Derselbe kurze Monitor schützt die Config-Veröffentlichung und die Reservierung beider Identitäten.
+        synchronized (resetService) {
+            resetConfig = resetService.getConfig(farmworldKey).orElse(null);
+            String world = resetConfig == null ? "" : resetConfig.worldName();
+            if (type == null) {
+                return rejected(Objects.toString(farmworldKey, ""), world, ResetStatus.NOT_CONFIGURED,
+                        "Die Farmwelt ist nicht konfiguriert.");
+            }
+            if (runningResets.containsKey(type) || targetReserved(world)) {
+                return rejected(type.key(), world, ResetStatus.ALREADY_RUNNING, "Für diese Farmwelt läuft bereits ein Reset.");
+            }
+            if (resetConfig == null) {
+                return rejected(type.key(), world, ResetStatus.NOT_CONFIGURED, "Die Farmwelt ist nicht konfiguriert.");
+            }
+            if (!resetConfig.enabled()) {
+                return rejected(type.key(), world, ResetStatus.DISABLED, "Der Reset ist für diese Farmwelt deaktiviert.");
+            }
+            reservation = new Reservation(world);
+            runningResets.put(type, reservation);
         }
 
-        if (!runningResets.add(farmworldKey)) {
-            String worldName = resetService.getConfig(farmworldKey)
-                    .map(FarmworldResetConfig::worldName)
-                    .orElse("");
-            return CompletableFuture.completedFuture(new ResetResult(
-                    farmworldKey,
-                    worldName,
-                    ResetStatus.ALREADY_RUNNING,
-                    "Für diese Farmwelt läuft bereits ein Reset.",
-                    null
-            ));
+        try {
+            // Nur die interne Pipeline gibt ihre Reservierung frei, auch wenn ein Beobachter abbricht.
+            return runReserved(resetConfig, options, dueAt)
+                    .whenComplete((result, failure) -> release(type, reservation)).copy();
+        } catch (RuntimeException | Error failure) {
+            release(type, reservation);
+            throw failure;
         }
+    }
 
-        Optional<FarmworldResetConfig> configuredReset = resetService.getConfig(farmworldKey);
-        if (configuredReset.isEmpty()) {
-            runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(new ResetResult(
-                    farmworldKey,
-                    "",
-                    ResetStatus.NOT_CONFIGURED,
-                    "Die Farmwelt ist nicht konfiguriert.",
-                    null
-            ));
-        }
-
-        FarmworldResetConfig resetConfig = configuredReset.orElseThrow();
-        if (!resetConfig.enabled()) {
-            runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(new ResetResult(
-                    farmworldKey,
-                    resetConfig.worldName(),
-                    ResetStatus.DISABLED,
-                    "Der Reset ist für diese Farmwelt deaktiviert.",
-                    null
-            ));
-        }
-
+    private CompletableFuture<ResetResult> runReserved(FarmworldResetConfig resetConfig, ResetOptions options,
+                                                        Instant dueAt) {
+        String key = resetConfig.farmworldKey();
         Optional<String> recovery = resetService.recoveryProblem(resetConfig);
         if (recovery.isPresent()) {
-            runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(new ResetResult(farmworldKey, resetConfig.worldName(),
-                    ResetStatus.RECOVERY_BLOCKED, "Recovery-Sperre. " + recovery.orElseThrow(), null));
+            return rejected(key, resetConfig.worldName(), ResetStatus.RECOVERY_BLOCKED,
+                    "Recovery-Sperre. " + recovery.orElseThrow());
         }
-
         // Zwischen Tick-Auswahl und Lock-Erwerb kann ein manueller Reset den Plan erfüllt haben.
-        if (dueAt != null && resetService.getState(farmworldKey)
-                .filter(state -> !dueAt.isBefore(state.nextReset())).isEmpty()) {
-            runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(new ResetResult(farmworldKey, resetConfig.worldName(),
-                    ResetStatus.NOT_DUE, "Es liegt kein fälliger Reset-Termin vor.", null));
+        if (dueAt != null && resetService.getState(key).filter(state -> !dueAt.isBefore(state.nextReset())).isEmpty()) {
+            return rejected(key, resetConfig.worldName(), ResetStatus.NOT_DUE, "Es liegt kein fälliger Reset-Termin vor.");
         }
-
-        logger.info("Reset für Farmwelt '" + farmworldKey + "' ("
-                + resetConfig.worldName() + ") gestartet.");
-        notificationService.broadcastResetStart(resetConfig);
 
         final FarmworldPostResetInitializer.ResetScope resetScope;
         try {
+            logger.info("Reset für Farmwelt '" + key + "' (" + resetConfig.worldName() + ") gestartet.");
+            notificationService.broadcastResetStart(resetConfig);
             if (FarmworldRegenerationOptions.effectiveDragonPolicy(resetConfig, options)
                     != FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE) {
                 try {
@@ -161,53 +146,69 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     "postResetInitializer.beginReset(...)"
             );
         } catch (RuntimeException exception) {
-            runningResets.remove(farmworldKey);
-            return CompletableFuture.completedFuture(finishAndNotify(
-                    resetConfig,
-                    null,
-                    exception
-            ));
+            return CompletableFuture.completedFuture(finishAndNotify(resetConfig, null, exception));
         }
 
         CompletableFuture<ResetResult> resetFuture;
         try {
-            resetFuture = execute(resetConfig, options)
-                    .handle((result, failure) -> finishAndNotify(
-                            resetConfig,
-                            result,
-                            failure
-                    ));
+            resetFuture = execute(resetConfig, options);
         } catch (RuntimeException exception) {
-            resetFuture = CompletableFuture.completedFuture(finishAndNotify(
-                    resetConfig,
-                    null,
-                    exception
-            ));
+            resetFuture = CompletableFuture.failedFuture(exception);
         }
 
-        // Ein abgebrochener Beobachter darf die Freigabe nach dem tatsächlichen Abschluss nicht verhindern.
-        return resetFuture.whenComplete((result, failure) -> {
-            try {
-                resetScope.close();
-            } catch (RuntimeException exception) {
-                logger.log(
-                        Level.SEVERE,
-                        "Tempor\u00e4re Dragon-Policy f\u00fcr '" + resetConfig.worldName()
-                                + "' konnte nicht bereinigt werden.",
-                        exception
-                );
-            } finally {
-                runningResets.remove(farmworldKey);
+        return resetFuture.handle((result, failure) -> finishAndNotify(resetConfig, result, failure))
+                .whenComplete((result, failure) -> closeScope(resetConfig, resetScope));
+    }
+
+    private void closeScope(FarmworldResetConfig resetConfig, FarmworldPostResetInitializer.ResetScope resetScope) {
+        try {
+            resetScope.close();
+        } catch (RuntimeException exception) {
+            logger.log(Level.SEVERE, "Temporäre Dragon-Policy für '" + resetConfig.worldName()
+                    + "' konnte nicht bereinigt werden.", exception);
+        }
+    }
+
+    private static CompletableFuture<ResetResult> rejected(String key, String world, ResetStatus status, String message) {
+        return CompletableFuture.completedFuture(new ResetResult(key, world, status, message, null));
+    }
+
+    private record Reservation(String worldName) {}
+
+    private void release(FarmworldType type, Reservation owner) {
+        synchronized (resetService) {
+            if (runningResets.get(type) == owner) {
+                runningResets.remove(type);
             }
-        }).copy();
+        }
+    }
+
+    private boolean targetReserved(String worldName) {
+        return runningResets.values().stream().anyMatch(r -> r.worldName().equalsIgnoreCase(worldName));
     }
 
     public boolean isResetRunning(String farmworldKey) {
-        return farmworldKey != null && runningResets.contains(farmworldKey);
+        synchronized (resetService) {
+            return runningResets.containsKey(FarmworldType.fromFarmworldKey(farmworldKey).orElse(null))
+                    || resetService.getConfig(farmworldKey).map(config -> targetReserved(config.worldName())).orElse(false);
+        }
     }
 
     public Set<String> getRunningResets() {
-        return Set.copyOf(runningResets);
+        synchronized (resetService) {
+            Set<String> keys = new HashSet<>();
+            runningResets.keySet().forEach(type -> keys.add(type.key()));
+            return Set.copyOf(keys);
+        }
+    }
+
+    public Set<String> getResetWorldNames() {
+        synchronized (resetService) {
+            Set<String> names = new HashSet<>();
+            resetService.getConfiguredWorlds().forEach(config -> names.add(config.worldName()));
+            runningResets.values().forEach(reservation -> names.add(reservation.worldName()));
+            return Set.copyOf(names);
+        }
     }
 
     @Override

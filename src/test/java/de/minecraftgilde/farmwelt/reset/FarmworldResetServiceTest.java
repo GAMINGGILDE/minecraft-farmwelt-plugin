@@ -28,6 +28,23 @@ class FarmworldResetServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-17T06:00:00Z");
 
     @Test
+    void rejectsAmbiguousReloadBeforeInitializingOrPublishingAnyPlan() {
+        var repository = new InMemoryResetStateRepository();
+        var service = createService(repository);
+        var original = config(Duration.ofDays(30));
+        assertTrue(service.reload(List.of(original)));
+        var before = repository.states;
+        for (var duplicate : List.of(
+                new FarmworldResetConfig("OVERWORLD", "Other", false, Duration.ofDays(5)),
+                new FarmworldResetConfig("Nether", "FaRmWeLt", true, Duration.ofDays(2)))) {
+            assertFalse(service.reload(List.of(original, duplicate)));
+            assertEquals(List.of(original), service.getConfiguredWorlds());
+            assertEquals(before, repository.states);
+            assertEquals(1, repository.saveCount);
+        }
+    }
+
+    @Test
     void initializesAndImmediatelyPersistsMissingState() {
         InMemoryResetStateRepository repository = new InMemoryResetStateRepository();
         FarmworldResetService service = createService(repository);

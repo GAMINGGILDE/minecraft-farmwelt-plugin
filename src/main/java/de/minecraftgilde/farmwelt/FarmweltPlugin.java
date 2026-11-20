@@ -33,9 +33,7 @@ import java.time.Clock;
 import java.time.ZoneId;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 import org.bukkit.configuration.InvalidConfigurationException;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class FarmweltPlugin extends JavaPlugin {
@@ -66,7 +64,6 @@ public final class FarmweltPlugin extends JavaPlugin {
 
         configManager = new ConfigManager(this);
         configManager.loadFarmweltMenuItems();
-        configManager.loadFarmworldResetConfigs();
         configManager.loadResourceMonitorConfig();
 
         resetService = new FarmworldResetService(
@@ -75,8 +72,12 @@ public final class FarmweltPlugin extends JavaPlugin {
                 Clock.systemUTC(),
                 getLogger()
         );
-        if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
-            throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht geladen werden.");
+        try {
+            if (!resetService.reload(configManager.readFarmworldResetConfigs())) {
+                throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht geladen werden.");
+            }
+        } catch (IOException | InvalidConfigurationException exception) {
+            throw new IllegalStateException("Reset-Konfiguration konnte nicht gelesen werden.", exception);
         }
         resetNotificationService = new ResetNotificationService(
                 resetService,
@@ -90,9 +91,7 @@ public final class FarmweltPlugin extends JavaPlugin {
 
         BukkitFarmworldWorldOperations worldOperations = new BukkitFarmworldWorldOperations(
                 this,
-                () -> resetService.getConfiguredWorlds().stream()
-                        .map(FarmworldResetConfig::worldName)
-                        .collect(Collectors.toUnmodifiableSet())
+                () -> resetEngine.getResetWorldNames()
         );
         FoliaFarmweltScheduler resetScheduler = new FoliaFarmweltScheduler(this);
         postResetInitializer = new BukkitFarmworldPostResetInitializer(
@@ -176,13 +175,10 @@ public final class FarmweltPlugin extends JavaPlugin {
         }
         try {
             // JavaPlugin#reloadConfig meldet ungültiges YAML nicht zuverlässig an den Command-Aufrufer.
-            YamlConfiguration validation = new YamlConfiguration();
-            validation.load(getDataFolder().toPath().resolve("config.yml").toFile());
-            reloadConfig();
-            configManager.loadFarmworldResetConfigs();
-            if (!resetService.reload(configManager.getFarmworldResetConfigs())) {
+            if (!resetService.reload(configManager.readFarmworldResetConfigs())) {
                 throw new IllegalStateException("Reset-Konfiguration und Reset-State konnten nicht neu geladen werden.");
             }
+            reloadConfig();
             configManager.loadFarmweltMenuItems();
             configManager.loadResourceMonitorConfig();
             resetNotificationService.reload();

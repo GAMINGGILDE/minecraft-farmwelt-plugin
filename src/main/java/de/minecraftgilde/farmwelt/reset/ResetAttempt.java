@@ -56,7 +56,8 @@ record ResetAttempt(UUID id, String key, String world, Instant started, Phase ph
     }
 
     boolean confirmedBy(FarmworldResetState state) {
-        return phase == Phase.POST_RESET_DONE && state != null && key.equals(state.farmworldKey())
+        return phase == Phase.POST_RESET_DONE && state != null
+                && FarmworldType.fromFarmworldKey(key).map(type -> type.key().equals(state.farmworldKey())).orElse(false)
                 && state.attemptId().equals(Optional.of(id)) && state.lastReset().equals(Optional.of(completed))
                 && next.equals(state.nextReset());
     }

@@ -6,6 +6,8 @@ import de.minecraftgilde.farmwelt.model.ResourceWorldRule;
 import de.minecraftgilde.farmwelt.model.ResourceWorldType;
 import de.minecraftgilde.farmwelt.model.ViolationAction;
 import de.minecraftgilde.farmwelt.reset.FarmworldResetConfig;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -19,6 +21,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class ConfigManager {
@@ -33,7 +36,6 @@ public final class ConfigManager {
     private final JavaPlugin plugin;
     private final FarmworldResetConfigParser resetConfigParser;
     private volatile List<FarmweltMenuItem> farmweltMenuItems = List.of();
-    private volatile List<FarmworldResetConfig> farmworldResetConfigs = List.of();
     private volatile ResourceMonitorConfig resourceMonitorConfig =
             createDefaultResourceMonitorConfig();
 
@@ -71,14 +73,9 @@ public final class ConfigManager {
         return farmweltMenuItems;
     }
 
-    public void loadFarmworldResetConfigs() {
-        farmworldResetConfigs = resetConfigParser.parse(
-                plugin.getConfig().getConfigurationSection("farmworlds")
-        );
-    }
-
-    public List<FarmworldResetConfig> getFarmworldResetConfigs() {
-        return farmworldResetConfigs;
+    public List<FarmworldResetConfig> readFarmworldResetConfigs() throws IOException, InvalidConfigurationException {
+        String contents = Files.readString(plugin.getDataFolder().toPath().resolve("config.yml"));
+        return resetConfigParser.parse(contents, plugin.getConfig().getDefaults());
     }
 
     public void loadResourceMonitorConfig() {

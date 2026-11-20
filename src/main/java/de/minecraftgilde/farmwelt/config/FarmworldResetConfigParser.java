@@ -7,11 +7,16 @@ import de.minecraftgilde.farmwelt.reset.ResetIntervalParser;
 import de.minecraftgilde.farmwelt.reset.ResetNotificationConfig;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.logging.Logger;
+import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
 
 /** Übersetzt den Reset-Bereich der YAML-Konfiguration in validierte Laufzeitwerte. */
 public final class FarmworldResetConfigParser {
@@ -27,13 +32,35 @@ public final class FarmworldResetConfigParser {
         this.notificationConfigParser = new FarmworldResetNotificationConfigParser(logger);
     }
 
+    List<FarmworldResetConfig> parse(String contents, Configuration defaults) throws InvalidConfigurationException {
+        var yaml = new YamlConfiguration();
+        yaml.loadFromString(contents);
+        var duplicates = FarmworldYamlKeys.duplicates(contents, "farmworlds");
+        if (!duplicates.isEmpty()) {
+            throw new IllegalArgumentException(FarmworldYamlKeys.diagnosis(duplicates.values().iterator().next()));
+        }
+        if (defaults != null) {
+            yaml.setDefaults(defaults);
+        }
+        return parse(yaml.getConfigurationSection("farmworlds"));
+    }
+
     public List<FarmworldResetConfig> parse(ConfigurationSection farmworldsSection) {
         if (farmworldsSection == null) {
             return List.of();
         }
 
         List<FarmworldResetConfig> loadedConfigs = new ArrayList<>();
+        var logicalIds = new EnumMap<FarmworldType, String>(FarmworldType.class);
+        var targets = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
         for (String farmworldKey : farmworldsSection.getKeys(false)) {
+            FarmworldType type = FarmworldType.fromFarmworldKey(farmworldKey).orElse(null);
+            if (type != null) {
+                String previous = logicalIds.putIfAbsent(type, farmworldKey);
+                if (previous != null) {
+                    throw new IllegalArgumentException("Doppelte Farmwelt-ID: '" + previous + "' und '" + farmworldKey + "'.");
+                }
+            }
             ConfigurationSection farmworldSection = farmworldsSection.getConfigurationSection(farmworldKey);
             if (farmworldSection == null) {
                 continue;
@@ -42,6 +69,15 @@ public final class FarmworldResetConfigParser {
             ConfigurationSection resetSection = farmworldSection.getConfigurationSection("reset");
             if (resetSection == null) {
                 continue;
+            }
+
+            String target = resetSection.getString("world", "").trim();
+            if (type != null && !target.isEmpty()) {
+                String previous = targets.putIfAbsent(target, farmworldKey);
+                if (previous != null) {
+                    throw new IllegalArgumentException("Mehrfaches Reset-Ziel '" + target
+                            + "' für die Farmwelt-IDs '" + previous + "' und '" + farmworldKey + "'.");
+                }
             }
 
             boolean enabled = farmworldSection.getBoolean("enabled", true)

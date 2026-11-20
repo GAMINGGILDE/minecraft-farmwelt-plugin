@@ -173,7 +173,15 @@ Reset-Lock und Config-Snapshot
     -> Lock auf jedem Exit-Pfad freigeben
 ```
 
-Der `runningResets`-Lock erlaubt maximal einen Reset pro logischer Farmwelt. Derselbe Lock steuert die Teleport-Verfügbarkeit; `FarmweltTeleportService` prüft ihn vor dem Scheduling und erneut im Entity-Kontext. Die Engine entfernt ihn in allen synchronen und asynchronen Erfolgs- und Fehlerpfaden. Scheduler und Startup-Coordinator besitzen bewusst keinen zweiten Reset-Lock.
+### Identitäten und Laufzeitreservierung (FW-003)
+
+| Identität | Verwendung |
+|---|---|
+| Logische ID | `FarmworldType` ordnet externe Schreibweisen mit `Locale.ROOT` den Typen Overworld, Nether und End zu. `key()` liefert den Schlüssel für Config, Commands, Menü, Scheduler, Warnungen und Zeitplan. |
+| Physisches Ziel | Die Reservierung vergleicht konfigurierte Bukkit-Namen ohne Beachtung der Großschreibung. Vor Worlds prüft die Pipeline exakten registrierten Namen, Weltinstanz, Dimension und Hauptweltschutz. Nach Worlds prüft sie die neue registrierte Instanz. Objekt und Welt-UUID können beim Weltwechsel wechseln. |
+| Reset-Versuch | FW-002 vergibt für die einzelne Pipeline eine UUID. Journal und Zeitplan belegen mit dieser UUID den Abschluss. |
+
+Die Engine erfasst den Config-Snapshot und reserviert Typ und Zielname gemeinsam unter dem kurzen Monitor, über den der Service auch neue Konfigurationen veröffentlicht. Der Besitzer hält die Reservierung über Evakuierung, Worlds, Persistenz und Dragon-Scope-Bereinigung. Ein abgebrochener Beobachter kann sie nicht freigeben. Auf Scheduler- oder Dateioperationen wird unter diesem Monitor nicht gewartet. Die Teleport-Prüfungen vor dem Scheduling und im Spieler-Kontext sehen auch eine Reservierung des neu zugeordneten Zielnamens.
 
 Der zurückgegebene Weltordner wird nur diagnostisch geloggt. `lastReset` und `nextReset` werden ausschließlich nach erfolgreicher Worlds-Regeneration, Validierung und Post-Reset-Initialisierung als Kandidat berechnet. `FarmworldResetService` speichert zuerst die vollständige Kandidaten-Map und veröffentlicht sie erst nach erfolgreichem Repository-Save als neuen In-Memory-State. Scheitert die Initialisierung, lautet das Ergebnis `POST_RESET_FAILED`; scheitert nur das Speichern, lautet es `STATE_SAVE_FAILED`. Im zweiten Fall ist die Welt bereits regeneriert und initialisiert, es gibt aber kein `SUCCESS` und der zuvor veröffentlichte State bleibt unverändert. Damit gilt die Invariante: `nextReset` wird nur nach einer vollständig erfolgreichen Pipeline fortgeschrieben.
 
@@ -198,7 +206,9 @@ Vor FW-002 überdauerte ausschließlich der Zeitplan einen Prozessabbruch. Zwisc
 | Initialisierung bestätigt, Zeitplan noch offen | `POST_RESET_DONE` mit exaktem Abschluss und Folgetermin aus dem Intervall-Snapshot | Der Plan wird als Kandidat gespeichert. Bei `STATE_SAVE_FAILED` bleibt der veröffentlichte Plan erhalten. Eine administrative Nachtragung ist anhand des Journals möglich. |
 | State-Save abgeschlossen, Veröffentlichung, Benachrichtigung und Lock-Freigabe | `POST_RESET_DONE` und passende `attempt-id`, `last-reset`, `next-reset` im Weltabschnitt | Auch ein Prozessende direkt nach dem Dateiersatz hinterlässt einen erkennbaren Abschluss. Alte UUIDs oder abweichende Termine sperren die Welt. |
 
-`ResetRecoveryJournal` liest die drei Plätze beim Service-Start. Scheduler und Commands prüfen den veröffentlichten Speicherstand. Vor jedem Phasenwechsel vergleicht der asynchrone Schreiber zusätzlich den erwarteten Vorgänger mit der Datei. Die Vorbereitung prüft Sperre und Vorgänger unter demselben Schreiblock. Das Journal verwendet einen festen Platz pro `FarmworldType`, auch bei unterschiedlich geschriebener ID. Ein lesbarer offener Versuch schützt zusätzlich seinen Bukkit-Namen bei einer geänderten Zuordnung. Die umfassende Kanonisierung der Konfiguration gehört zu FW-003.
+`ResetRecoveryJournal` liest die drei Plätze beim Service-Start. Scheduler und Commands prüfen den veröffentlichten Speicherstand. Vor jedem Phasenwechsel vergleicht der asynchrone Schreiber zusätzlich den erwarteten Vorgänger mit der Datei. Die Vorbereitung prüft Sperre und Vorgänger unter demselben Schreiblock. Das Journal verwendet einen festen Platz pro `FarmworldType`, auch bei unterschiedlich geschriebener ID. Ein lesbarer offener Versuch schützt zusätzlich seinen Bukkit-Namen bei einer geänderten Zuordnung. Die ID aus einer älteren Journaldatei wird für den Belegvergleich ihrem geprüften Typ zugeordnet. Die Rücknahme vor Worlds verwendet weiterhin den originalen Vorgänger einschließlich seiner Schreibweise.
+
+Beim Lesen von `reset-state.yml` werden eindeutige bekannte IDs im Speicher kanonisiert. Mehrdeutige Abschnitte werden vor der Auswahl eines Termins anhand ihrer YAML-Schlüssel erkannt. Ihre ursprünglichen Einträge bleiben beim Speichern unabhängiger Zeitpläne erhalten. Der erste reguläre Replace schreibt eindeutige IDs kanonisch. Vor und nach diesem Replace erkennt derselbe Journalvergleich die Versuchs-UUID und beide Zeitstempel. Ein Start in einem dieser beiden Zustände benötigt keinen weiteren Migrationsschritt.
 
 Der Shutdown stoppt die Planung. Eine laufende Pipeline kann ihre Belege bis zum Prozessende fortschreiben. Der Abbruch eines wartenden Aufrufers berührt den internen Abschluss-Callback nicht. Startup-Catch-up und periodischer Scheduler überspringen `RECOVERY_BLOCKED`. Ein weiterhin offenes Worlds-Future hält den Laufzeit-Lock und kann die sequenzielle Startup-Kette bis zum Prozessende aufhalten (FW-007).
 
