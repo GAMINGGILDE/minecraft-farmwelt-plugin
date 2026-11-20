@@ -55,6 +55,9 @@ jobs:
       - name: Test log gate fixtures
         run: ./testing/blackbox/test-assert-log.sh
 
+      - name: Test filesystem isolation gate
+        run: python3 ./testing/blackbox/test-isolation.py
+
       - name: Run real Folia/Worlds smoke test
         run: ./testing/blackbox/run-blackbox.sh "${{ matrix.world }}"
 

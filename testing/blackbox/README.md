@@ -32,7 +32,8 @@ Voraussetzungen sind ein privater Linux-Runner mit `/proc/self/mountinfo` und Ba
 ```bash
 ./gradlew clean test
 ./gradlew build
-bash ./testing/blackbox/run-blackbox.sh
+bash ./testing/blackbox/run-blackbox.sh overworld
+bash ./testing/blackbox/run-blackbox.sh nether
 ```
 
 Die Log-Gate-Fixtures können ohne Serverstart separat ausgeführt werden:

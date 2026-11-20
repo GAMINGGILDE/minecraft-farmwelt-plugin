@@ -6,7 +6,7 @@ Basis ist `main` bei `f16478e`, einschließlich der Merge-Commits für FW-001, F
 | --- | --- | --- |
 | Minecraft / Folia | 26.1.2 Build 8 | 26.3 Build 26 STABLE, Commit `eca40f9`, SHA-256 `99263358903dbc44d4a90d45b5fbb7dfdce532154734489be89a3a94088063dc` |
 | Paper API | 26.1.2.build.74-stable | `io.papermc.paper:paper-api:26.3.build.256-stable`, SHA-256 `04891916be204f085b582c21a69a93ad2a5b73353e8bd0275ea3fc49da5b9329` |
-| Worlds-API | 4.4.0 | `net.thenextlvl:worlds:4.5.1`, Maven-Releases, Compile- und Test-Classpath |
+| Worlds-API | 4.4.0 | `net.thenextlvl:worlds:4.5.1`, Maven-Releases, Compile- und Test-Classpath, SHA-256 `466d23df49345f300a2a936ebacfadd1040f57448161683ff6b7ddac6ebeafd3` |
 | Worlds-Plugin | 4.4.0 | `worlds-4.5.1-all.jar`, Modrinth-Release `4y0Ijnx1` für Paper/Folia 26.3, SHA-512 `b600b5d898eecab53d712b3c0ca93b8d36b87b3815782f51b466ce16996aa8ec28532e30a4b05233dcc61368323acc4227023ba48a3143e5c65134aed886a4e4` |
 | Java / Gradle / JUnit Jupiter | 25 / 9.6.1 / 6.1.2 | 25 / 9.6.1 / 6.1.2 |
 
@@ -23,6 +23,36 @@ Zwischen den Worlds-Tags 4.4.0 und 4.5.1 gibt es keine Änderungen im API-Quellb
 `PaperLevelView.delete(Path, Set<Path>)` prüft übersprungene Namen mit `toAbsolutePath().normalize()`. Diese lexikalische Normalisierung löst Verzeichnisumleitungen nicht auf. `Files.isDirectory` und anschließend `Files.list` folgen einem Verzeichnislink. Dadurch können die rekursiven Dateioperationen außerhalb des Weltbaums wirken, sofern der Serverbenutzer dort Schreibrechte besitzt. Bei der Regeneration betrifft dies insbesondere die Bäume für Entities, POI und Regionen. Nach einem zweiten Listing entfernt Worlds nur leere Verzeichnisse. Abgefangene IO-Fehler werden als Warnung protokolliert. Restdaten und ein erfolgreich abgeschlossenes Future können daher zusammen auftreten. Die Quellprüfung genügt für den Befund. [Worlds 4.5.1, PaperLevelView](https://github.com/TheNextLvl-net/worlds/blob/bc50f825922c79bf4594795d23b31c73d81a3f87/plugin/src/main/java/net/thenextlvl/worlds/view/PaperLevelView.java#L291-L381)
 
 Destruktive Tests benötigen einen privaten Wegwerf-Runner ohne erreichbare produktive Welten, Backups oder eingebundene Datenträger. Der Testbenutzer kontrolliert den Pfad exklusiv. Das Harness erzeugt pro Ziel einen neuen privaten Laufordner, prüft auf umgeleitete Vorfahren und Mounts und inspiziert vor der Übergabe den Weltbaum einschließlich aller Kinder. Nicht auflösbare Pfade sperren den Lauf. Die Prüfung setzt voraus, dass andere Prozesse weder Pfade austauschen noch nachträglich Mounts hinzufügen können. Für den Betrieb sind getrennte Rechte und Dateisystemgrenzen erforderlich. Ein Upstream-Fix sollte Links ohne Verfolgung behandeln, die physische Grenze bei jedem Dateizugriff durchsetzen und unvollständige Operationen an den Aufrufer melden.
+
+## Testbericht vom 20. November 2026
+
+Der Abgleich der kompilierten Farmwelt-JAR mit den Bibliotheken des tatsächlich gestarteten Servers und dem vollständigen Worlds-Plugin erfasste 123 Plugin-Klassen und 226 unterschiedliche externe Methoden- und Feldreferenzen außerhalb des JDK. Alle Namen und JVM-Deskriptoren waren einschließlich der geerbten Mitglieder auflösbar. 178 unterschiedliche Materialnamen aus Feldern und gebündelter Konfiguration waren vorhanden. Der Clean-Build erforderte keinen Austausch einer API-Signatur. Die statische Prüfung deckt binäre Referenzen ab. Aussagen über Threads und Verhalten stützen sich auf die jeweiligen Laufzeittests.
+
+Beim realen Test des Vanilla-End griff zunächst unerwartet die Versionssperre. Bukkit lieferte bei fehlendem `post-reset.end.dragon` den Wert aus den Ressourcen der JAR. Der Parser prüft deshalb an diesem Schlüssel mit `contains("dragon", true)`, ob in der Server-Konfiguration ein Wert steht. Drei Regressionstests bilden den fehlenden Post-Reset-Bereich, den fehlenden End-Bereich und die fehlende Dragon-Einstellung mit gesetztem Bukkit-Default nach. Alle drei schlugen vor der Änderung fehl. Der ausgelieferte explizite Standardwert bleibt wirksam.
+
+| Prüfung | Beobachtetes Ergebnis |
+| --- | --- |
+| Java 25 unter Windows | Clean-Test und Build erfolgreich. 419 bestanden, 0 fehlgeschlagen, 2 bestehende Dateisystemtests konnten unter Windows keine Symlinks anlegen. |
+| Linux-CI | Erster Lauf mit 418 bestandenen Tests ohne Fehler oder Skips. Der PR prüft jeden Folgestand erneut, einschließlich der drei zusätzlichen Parserfälle. [Build](https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/actions/runs/44715141664) · [Aktuelle PR-Prüfungen](https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/pull/18/checks) |
+| Overworld | Eine Regeneration. Seed von `2384433478262549946` auf `7710101654665864892`. Neuer Instanz- und Markernachweis, Gamerule `false`, Border 512, passender Journal- und Zeitplanbeleg `79fb23c9-342f-4f31-89de-39de88217a0d`, Folgezeitpunkt nach 30 Tagen, sauberer Shutdown. [Job](https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/actions/runs/44715142009/job/136216493577) |
+| Nether | Eine Regeneration der separaten Welt `worlds:test_nether`. Seed von `6286750470817318000` auf `-6174959594468431182`. Dieselben Prüfungen einschließlich Nether-Dimension und Journal `271e9694-8a19-403d-b486-8cc2922adfba`. [Job](https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/actions/runs/44715142009/job/136216493215) |
+| Reale Negativprüfung nach der Parserkorrektur | Folia 26.3 Build 26 und Worlds 4.5.1 lehnten die Hauptwelt, Vanilla-Nether, Vanilla-End, eine falsch zugeordnete Dimension und ein unregistriertes Ziel vor Worlds ab. Zeitplan und Journale blieben unverändert. Ein ausschließlich im Prüflauf installierter Listener hätte jede versehentliche Regeneration abgebrochen. Er erhielt kein Regenerate-Event. Veraltete Instanzen deckt zusätzlich der Engine-Regressionstest ab. |
+| End-Gate | Auf einem frischen Server ohne geladene Ziel-Endfarm wurden vier Varianten vor der Weltprüfung abgelehnt: explizit `false`, explizit `true`, Override bei `false` und Override ohne End-Abschnitt. Jeweils null Regenerationen, unveränderter State und `READY`. Scope, Listener und Saved-Data-Zugriffe sind zusätzlich durch FW-001-Regressionstests abgedeckt. |
+| Optionale Plugins | Start und Reload funktionierten ohne BetterRTP und GriefPrevention. Der Claim-Hook blieb inaktiv. Eine Installation der optionalen Plugins mit Spieleraktionen gehört zur späteren Mehrspielerabnahme. |
+
+### Dateien im Pull Request
+
+| Dateien | Änderung |
+| --- | --- |
+| `build.gradle.kts`, `src/main/resources/paper-plugin.yml` | Compile-/Test-Pins und Mindest-API. |
+| `FarmworldPostResetConfigParser.java`, `FarmworldResetConfigParserTest.java`, `FarmworldResetEngineTest.java` | Explizite End-Policy und frühe Ablehnung mit unverändertem Journal. |
+| `.github/workflows/blackbox.yml`, `testing/blackbox/versions.env` | Getrennte CI-Jobs und Artefakte, feste Runtime-Pins und Prüfsummen. |
+| `testing/blackbox/run-blackbox.sh`, `fixtures/config.yml` | Isolierte Testziele, Kontrolle der Vanilla-Regionen, Serverkennung, Seedwechsel und Post-Reset-Abfragen. |
+| `testing/blackbox/check-isolation.py`, `test-isolation.py` | Physische Pfade und Mount-Grenzen prüfen, zulässige und gesperrte Testpfade abdecken. |
+| `testing/blackbox/assert-state.py`, `assert-log.sh` | UUID, Zeitplan, Ziel und Phase sowie Logs und Regenerationsanzahl prüfen. |
+| Log-Fixtures unter `testing/blackbox/fixtures/`: `log-foreign-watchdog-thread.log`, `log-foreign-watchdog.log`, `log-known-worlds-watchdogs.log`, `log-real-exception.log`, `log-too-long-worlds-watchdog.log`, `log-too-many-known-watchdogs.log`, `log-worlds-watchdog-outside-phase.log` | Versionszeile der synthetischen Logs aktualisiert. |
+| `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/ADMIN_GUIDE.md`, `docs/RELEASE.md` | Zielplattform, Freigabegrenzen und Betrieb. |
+| `testing/blackbox/README.md`, `docs/testing/black-box-testing.md`, `docs/testing/v2-acceptance-template.md`, `docs/testing/phase-2.2.md` | Testanleitung, Abnahmekriterien, Versionsmatrix und Befunde. |
 
 ## Abnahmegrenzen
 

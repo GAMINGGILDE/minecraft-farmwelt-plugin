@@ -15,8 +15,8 @@ from uuid import UUID
 @dataclass(frozen=True)
 class ResetState:
     version: int
-    last_reset: datetime | None
-    next_reset: datetime
+    last_reset: str | None
+    next_reset: str
     attempt_id: str | None
 
 
@@ -57,17 +57,20 @@ def read_state(path: Path, world: str) -> ResetState:
     for line in section_match.group(1).splitlines():
         match = re.match(r"^    ([a-z-]+):\s*(.*?)\s*$", line)
         if match:
-            values[match.group(1)] = match.group(2)
+            values[match.group(1)] = match.group(2).strip("'\"")
 
     next_raw = values.get("next-reset")
     if not next_raw:
         fail(f"{path}: worlds.{world}.next-reset is missing")
     last_raw = values.get("last-reset")
+    if last_raw:
+        parse_timestamp(last_raw, path, "last-reset")
+    parse_timestamp(next_raw, path, "next-reset")
 
     return ResetState(
         version=int(version_match.group(1)),
-        last_reset=parse_timestamp(last_raw, path, "last-reset") if last_raw else None,
-        next_reset=parse_timestamp(next_raw, path, "next-reset"),
+        last_reset=last_raw,
+        next_reset=next_raw,
         attempt_id=values.get("attempt-id"),
     )
 
@@ -90,9 +93,13 @@ def main() -> None:
         fail("last-reset was not set after the successful reset")
     if before.last_reset == after.last_reset:
         fail("last-reset was not changed by the reset")
-    if before.next_reset == after.next_reset:
+    if parse_timestamp(before.next_reset, args.before, "next-reset") >= parse_timestamp(
+        after.next_reset, args.after, "next-reset"
+    ):
         fail("next-reset was not advanced by the reset")
-    if after.next_reset <= after.last_reset:
+    if parse_timestamp(after.next_reset, args.after, "next-reset") <= parse_timestamp(
+        after.last_reset, args.after, "last-reset"
+    ):
         fail("next-reset is not later than last-reset")
 
     journal = dict(line.split("=", 1) for line in args.journal.read_text().splitlines())
@@ -102,8 +109,8 @@ def main() -> None:
         fail("Journalphase oder Weltidentität stimmt nicht")
     if str(UUID(journal["id"])) != after.attempt_id or before.attempt_id == after.attempt_id:
         fail("Versuchs-UUID stimmt nicht mit dem neuen Zeitplanbeleg überein")
-    if (parse_timestamp(journal["completed"], args.journal, "completed") != after.last_reset
-            or parse_timestamp(journal["next"], args.journal, "next") != after.next_reset):
+    # Beide Schreiber serialisieren denselben Instant. Auch die Nanosekunden müssen passen.
+    if journal["completed"] != after.last_reset or journal["next"] != after.next_reset:
         fail("Journal und Zeitplan enthalten unterschiedliche Abschlusszeiten")
     print(f"Bestätigter Versuch: {journal['id']} ({args.world}, {args.bukkit_name})")
 

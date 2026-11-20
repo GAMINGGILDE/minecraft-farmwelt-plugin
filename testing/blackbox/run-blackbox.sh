@@ -360,6 +360,13 @@ wait_for_log_regex \
 wait_for_path "$WORLD_DIR/region" "$WORLD_TIMEOUT_SECONDS" "Worlds test-world readiness"
 
 "$PYTHON_BIN" "$SCRIPT_DIR/check-isolation.py" "$RUN_DIR" "$SERVER_DIR/$MAIN_WORLD_NAME"
+vanilla_markers=()
+for dimension in overworld the_nether the_end; do
+  region="$SERVER_DIR/$MAIN_WORLD_NAME/dimensions/minecraft/$dimension/region"
+  [[ -d "$region" ]] || fail "vanilla region directory missing: $dimension"
+  vanilla_markers+=("$region/.farmwelt-blackbox-control")
+  printf '%s\n' "$dimension" > "$region/.farmwelt-blackbox-control"
+done
 printf 'created-before-reset=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$WORLD_MARKER"
 [[ -f "$WORLD_MARKER" ]] || fail "could not place the regeneration marker in the test-world directory"
 
@@ -393,6 +400,11 @@ if [[ -e "$WORLD_MARKER" ]]; then
   fail "the pre-reset world marker survived; Worlds did not replace the test-world directory"
 fi
 echo "PASS: the marker disappeared when Worlds recreated the region data"
+for marker in "${vanilla_markers[@]}"; do
+  [[ -s "$marker" ]] || fail "vanilla control marker lost: $marker"
+done
+[[ "$(grep -Fc -- "über Worlds mit zufälligem Seed gestartet." "$LATEST_LOG")" == 1 ]] \
+  || fail "unexpected additional Worlds regeneration"
 
 old_seed="$(tail -n "+$reset_log_line" "$LATEST_LOG" | sed -n 's/.*Alter Seed: \([-0-9][0-9]*\).*/\1/p' | tail -n 1)"
 new_seed="$(tail -n "+$reset_log_line" "$LATEST_LOG" | sed -n 's/.*Neuer Seed: \([-0-9][0-9]*\).*/\1/p' | tail -n 1)"
@@ -400,6 +412,9 @@ new_seed="$(tail -n "+$reset_log_line" "$LATEST_LOG" | sed -n 's/.*Neuer Seed: \
 [[ "$old_seed" != "$new_seed" ]] || fail "this run did not demonstrate a seed change"
 echo "PASS: world seed changed from $old_seed to $new_seed"
 
+if grep -Eq 'Disabling (Farmwelt|Worlds)|Farmwelt wurde gestoppt\.' "$LATEST_LOG"; then
+  fail "a required plugin stopped before the requested server shutdown"
+fi
 stop_server || fail "server required forced cleanup instead of a clean shutdown"
 
 "$SCRIPT_DIR/assert-log.sh" "$LATEST_LOG" "$ARTIFACT_DIR/log-gate-findings.txt" \
