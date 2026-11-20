@@ -9,6 +9,9 @@ LOG_FILE="${1:?usage: assert-log.sh <latest.log> <findings-file> [known-watchdog
 FINDINGS_FILE="${2:?usage: assert-log.sh <latest.log> <findings-file> [known-watchdogs-file]}"
 KNOWN_WATCHDOGS_FILE="${3:-$(dirname -- "$FINDINGS_FILE")/known-watchdogs.txt}"
 
+FARMWORLD="${4:-overworld}"
+TEST_WORLD_NAME="${5:-worlds_test_farmwelt}"
+
 WATCHDOG_MAX_SECONDS=10
 WATCHDOG_MAX_BLOCKS=2
 WATCHDOG_MAX_BLOCK_LINES=200
@@ -54,7 +57,7 @@ require_fixed "Worlds-Integration initialisiert. Reset-Lifecycle wird über Worl
 require_fixed "Farmwelt wurde gestartet." "Farmwelt did not finish startup"
 require_fixed "Geladene Bukkit-Welt '$TEST_WORLD_NAME' gefunden." \
   "the prepared farmworld was not loaded when reset validation ran"
-require_fixed "Reset für Farmwelt 'overworld' erfolgreich abgeschlossen." \
+require_fixed "Reset für Farmwelt '$FARMWORLD' erfolgreich abgeschlossen." \
   "the reset did not finish with SUCCESS"
 require_fixed "Farmwelt wurde gestoppt." "Farmwelt did not receive a clean shutdown"
 
@@ -66,12 +69,12 @@ regeneration_successes="$(count_fixed "Worlds hat Farmwelt '$TEST_WORLD_NAME' er
 [[ "$regeneration_successes" == "1" ]] \
   || fail "expected exactly one successful Worlds regeneration but found $regeneration_successes"
 
-manual_requests="$(count_fixed "hat einen manuellen Reset für Farmwelt 'overworld' angefordert.")"
+manual_requests="$(count_fixed "hat einen manuellen Reset für Farmwelt '$FARMWORLD' angefordert.")"
 [[ "$manual_requests" == "1" ]] \
   || fail "expected exactly one manual reset request but found $manual_requests"
 
 folia_done_line="$(first_line_fixed "Done (")"
-manual_request_line="$(first_line_fixed "hat einen manuellen Reset für Farmwelt 'overworld' angefordert.")"
+manual_request_line="$(first_line_fixed "hat einen manuellen Reset für Farmwelt '$FARMWORLD' angefordert.")"
 regeneration_start_line="$(first_line_fixed "Regeneration von '$TEST_WORLD_NAME' über Worlds mit zufälligem Seed gestartet.")"
 regeneration_success_line="$(first_line_fixed "Worlds hat Farmwelt '$TEST_WORLD_NAME' erfolgreich regeneriert.")"
 
@@ -229,7 +232,7 @@ finish_watchdog_block
 # Das Gate bewertet Fehlerkontext, nicht bloß die normalen Wörter "Thread" oder "Region".
 # Der eng geprüfte Worlds-Watchdog wurde bereits blockweise behandelt. Explizite erwartete
 # Einzelzeilen werden anschließend weiterhin über die kleine Allowlist entfernt.
-error_pattern='(SEVERE|ERROR)(\]|:)|IllegalStateException|CompletionException|NullPointerException|(^|[[:space:]])Caused by:|(^|[[:space:]])Suppressed:|(^|[[:space:]])at [[:alnum:]_$]+\.|uncaught exception|Unhandled exception|Could not pass event|Failed to (load|enable|disable|unload|create|delete|regenerate|schedule)|Worlds-Integration konnte nicht initialisiert|Reset für Farmwelt .* abgebrochen|already running|läuft bereits ein Reset|scheduler.*(failed|exception|rejected)|(Thread|thread|Region|region).*(violation|unsafe|wrong|not owned|not on|access error)|(violation|unsafe|wrong|not owned|not on|access error).*(Thread|thread|Region|region)'
+error_pattern='(SEVERE|ERROR)(\]|:)|LinkageError|NoSuchMethodError|NoClassDefFoundError|IllegalStateException|CompletionException|NullPointerException|(^|[[:space:]])Caused by:|(^|[[:space:]])Suppressed:|(^|[[:space:]])at [[:alnum:]_$]+\.|uncaught exception|Unhandled exception|Could not pass event|Failed to (load|enable|disable|unload|create|delete|regenerate|schedule)|Worlds-Integration konnte nicht initialisiert|Reset für Farmwelt .* abgebrochen|already running|läuft bereits ein Reset|scheduler.*(failed|exception|rejected)|(Thread|thread|Region|region).*(violation|unsafe|wrong|not owned|not on|access error)|(violation|unsafe|wrong|not owned|not on|access error).*(Thread|thread|Region|region)'
 
 grep -Ev '^[[:space:]]*(#|$)' "$SCRIPT_DIR/log-allowlist.txt" > "$allowlist_patterns" || true
 

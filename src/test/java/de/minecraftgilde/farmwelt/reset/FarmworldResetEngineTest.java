@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -58,6 +59,7 @@ class FarmworldResetEngineTest {
     );
     private final MutableClock clock = new MutableClock(NOW, ZoneOffset.UTC);
     private final FarmworldResetService resetService;
+    private final Path endJournal;
     private final List<String> lifecycleMessages = new ArrayList<>();
     private final List<PlayerMessage> evacuationMessages = new ArrayList<>();
     private final ResetNotificationService notificationService;
@@ -66,6 +68,7 @@ class FarmworldResetEngineTest {
     private final FarmworldResetEngine engine;
 
     FarmworldResetEngineTest(@TempDir Path dataDirectory) {
+        endJournal = dataDirectory.resolve("reset-recovery-end.journal");
         resetService = new FarmworldResetService(
                 repository,
                 dataDirectory,
@@ -819,10 +822,10 @@ class FarmworldResetEngineTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"26.3,false,false", "26.3,true,false", "26.3,,true", "99.1,,true"})
+    @CsvSource({"26.3,false,false", "26.3,true,false", "26.3,false,true", "26.3,,true", "99.1,,true"})
     void unsupportedFightStopsBeforeScopeEvacuationAndWorlds(
             String version, Boolean dragon, boolean override
-    ) {
+    ) throws IOException {
         minecraftVersion = version;
         configureEnd(dragon);
         FarmworldResetState previous = resetService.getState("end").orElseThrow();
@@ -835,6 +838,7 @@ class FarmworldResetEngineTest {
         assertTrue(calls.isEmpty(), calls::toString);
         assertFalse(postResetInitializer.scopeStarted);
         assertEquals(previous, resetService.getState("end").orElseThrow());
+        assertEquals("version=1\nphase=READY\n", Files.readString(endJournal));
         assertFalse(engine.isResetRunning("end"));
     }
 

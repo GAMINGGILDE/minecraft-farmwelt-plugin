@@ -4,7 +4,7 @@
 
 Dieses Repository enthält das Minecraft-Farmwelt-Plugin für Paper/Folia. Es führt Spieler über eine GUI in konfigurierbare Farmwelten, überwacht Ressourcenabbau in normalen Welten, unterstützt Moderation und Diagnose und setzt Overworld-, Nether- und End-Farmwelten sicher zurück. Es ist kein allgemeines Anti-Grief- oder Claim-Plugin.
 
-Zielplattform sind aktuell Minecraft/Folia 26.1.2 und Java 25. Die technische Source of Truth für API-, Toolchain- und Dependency-Versionen ist `build.gradle.kts`; `paper-plugin.yml` definiert Plugin-Metadaten, Runtime-Dependencies und die eingebauten Permission-Defaults. Versionsangaben hier nur als Orientierung behandeln und bei Upgrades mit dem Build abgleichen.
+Zielplattform sind aktuell Minecraft/Folia 26.3 (Testserver Build 26), Worlds 4.5.1 und Java 25. Die technische Source of Truth für API-, Toolchain- und Dependency-Versionen ist `build.gradle.kts`; `paper-plugin.yml` definiert Plugin-Metadaten, Runtime-Dependencies und die eingebauten Permission-Defaults. Versionsangaben hier nur als Orientierung behandeln und bei Upgrades mit dem Build abgleichen.
 
 ## Architekturgrenzen
 
@@ -88,7 +88,9 @@ Zielplattform sind aktuell Minecraft/Folia 26.1.2 und Java 25. Die technische So
 
 Die Endfarm enthält bewusst spezielle und versionssensitive Logik. Insbesondere `EndDragonFightCompatibility`, `EndDragonFightRuntimeAccess`, `EndDragonFightDataStore`, DragonBattle-State-Manipulation, Saved-Data-Staging mit Commit/Rollback, Bossbar-Suppression, Spawn-Guard, Exit-Portal-Erzeugung und -Verifikation sowie die vorhandene `--dragon`-Sonderlogik dürfen nicht ohne konkreten Auftrag vereinfacht, ersetzt oder entfernt werden.
 
-Für `dragon: false` gilt:
+Phase 2.2 lässt interne DragonBattle-Zugriffe ausschließlich auf 26.1.2 zu. Auf 26.3 müssen explizite Dragon-Policies und `--dragon` vor Evakuierung, Journal und Worlds scheitern. Für destruktive Tests gelten die Isolationsbedingungen aus `docs/testing/phase-2.2.md` (FW-004).
+
+Für `dragon: false` gilt auf der intern freigegebenen Version:
 
 - Direkt nach dem Reset existiert kein Enderdrache und keine Bossbar.
 - Das Exit-Portal ist aktiv und der Fight-State gilt als abgeschlossen.

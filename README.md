@@ -7,7 +7,7 @@
   <a href="https://github.com/GAMINGGILDE/minecraft-farmwelt-plugin/releases"><img alt="Release" src="https://img.shields.io/github/v/release/GAMINGGILDE/minecraft-farmwelt-plugin?label=release&amp;cacheSeconds=300&amp;style=flat-square&amp;logo=github&amp;logoColor=white"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GAMINGGILDE/minecraft-farmwelt-plugin?style=flat-square&amp;logo=opensourceinitiative&amp;logoColor=white"></a>
   <img alt="Java 25" src="https://img.shields.io/badge/Java-25-orange?style=flat-square&amp;logo=openjdk&amp;logoColor=white">
-  <img alt="Paper 26.1.2" src="https://img.shields.io/badge/Paper-26.1.2-blue?style=flat-square">
+  <img alt="Paper 26.3" src="https://img.shields.io/badge/Paper-26.3-blue?style=flat-square">
   <img alt="Folia supported" src="https://img.shields.io/badge/Folia-supported-brightgreen?style=flat-square">
 </p>
 
@@ -29,7 +29,7 @@ Das Plugin ist kein Claim- oder allgemeines Anti-Grief-System. GriefPrevention k
 
 Ein ungeklärter Reset sperrt weitere Regenerationen dieser Farmwelt auch nach einem Neustart. `/farmwelt status <welt>` nennt den Versuch und die zuletzt bestätigte Phase. Den Ablauf für die Wiederherstellung beschreibt der [Admin Guide](docs/ADMIN_GUIDE.md#recovery-nach-einem-unterbrochenen-reset).
 
-Die Endfarm unterstützt einen dragonlosen Zustand mit aktivem Ausgangsportal und einen einmaligen Erstkampf über `--dragon`. Beide benötigen Minecraft 26.1.2. Farmwelt prüft die Freigabe vor der Evakuierung. Spawn-Guard und Portalreparatur greifen ausschließlich in einer geladenen, separaten Endfarm mit wirksamer Dragon-Policy. Die Betriebsdetails stehen im [Admin Guide](docs/ADMIN_GUIDE.md).
+Auf Folia 26.3 sind Overworld- und Nether-Resets vorgesehen. End-Resets mit konfiguriertem `dragon` oder `--dragon` enden vor der Evakuierung mit `UNSUPPORTED_DRAGON_VERSION`. Ohne wirksame Dragon-Policy gilt `PRESERVE`. Die technische Endfarm-Abnahme folgt in Phase 2.4. Die Betriebsdetails stehen im [Admin Guide](docs/ADMIN_GUIDE.md).
 
 Spieler sehen unter `/farmwelt` beim jeweiligen Welt-Item den geplanten Reset in der Server-Zeitzone und die ungefähre Restzeit. Die Anzeige wird bei jedem Öffnen aktualisiert; bei höchstens einer Stunde Restzeit ist sie gelb, bei höchstens fünf Minuten rot. Der Info-Kompass erklärt, dass platzierte Blöcke und gelagerte Items beim Reset verloren gehen. Dafür genügt die bestehende Permission `farmwelt.use`.
 
@@ -38,8 +38,8 @@ Spieler sehen unter `/farmwelt` beim jeweiligen Welt-Item den geplanten Reset in
 | Komponente | Status | Aktueller Stand |
 | --- | --- | --- |
 | Java | erforderlich | 25 |
-| Minecraft/Paper/Folia | erforderlich | 26.1.2; Build gegen `paper-api:26.1.2.build.74-stable` |
-| Worlds | erforderlich | 4.4.0; übernimmt den dynamischen Welt-Lifecycle |
+| Minecraft/Paper/Folia | erforderlich | 26.3, Folia Build 26, Build gegen `paper-api:26.3.build.256-stable` |
+| Worlds | erforderlich | 4.5.1; übernimmt den dynamischen Welt-Lifecycle |
 | BetterRTP | optional | Standard-Teleportbefehle verwenden BetterRTP |
 | GriefPrevention | optional | Claim-Ausnahmen für den Ressourcenmonitor |
 
@@ -47,13 +47,13 @@ Ohne Worlds lädt Farmwelt nicht. Es gibt keinen Bukkit-Fallback für die Weltre
 
 ## Installation
 
-1. Worlds 4.4.0 und dessen Servervoraussetzungen installieren.
+1. Worlds 4.5.1 und dessen Servervoraussetzungen installieren.
 2. Farmwelt-JAR in den Serverordner `plugins/` legen.
 3. Server starten und `plugins/Farmwelt/config.yml` prüfen.
 4. Bukkit-Weltnamen, Teleportbefehle und optionale GriefPrevention-Integration anpassen.
 5. Mit `/farmwelt info`, `/farmwelt status` und als Spieler mit `/farmwelt` prüfen.
 
-Vor dem ersten produktiven Reset die [Betriebs- und Testanleitung](docs/ADMIN_GUIDE.md) verwenden und ausschließlich mit gesicherten Testwelten beginnen.
+Phase 2.2 hat keine Produktionsfreigabe. FW-004 betrifft die Löschgrenzen von Worlds. Betriebsbedingungen und Versionsnachweise stehen im [Migrationsbericht](docs/testing/phase-2.2.md). Die Mindest-API 26.3 schließt das Laden dieser JAR auf 26.1.2 aus.
 
 ## Commands
 

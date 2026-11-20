@@ -6,6 +6,15 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=versions.env
 source "$SCRIPT_DIR/versions.env"
 
+FARMWORLD="${1:-overworld}"
+case "$FARMWORLD" in
+  overworld) WORLD_ID=test_farmwelt; CREATE_OPTIONS="" ;;
+  nether) WORLD_ID=test_nether; CREATE_OPTIONS=" type normal dimension minecraft:the_nether" ;;
+  *) echo "usage: $0 [overworld|nether]" >&2; exit 2 ;;
+esac
+TEST_WORLD_KEY="worlds:$WORLD_ID"
+TEST_WORLD_NAME="worlds_$WORLD_ID"
+
 DOWNLOAD_TIMEOUT_SECONDS="${BLACKBOX_DOWNLOAD_TIMEOUT_SECONDS:-180}"
 STARTUP_TIMEOUT_SECONDS="${BLACKBOX_STARTUP_TIMEOUT_SECONDS:-240}"
 WORLD_TIMEOUT_SECONDS="${BLACKBOX_WORLD_TIMEOUT_SECONDS:-180}"
@@ -27,9 +36,10 @@ LATEST_LOG="$SERVER_DIR/logs/latest.log"
 STATE_FILE="$SERVER_DIR/plugins/Farmwelt/reset-state.yml"
 STATE_BEFORE="$ARTIFACT_DIR/reset-state-before.yml"
 STATE_AFTER="$ARTIFACT_DIR/reset-state-after.yml"
-WORLD_DIR="$SERVER_DIR/$MAIN_WORLD_NAME/dimensions/worlds/test_farmwelt"
+WORLD_DIR="$SERVER_DIR/$MAIN_WORLD_NAME/dimensions/worlds/$WORLD_ID"
 WORLD_MARKER="$WORLD_DIR/region/.farmwelt-blackbox-marker"
 
+"$PYTHON_BIN" "$SCRIPT_DIR/check-isolation.py" "$RUN_DIR" "$RUN_DIR"
 mkdir -p -- "$SERVER_DIR/plugins/Farmwelt" "$ARTIFACT_DIR" "$DOWNLOAD_DIR"
 exec > >(tee -a "$HARNESS_LOG") 2>&1
 
@@ -192,6 +202,7 @@ collect_artifacts() {
     cp -a -- "$SERVER_DIR/plugins/Worlds/." "$ARTIFACT_DIR/worlds-data/"
   fi
   copy_if_present "$SCRIPT_DIR/versions.env" "$ARTIFACT_DIR/versions.env"
+  copy_if_present "$SERVER_DIR/plugins/Farmwelt/reset-recovery-$FARMWORLD.journal" "$ARTIFACT_DIR/reset-recovery-$FARMWORLD.journal"
 }
 
 on_exit() {
@@ -279,7 +290,8 @@ download_verified "$WORLDS_URL" "$WORLDS_JAR" sha512 "$WORLDS_SHA512"
 cp -- "$FOLIA_JAR" "$SERVER_DIR/folia.jar"
 cp -- "$WORLDS_JAR" "$SERVER_DIR/plugins/Worlds.jar"
 cp -- "$PLUGIN_JAR" "$SERVER_DIR/plugins/Farmwelt.jar"
-cp -- "$SCRIPT_DIR/fixtures/config.yml" "$SERVER_DIR/plugins/Farmwelt/config.yml"
+sed -e "s/@FARMWORLD@/$FARMWORLD/g" -e "s/@WORLD_ID@/$WORLD_ID/g" \
+  "$SCRIPT_DIR/fixtures/config.yml" > "$SERVER_DIR/plugins/Farmwelt/config.yml"
 
 printf 'eula=true\n' > "$SERVER_DIR/eula.txt"
 cat > "$SERVER_DIR/server.properties" <<EOF
@@ -325,6 +337,9 @@ CONSOLE_READER_PID=$!
 
 wait_for_log_regex 'Done \(' "$STARTUP_TIMEOUT_SECONDS" "Folia startup"
 
+grep -F -- "Folia version $FOLIA_VERSION-$FOLIA_BUILD-" "$LATEST_LOG" \
+  || fail "running Folia build does not match the pin"
+
 grep -Fq -- "Worlds $WORLDS_VERSION erkannt." "$LATEST_LOG" \
   || fail "Worlds plugin did not enable or Farmwelt did not detect version $WORLDS_VERSION"
 grep -Fq -- "Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt." "$LATEST_LOG" \
@@ -336,7 +351,7 @@ if grep -Fq -- "Farmwelt wird deaktiviert" "$LATEST_LOG"; then
 fi
 
 world_log_line="$(line_after_current_log)"
-send_console "world create test_farmwelt"
+send_console "world create $WORLD_ID$CREATE_OPTIONS"
 wait_for_log_regex \
   "Successfully created the world.*$TEST_WORLD_KEY|$TEST_WORLD_KEY.*wurde erfolgreich erstellt" \
   "$WORLD_TIMEOUT_SECONDS" \
@@ -344,43 +359,64 @@ wait_for_log_regex \
   "$world_log_line"
 wait_for_path "$WORLD_DIR/region" "$WORLD_TIMEOUT_SECONDS" "Worlds test-world readiness"
 
+"$PYTHON_BIN" "$SCRIPT_DIR/check-isolation.py" "$RUN_DIR" "$SERVER_DIR/$MAIN_WORLD_NAME"
+vanilla_markers=()
+for dimension in overworld the_nether the_end; do
+  region="$SERVER_DIR/$MAIN_WORLD_NAME/dimensions/minecraft/$dimension/region"
+  [[ -d "$region" ]] || fail "vanilla region directory missing: $dimension"
+  vanilla_markers+=("$region/.farmwelt-blackbox-control")
+  printf '%s\n' "$dimension" > "$region/.farmwelt-blackbox-control"
+done
 printf 'created-before-reset=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$WORLD_MARKER"
 [[ -f "$WORLD_MARKER" ]] || fail "could not place the regeneration marker in the test-world directory"
 
 status_log_line="$(line_after_current_log)"
-send_console "farmwelt status overworld"
-wait_for_log_regex 'Reset-Status:.*overworld' 30 "Farmwelt status response" "$status_log_line"
+send_console "farmwelt status $FARMWORLD"
+wait_for_log_regex "Reset-Status:.*$FARMWORLD" 30 "Farmwelt status response" "$status_log_line"
 
 [[ -s "$STATE_FILE" ]] || fail "Farmwelt did not initialize reset-state.yml"
 cp -- "$STATE_FILE" "$STATE_BEFORE"
 
 reset_log_line="$(line_after_current_log)"
-send_console "farmwelt reset force overworld"
+"$PYTHON_BIN" "$SCRIPT_DIR/check-isolation.py" "$RUN_DIR" "$SERVER_DIR/$MAIN_WORLD_NAME"
+send_console "farmwelt reset force $FARMWORLD"
 wait_for_log_regex \
-  "Reset für Farmwelt 'overworld' erfolgreich abgeschlossen" \
+  "Reset für Farmwelt '$FARMWORLD' erfolgreich abgeschlossen" \
   "$RESET_TIMEOUT_SECONDS" \
   "Farmwelt reset" \
   "$reset_log_line"
 
 [[ -s "$STATE_FILE" ]] || fail "reset-state.yml is missing after reset success"
 cp -- "$STATE_FILE" "$STATE_AFTER"
-"$PYTHON_BIN" "$SCRIPT_DIR/assert-state.py" "$STATE_BEFORE" "$STATE_AFTER" overworld
+"$PYTHON_BIN" "$SCRIPT_DIR/assert-state.py" "$STATE_BEFORE" "$STATE_AFTER" "$FARMWORLD" \
+  "$SERVER_DIR/plugins/Farmwelt/reset-recovery-$FARMWORLD.journal" "$TEST_WORLD_NAME"
+query_line="$(line_after_current_log)"
+send_console "world gamerule $TEST_WORLD_KEY show_advancement_messages"
+wait_for_log_regex "show_advancement_messages.*$TEST_WORLD_KEY.*false|show_advancement_messages.*false.*$TEST_WORLD_KEY" 30 "gamerule readback" "$query_line"
+send_console "execute in $TEST_WORLD_KEY run worldborder get"
+wait_for_log_regex 'border.*512' 30 "world border readback" "$query_line"
 
 if [[ -e "$WORLD_MARKER" ]]; then
   fail "the pre-reset world marker survived; Worlds did not replace the test-world directory"
 fi
 echo "PASS: the marker disappeared when Worlds recreated the region data"
+for marker in "${vanilla_markers[@]}"; do
+  [[ -s "$marker" ]] || fail "vanilla control marker lost: $marker"
+done
+[[ "$(grep -Fc -- "über Worlds mit zufälligem Seed gestartet." "$LATEST_LOG")" == 1 ]] \
+  || fail "unexpected additional Worlds regeneration"
 
 old_seed="$(tail -n "+$reset_log_line" "$LATEST_LOG" | sed -n 's/.*Alter Seed: \([-0-9][0-9]*\).*/\1/p' | tail -n 1)"
 new_seed="$(tail -n "+$reset_log_line" "$LATEST_LOG" | sed -n 's/.*Neuer Seed: \([-0-9][0-9]*\).*/\1/p' | tail -n 1)"
 [[ -n "$old_seed" && -n "$new_seed" ]] || fail "old and new world seeds were not logged"
-if [[ "$old_seed" == "$new_seed" ]]; then
-  echo "NOTE: random seeds are identical; marker removal still proves directory replacement"
-else
-  echo "PASS: world seed changed from $old_seed to $new_seed"
-fi
+[[ "$old_seed" != "$new_seed" ]] || fail "this run did not demonstrate a seed change"
+echo "PASS: world seed changed from $old_seed to $new_seed"
 
+if grep -Eq 'Disabling (Farmwelt|Worlds)|Farmwelt wurde gestoppt\.' "$LATEST_LOG"; then
+  fail "a required plugin stopped before the requested server shutdown"
+fi
 stop_server || fail "server required forced cleanup instead of a clean shutdown"
 
-"$SCRIPT_DIR/assert-log.sh" "$LATEST_LOG" "$ARTIFACT_DIR/log-gate-findings.txt"
+"$SCRIPT_DIR/assert-log.sh" "$LATEST_LOG" "$ARTIFACT_DIR/log-gate-findings.txt" \
+  "$ARTIFACT_DIR/known-watchdogs.txt" "$FARMWORLD" "$TEST_WORLD_NAME"
 collect_artifacts

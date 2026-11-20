@@ -13,7 +13,11 @@ concurrency:
 
 jobs:
   blackbox:
-    name: Folia/Worlds reset smoke test
+    name: Folia/Worlds reset (${{ matrix.world }})
+    strategy:
+      fail-fast: false
+      matrix:
+        world: [overworld, nether]
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -51,8 +55,11 @@ jobs:
       - name: Test log gate fixtures
         run: ./testing/blackbox/test-assert-log.sh
 
+      - name: Test filesystem isolation gate
+        run: python3 ./testing/blackbox/test-isolation.py
+
       - name: Run real Folia/Worlds smoke test
-        run: ./testing/blackbox/run-blackbox.sh
+        run: ./testing/blackbox/run-blackbox.sh "${{ matrix.world }}"
 
       - name: Prepare artifact name
         if: ${{ always() }}
@@ -61,7 +68,7 @@ jobs:
           REF_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           REF_SLUG="$(printf '%s' "$REF_NAME" | tr -cs '[:alnum:]_.-' '-')"
-          echo "name=blackbox-${REF_SLUG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "name=blackbox-${{ matrix.world }}-${REF_SLUG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Upload diagnostics and test reports
         if: ${{ always() }}

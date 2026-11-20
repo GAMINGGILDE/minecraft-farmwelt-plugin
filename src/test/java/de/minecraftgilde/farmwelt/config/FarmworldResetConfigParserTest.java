@@ -24,6 +24,23 @@ class FarmworldResetConfigParserTest {
     private final FarmworldResetConfigParser parser =
             new FarmworldResetConfigParser(quietLogger());
 
+    @ParameterizedTest
+    @ValueSource(strings = {"", "post-reset: {}", "post-reset: {end: {}}"})
+    void missingDragonPolicyPreservesFightEvenWithBundledDefaults(String postReset) throws Exception {
+        var defaults = new YamlConfiguration();
+        defaults.set("farmworlds.end.reset.post-reset.end.dragon", false);
+        var config = parser.parse("""
+                farmworlds:
+                  end:
+                    reset:
+                      enabled: true
+                      world: test_end
+                      interval: 30d
+                      %s
+                """.formatted(postReset), defaults).getFirst();
+        assertTrue(config.postReset().end().isEmpty());
+    }
+
     @Test
     void rejectsIdenticalYamlKeysBeforeBukkitMergesThem() {
         var failure = assertThrows(IllegalArgumentException.class, () -> parser.parse("""

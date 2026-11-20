@@ -8,15 +8,15 @@ fachlichen PASS-Kriterien; eine separate Laufkopie der Vorlage dokumentiert das 
 
 Die Black-Box-Abnahme prüft die reale Integration von Folia, Minecraft, Worlds, der gebauten Plugin-JAR und dem vollständigen Reset-Lifecycle. Sie ergänzt die deterministischen Gradle-Tests und den vorhandenen [automatisierten Folia-/Worlds-Smoke-Test](../../testing/blackbox/README.md), ersetzt aber keinen davon. Der allgemeine Build-Workflow startet bewusst keinen Minecraft-Server; der echte Server-Smoke-Test läuft getrennt in `.github/workflows/blackbox.yml`.
 
-Alle Szenarien werden ausschließlich auf einem isolierten, wegwerfbaren Testserver mit Backup und separaten Testwelten ausgeführt. Produktive Welten und produktive State-Dateien dürfen nicht verwendet werden. Vor jedem Lauf sind Plugin-JAR, Folia-, Minecraft- und Worlds-Version sowie die Ausgangswerte aus `config.yml` und `reset-state.yml` zu protokollieren. `reset-state.yml` nur bei gestopptem Server und nur für den gezielt getesteten Weltabschnitt bearbeiten oder entfernen. Die komplette Datei niemals als Kurztest-Anweisung auf einem produktiven Server löschen. Automatische Kurzintervalle wie `1m` sind ausschließlich für diesen isolierten Abnahmetest zulässig.
+Alle Szenarien werden ausschließlich auf einem isolierten, wegwerfbaren Testserver mit separat verwahrtem Testbackup und separaten Testwelten ausgeführt. Produktive Welten und produktive State-Dateien dürfen nicht verwendet werden. Vor jedem Lauf sind Plugin-JAR, Folia-, Minecraft- und Worlds-Version sowie die Ausgangswerte aus `config.yml` und `reset-state.yml` zu protokollieren. `reset-state.yml` nur bei gestopptem Server und nur für den gezielt getesteten Weltabschnitt bearbeiten oder entfernen. Die komplette Datei niemals als Kurztest-Anweisung auf einem produktiven Server löschen. Automatische Kurzintervalle wie `1m` sind ausschließlich für diesen isolierten Abnahmetest zulässig.
 
 Für Tests mit manuell vorbereiteten Terminen eine frische isolierte Fixture mit `READY` verwenden. Nach einem erfolgreichen Reset müssen gespeicherter Termin und Journalbeleg zusammenpassen. Für eine weitere Ausgangslage eine separate Fixture oder den vollständigen konsistenten Vorher-Snapshot verwenden.
 
-Vor den Reset-Szenarien muss Folia 26.1.2 mit Farmwelt und Worlds ohne Exceptions starten. Das Serverlog ist während aller Tests zusätzlich auf Folia-Thread-/Region-Fehler zu prüfen.
+Vor den Reset-Szenarien muss Folia 26.3 Build 26 mit Farmwelt und Worlds 4.5.1 ohne Exceptions starten. Das Serverlog ist während aller Tests zusätzlich auf Folia-Thread-/Region-Fehler zu prüfen.
 
 ## Vorbereitung und Sicherheitsfreigabe
 
-Vor dem ersten destruktiven Szenario:
+Vor jedem destruktiven Szenario gelten die [FW-004-Isolationsbedingungen](phase-2.2.md).
 
 1. Sicherstellen, dass Serververzeichnis, Farmwelten und `plugins/Farmwelt/reset-state.yml` nur Testdaten enthalten.
 2. Vollständiges, rückspielbares Backup des Testservers erstellen.
@@ -91,6 +91,8 @@ overworld vollständig fertig
 ```
 
 Keine zwei Startup-Resets dürfen parallel laufen. Optional einen kontrollierten Worlds-Fehler für die erste Welt erzeugen: Die folgenden Welten müssen weiter verarbeitet werden, der alte Termin bleibt fällig. Die betroffene Welt zeigt eine Recovery-Sperre und wird beim nächsten regulären Tick übersprungen.
+
+Die positiven Kriterien der Tests E und F setzen die separate technische Freigabe voraus. In Phase 2.2 auf 26.3 für `dragon: false`, `dragon: true` sowie `--dragon` mit und ohne End-Abschnitt die frühe Versionsablehnung und unveränderte Journale prüfen. Die Versionssperre bleibt aktiv.
 
 ## Test E – End ohne Dragon
 
@@ -247,12 +249,12 @@ Das branch-unabhängige Harness unter [`testing/blackbox/`](../../testing/blackb
 
 - isolierter Folia-Serverstart mit gepinnten und hashgeprüften Binaries sowie der Farmwelt-JAR des aktuellen Commits,
 - Startup und Aktivierung von Worlds sowie Farmwelt ohne relevante Exceptions,
-- automatisches Erzeugen und Laden genau einer separaten Overworld-Testfarmwelt durch Worlds,
-- ein vollständiger Reset über `farmwelt reset force overworld` und die reale Worlds-Integration,
+- automatisches Erzeugen und Laden je einer separaten Overworld- und Nether-Testfarmwelt auf eigenständigen Runnern durch Worlds,
+- ein vollständiger Reset über `farmwelt reset force <welt>` je Dimension und die reale Worlds-Integration,
 - `SUCCESS`, genau ein Farmwelt-Regenerationsaufruf und genau ein Worlds-Erfolg,
 - Nachweis der echten Neuerzeugung durch das Verschwinden eines Markers im alten `region`-Bereich,
-- Vorhandensein und Vergleich von altem und neuem Seed; ein theoretisch identischer Zufallsseed bleibt wegen des unabhängigen Markers zulässig,
-- Fortschreiben und Konsistenz von `reset-state.yml` anhand gesicherter Vorher-/Nachher-Dateien,
+- Vorhandensein und Vergleich von altem und neuem Seed; der Abnahmelauf verlangt einen beobachteten Seedwechsel,
+- Fortschreiben und Konsistenz von `reset-state.yml` einschließlich UUID- und Zeitabgleich mit dem Recovery-Journal,
 - vollständiges Folia-/Thread-/Scheduler-/Worlds-Lifecycle-Log-Gate einschließlich der eng begrenzten bekannten CI-Watchdog-Ausnahme,
 - sauberer Konsolen-Shutdown mit Timeout,
 - Upload von Harness-Ausgabe, Serverlogs, Findings, bekannten Watchdog-Blöcken, Config, State und Worlds-Laufzeitdaten als Testartefakte.

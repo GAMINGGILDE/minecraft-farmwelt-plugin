@@ -111,7 +111,8 @@ public final class FarmworldPostResetConfigParser {
             String farmworldKey,
             FarmworldType farmworldType
     ) {
-        if (endSection == null || !endSection.contains("dragon")) {
+        // Nur ein expliziter Eintrag darf den PRESERVE-Pfad verlassen.
+        if (endSection == null || !endSection.contains("dragon", true)) {
             return Optional.empty();
         }
         if (farmworldType != FarmworldType.END) {

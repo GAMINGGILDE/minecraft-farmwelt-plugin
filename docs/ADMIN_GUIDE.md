@@ -277,6 +277,8 @@ Bei Events zählt die Position des betroffenen Blocks oder Entities, nicht die S
 
 ## Reset-Betrieb
 
+Phase 2.2 verwendet Java 25, Folia 26.3 Build 26 und Worlds 4.5.1. Für die Prüfung von Overworld und Nether ausschließlich private Wegwerfwelten auf einem isolierten Runner verwenden. Der Serverbenutzer darf keine produktiven Daten oder Backups erreichen. Vor jedem destruktiven Versuch die Weltpfade einschließlich aller Vorfahren und Unterverzeichnisse auf Umleitungen prüfen. FW-004 und die ausstehende Produktionsfreigabe sind im [Migrationsbericht](testing/phase-2.2.md) dokumentiert.
+
 ### Statuswerte
 
 Der Statusbefehl zeigt ausschließlich tatsächlich implementierte Zustände:
