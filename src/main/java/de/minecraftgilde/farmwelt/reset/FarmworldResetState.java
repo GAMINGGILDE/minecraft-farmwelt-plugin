@@ -3,6 +3,7 @@ package de.minecraftgilde.farmwelt.reset;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Persistent schedule state for one logical farmworld.
@@ -10,10 +11,16 @@ import java.util.Optional;
 public record FarmworldResetState(
         String farmworldKey,
         Optional<Instant> lastReset,
-        Instant nextReset
+        Instant nextReset,
+        Optional<UUID> attemptId
 ) {
 
+    public FarmworldResetState(String farmworldKey, Optional<Instant> lastReset, Instant nextReset) {
+        this(farmworldKey, lastReset, nextReset, Optional.empty());
+    }
+
     public FarmworldResetState {
+        Objects.requireNonNull(attemptId, "attemptId");
         if (farmworldKey == null || farmworldKey.isBlank()) {
             throw new IllegalArgumentException("farmworldKey darf nicht leer sein.");
         }

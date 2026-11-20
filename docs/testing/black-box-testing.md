@@ -10,6 +10,8 @@ Die Black-Box-Abnahme prüft die reale Integration von Folia, Minecraft, Worlds,
 
 Alle Szenarien werden ausschließlich auf einem isolierten, wegwerfbaren Testserver mit Backup und separaten Testwelten ausgeführt. Produktive Welten und produktive State-Dateien dürfen nicht verwendet werden. Vor jedem Lauf sind Plugin-JAR, Folia-, Minecraft- und Worlds-Version sowie die Ausgangswerte aus `config.yml` und `reset-state.yml` zu protokollieren. `reset-state.yml` nur bei gestopptem Server und nur für den gezielt getesteten Weltabschnitt bearbeiten oder entfernen. Die komplette Datei niemals als Kurztest-Anweisung auf einem produktiven Server löschen. Automatische Kurzintervalle wie `1m` sind ausschließlich für diesen isolierten Abnahmetest zulässig.
 
+Für Tests mit manuell vorbereiteten Terminen eine frische isolierte Fixture mit `READY` verwenden. Nach einem erfolgreichen Reset müssen gespeicherter Termin und Journalbeleg zusammenpassen. Für eine weitere Ausgangslage eine separate Fixture oder den vollständigen konsistenten Vorher-Snapshot verwenden.
+
 Vor den Reset-Szenarien muss Folia 26.1.2 mit Farmwelt und Worlds ohne Exceptions starten. Das Serverlog ist während aller Tests zusätzlich auf Folia-Thread-/Region-Fehler zu prüfen.
 
 ## Vorbereitung und Sicherheitsfreigabe
@@ -88,7 +90,7 @@ overworld vollständig fertig
 -> regulärer Scheduler startet
 ```
 
-Keine zwei Startup-Resets dürfen parallel laufen. Optional einen kontrollierten Worlds-Fehler für die erste Welt erzeugen: Die folgenden Welten müssen weiter verarbeitet werden, der fehlgeschlagene State bleibt fällig und wird bei einem späteren regulären Tick erneut versucht.
+Keine zwei Startup-Resets dürfen parallel laufen. Optional einen kontrollierten Worlds-Fehler für die erste Welt erzeugen: Die folgenden Welten müssen weiter verarbeitet werden, der alte Termin bleibt fällig. Die betroffene Welt zeigt eine Recovery-Sperre und wird beim nächsten regulären Tick übersprungen.
 
 ## Test E – End ohne Dragon
 
@@ -215,7 +217,7 @@ Den Server starten und vor Ablauf der 60-sekündigen Startup-Verzögerung sauber
 - **Hauptwelt-Schutz:** Die geschützte Hauptwelt niemals tatsächlich als Testziel opfern. Auf dem isolierten Server eine Konstellation herstellen, in der die konfigurierte Farmwelt auf die als Hauptwelt erkannte Instanz zeigt. Der Reset muss vor Worlds-Regeneration mit dem vorgesehenen Sicherheitsstatus enden.
 - **Falsche Dimension:** Einer logischen ID eine geladene Testwelt der falschen Dimension zuordnen. Keine Regeneration und keine State-Änderung dürfen erfolgen.
 - **Nicht geladene Farmwelt:** Eine korrekt benannte Testwelt gezielt nicht laden und den Reset anfordern. Es darf keinen Erfolg, keine Regeneration und keine State-Änderung geben.
-- **Persistenzfehler:** Nach Backup auf dem isolierten Server die Schreibbarkeit des Plugin-State-Verzeichnisses kontrolliert so einschränken, dass erst das atomare Speichern nach einer ansonsten erfolgreichen Regeneration fehlschlägt. Erwartet werden `STATE_SAVE_FAILED`, eine aktivierte Fehlermeldung statt Erfolg und ein unveränderter veröffentlichter sowie persistierter State. Dateirechte danach sofort wiederherstellen. Falls das sicher nicht reproduzierbar ist, BB-24 als `BLOCKED` markieren.
+- **Persistenzfehler:** Nach Backup auf dem isolierten Server die Schreibbarkeit des Plugin-State-Verzeichnisses kontrolliert so einschränken, dass erst das atomare Speichern nach einer ansonsten erfolgreichen Regeneration fehlschlägt. Erwartet werden `STATE_SAVE_FAILED`, eine aktivierte Fehlermeldung statt Erfolg und ein unveränderter veröffentlichter sowie persistierter State. Für eine gezielte Injektion ausschließlich `reset-state.yml.tmp` blockieren, etwa durch ein nicht leeres gleichnamiges Testverzeichnis. Die Journaldateien müssen schreibbar bleiben. Die Schreibbarkeit danach wiederherstellen. Zwei reguläre Ticks, einen Force-Aufruf und einen Neustart mit Catch-up beobachten. Im Log muss die Zahl der Worlds-Aufrufe für diesen Versuch bei eins bleiben, der Status muss `POST_RESET_DONE` nennen. Eine zweite gesunde, fällige Farmwelt muss weiter zurückgesetzt werden. Falls das sicher nicht reproduzierbar ist, BB-24 als `BLOCKED` markieren.
 
 ## Abnahmeprotokoll und Fehlerdiagnose
 
@@ -225,7 +227,7 @@ Für jeden Lauf festhalten:
 - Git-Commit, Plugin-Version, JAR-Dateiname und vorzugsweise JAR-Prüfsumme,
 - Java-, Minecraft-/Folia- und Worlds-Version,
 - relevante Ausschnitte aus `config.yml`,
-- relevante Ausschnitte aus `reset-state.yml` vor und nach dem Test,
+- relevante Ausschnitte aus `reset-state.yml` sowie Versionsmarker und weltbezogenes Journal vor und nach dem Test,
 - ausgeführter Command beziehungsweise automatischer Trigger,
 - tatsächlicher Start- und Abschlusszeitpunkt der Reset-Pipeline,
 - `ResetResult` beziehungsweise administrativ sichtbarer Ergebnisstatus,

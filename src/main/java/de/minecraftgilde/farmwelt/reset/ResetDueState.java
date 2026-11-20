@@ -4,5 +4,6 @@ package de.minecraftgilde.farmwelt.reset;
 public enum ResetDueState {
     NOT_DUE,
     DUE,
+    RECOVERY_BLOCKED,
     DISABLED
 }

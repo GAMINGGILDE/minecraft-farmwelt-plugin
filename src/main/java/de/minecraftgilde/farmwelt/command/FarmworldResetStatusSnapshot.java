@@ -12,7 +12,8 @@ record FarmworldResetStatusSnapshot(
         Optional<FarmworldResetState> state,
         boolean resetRunning,
         ResetDueState dueState,
-        Instant evaluatedAt
+        Instant evaluatedAt,
+        Optional<String> recovery
 ) {
 
     FarmworldResetStatusSnapshot {

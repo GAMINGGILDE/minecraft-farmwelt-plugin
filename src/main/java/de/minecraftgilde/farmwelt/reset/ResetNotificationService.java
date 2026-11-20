@@ -148,7 +148,7 @@ public final class ResetNotificationService {
         Objects.requireNonNull(result, "result");
         switch (result.status()) {
             case SUCCESS -> broadcastResetSuccess(configuration);
-            case NOT_CONFIGURED, DISABLED, ALREADY_RUNNING -> {
+            case NOT_CONFIGURED, DISABLED, NOT_DUE, ALREADY_RUNNING -> {
                 // Diese Status entstehen vor dem eigentlichen Reset-Start.
             }
             default -> broadcastResetFailure(configuration);
@@ -156,6 +156,9 @@ public final class ResetNotificationService {
     }
 
     private void broadcastDueWarnings(FarmworldResetConfig configuration, Instant now) {
+        if (resetService.recoveryProblem(configuration).isPresent()) {
+            return;
+        }
         Optional<FarmworldResetState> state = resetService.getState(
                 configuration.farmworldKey()
         );

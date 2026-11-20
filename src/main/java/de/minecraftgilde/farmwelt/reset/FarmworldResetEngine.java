@@ -1,5 +1,6 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -68,6 +69,15 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     @Override
     public CompletableFuture<ResetResult> reset(String farmworldKey, ResetOptions options) {
+        return startReset(farmworldKey, options, null);
+    }
+
+    @Override
+    public CompletableFuture<ResetResult> resetIfDue(String farmworldKey, Instant evaluatedAt) {
+        return startReset(farmworldKey, ResetOptions.defaults(), Objects.requireNonNull(evaluatedAt));
+    }
+
+    private CompletableFuture<ResetResult> startReset(String farmworldKey, ResetOptions options, Instant dueAt) {
         Objects.requireNonNull(options, "options");
         if (farmworldKey == null || farmworldKey.isBlank()) {
             return CompletableFuture.completedFuture(new ResetResult(
@@ -116,6 +126,21 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ));
         }
 
+        Optional<String> recovery = resetService.recoveryProblem(resetConfig);
+        if (recovery.isPresent()) {
+            runningResets.remove(farmworldKey);
+            return CompletableFuture.completedFuture(new ResetResult(farmworldKey, resetConfig.worldName(),
+                    ResetStatus.RECOVERY_BLOCKED, "Recovery-Sperre. " + recovery.orElseThrow(), null));
+        }
+
+        // Zwischen Tick-Auswahl und Lock-Erwerb kann ein manueller Reset den Plan erfüllt haben.
+        if (dueAt != null && resetService.getState(farmworldKey)
+                .filter(state -> !dueAt.isBefore(state.nextReset())).isEmpty()) {
+            runningResets.remove(farmworldKey);
+            return CompletableFuture.completedFuture(new ResetResult(farmworldKey, resetConfig.worldName(),
+                    ResetStatus.NOT_DUE, "Es liegt kein fälliger Reset-Termin vor.", null));
+        }
+
         logger.info("Reset für Farmwelt '" + farmworldKey + "' ("
                 + resetConfig.worldName() + ") gestartet.");
         notificationService.broadcastResetStart(resetConfig);
@@ -160,6 +185,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             ));
         }
 
+        // Ein abgebrochener Beobachter darf die Freigabe nach dem tatsächlichen Abschluss nicht verhindern.
         return resetFuture.whenComplete((result, failure) -> {
             try {
                 resetScope.close();
@@ -173,7 +199,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             } finally {
                 runningResets.remove(farmworldKey);
             }
-        });
+        }).copy();
     }
 
     public boolean isResetRunning(String farmworldKey) {
@@ -193,13 +219,15 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             FarmworldResetConfig resetConfig,
             ResetOptions options
     ) {
+        ResetAttempt attempt = resetService.newAttempt(resetConfig);
         return validateWorld(resetConfig, options)
                 .thenCompose(this::evacuatePlayers)
                 .thenCompose(this::confirmWorldIsEmpty)
+                .thenCompose(context -> prepareHandoff(context, attempt))
                 .thenCompose(this::regenerateWorld)
-                .thenCompose(this::validateRegeneratedWorld)
-                .thenCompose(this::applyPostReset)
-                .thenCompose(this::persistState)
+                .thenCompose(context -> checkpoint(() -> resetService.worldsReturned(resetConfig, attempt))
+                        .thenCompose(confirmed -> initializeAndRecord(context, confirmed)))
+                .thenCompose(completed -> persistState(resetConfig, completed))
                 .thenApply(state -> new ResetResult(
                         resetConfig.farmworldKey(),
                         resetConfig.worldName(),
@@ -325,6 +353,35 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             logger.info("Spieler aus '" + context.resetConfig().worldName() + "' evakuiert.");
             return CompletableFuture.completedFuture(context);
         });
+    }
+
+    private CompletableFuture<PipelineContext> prepareHandoff(PipelineContext context, ResetAttempt attempt) {
+        FarmworldResetConfig config = context.resetConfig();
+        return checkpoint(() -> resetService.prepare(config, attempt)).thenCompose(rollback ->
+                // Nur dieser Fehlerzweig liegt beweisbar vor dem Aufruf von regenerateWorld.
+                recheckHandoff(context).exceptionallyCompose(failure ->
+                        checkpoint(() -> {
+                            rollback.restorePrevious();
+                            return context;
+                        }).thenCompose(ignored -> CompletableFuture.failedFuture(failure))));
+    }
+
+    private CompletableFuture<PipelineContext> recheckHandoff(PipelineContext context) {
+        // Der Journal-Flush kann dauern. Währenddessen können sich Weltzuordnung und Belegung ändern.
+        return mapOperationFailure(() -> scheduler.runGlobal(() -> {
+            WorldInspection current = worldOperations.inspect(context.resetConfig());
+            if (current == null || current.loadedWorld().orElse(null) != context.originalWorld()
+                    || current.protectedMainWorld()
+                    || current.loadedWorldType().orElse(null) != context.resetConfig().farmworldType()) {
+                throw new ResetPipelineException(ResetStatus.INVALID_CONFIGURATION,
+                        "Die Farmwelt ist nach der Journal-Sicherung kein sicheres Reset-Ziel mehr.", null);
+            }
+            if (worldOperations.hasPlayers(context.originalWorld())) {
+                throw new ResetPipelineException(ResetStatus.EVACUATION_FAILED,
+                        "Die Farmwelt ist nach der Journal-Sicherung wieder belegt.", null);
+            }
+            return context;
+        }), ResetStatus.INVALID_CONFIGURATION, "Die letzte Prüfung vor der Worlds-Übergabe ist fehlgeschlagen.");
     }
 
     private CompletableFuture<RegeneratedContext> regenerateWorld(PipelineContext context) {
@@ -466,10 +523,24 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         });
     }
 
-    private CompletableFuture<FarmworldResetState> persistState(RegeneratedContext context) {
+    private CompletableFuture<ResetAttempt> initializeAndRecord(RegeneratedContext context, ResetAttempt confirmed) {
+        return validateRegeneratedWorld(context)
+                .thenCompose(this::applyPostReset)
+                .thenCompose(initialized -> checkpoint(() -> resetService.postResetDone(initialized.resetConfig(), confirmed)));
+    }
+
+    private <T> CompletableFuture<T> checkpoint(FarmweltScheduler.CheckedSupplier<T> operation) {
+        return mapOperationFailure(() -> scheduler.runAsync(operation), ResetStatus.RECOVERY_BLOCKED,
+                "Recovery-Phase konnte nicht sicher gespeichert werden. Journal und Serverlog prüfen.")
+                .thenCompose(value -> value == null
+                        ? failed(ResetStatus.RECOVERY_BLOCKED, "Die Recovery-Bestätigung fehlt.", null)
+                        : CompletableFuture.completedFuture(value));
+    }
+
+    private CompletableFuture<FarmworldResetState> persistState(FarmworldResetConfig config, ResetAttempt attempt) {
         return mapOperationFailure(
                 () -> scheduler.runAsync(
-                        () -> resetService.completeReset(context.resetConfig())
+                        () -> resetService.completeReset(config, attempt)
                 ),
                 ResetStatus.STATE_SAVE_FAILED,
                 "Der Weltreset war erfolgreich, aber der Reset-State konnte nicht gespeichert werden."
@@ -541,7 +612,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         }
 
         String logMessage = "Reset für Farmwelt '" + resetConfig.farmworldKey()
-                + "' abgebrochen: " + message;
+                + "' abgebrochen: " + message
+                + resetService.recoveryProblem(resetConfig).map(reason -> " Recovery-Sperre. " + reason).orElse("");
         if (status == ResetStatus.REGENERATE_FAILED
                 || status == ResetStatus.POST_RESET_FAILED
                 || status == ResetStatus.STATE_SAVE_FAILED) {

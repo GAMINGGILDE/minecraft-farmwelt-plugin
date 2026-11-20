@@ -277,6 +277,7 @@ Der Statusbefehl zeigt ausschließlich tatsächlich implementierte Zustände:
 
 | Anzeige | Bedeutung |
 | --- | --- |
+| `Recovery-Sperre` | Automatik und Force warten auf die Klärung eines früheren Versuchs. Status und Log nennen die letzte belegte Phase oder den Lesefehler. |
 | `Geplant` | Aktiver State mit zukünftigem `nextReset`. |
 | `Überfällig` | `nextReset` ist erreicht oder liegt in der Vergangenheit. |
 | `Läuft` | Für diese logische Farmwelt ist bereits eine Reset-Pipeline aktiv; dieser Status hat Vorrang. |
@@ -306,7 +307,7 @@ Farmwelt verwendet den persistenten `nextReset`-Termin. Nach abgeschlossenem Sta
 - Vor `nextReset` startet kein automatischer Reset.
 - Bei `now >= nextReset` wird die normale Pipeline ohne Dragon-Override angestoßen.
 - Der Scheduler blockiert nicht auf Reset-Futures und besitzt keinen zweiten Lock.
-- Ein fehlgeschlagener Reset bleibt fällig; der bestehende State wird nicht verschoben und ein späterer regulärer Tick kann erneut versuchen.
+- Kehrt während der Journal-Sicherung ein Spieler zurück oder hat sich die Zielwelt geändert, bricht die letzte Prüfung vor Worlds ab. Nach erfolgreicher Rücknahme des vorbereiteten Versuchs gilt der bisherige Zeitplan. Scheitert die Rücknahme, zeigt der Status die Recovery-Sperre. Bei einem Neustart bleibt ein vorgefundenes `WORLDS_PENDING` gesperrt.
 - Ein neuer `lastReset`/`nextReset` wird nur nach Regeneration, Validierung, Post-Reset und erfolgreichem Speichern veröffentlicht.
 
 ### Startup-Catch-up
@@ -345,10 +346,22 @@ Bei einem noch nie erfolgreich zurückgesetzten Plan kann `last-reset` fehlen. I
 - Eine Intervalländerung berechnet den aktuellen Termin nicht neu.
 - Nach vollständigem Erfolg werden `last-reset` und der neue `next-reset` anhand des Config-Snapshots dieses Resets gemeinsam gespeichert.
 - Bei jedem Resetfehler bleibt der bestehende veröffentlichte State erhalten.
-- Bei `STATE_SAVE_FAILED` ist die Welt bereits regeneriert und initialisiert, aber es gibt kein `SUCCESS`; der bisherige In-Memory- und Datei-State bleibt veröffentlicht.
-- Fehlende States aktivierter, gültiger Pläne werden beim Laden mit `now + interval` initialisiert.
+- Bei `STATE_SAVE_FAILED` sind Regeneration und Initialisierung bestätigt. Der zuvor veröffentlichte Plan bleibt im Speicher. Beim Neustart prüft Farmwelt, ob der Dateiersatz bereits einen passenden vollständigen Abschlussbeleg hinterlassen hat.
+- Fehlende States aktivierter, gültiger Pläne werden nur bei freiem Recovery-Platz mit `now + interval` initialisiert.
 
 Die Datei niemals während eines laufenden Servers manuell bearbeiten. Für isolierte Tests nur bei vollständig gestopptem Server, nach Backup und ausschließlich am gezielt benötigten Weltabschnitt arbeiten. Die Datei nicht pauschal löschen: Dadurch gingen die persistenten Termine aller Farmwelten verloren und würden neu initialisiert.
+
+### Recovery nach einem unterbrochenen Reset
+
+**Ein ungeklärter Reset-Zustand ist ein Sicherheitszustand. Er bleibt über das nächste Zeitintervall, Reload und Serverneustart hinweg gesperrt.** Ein Force-Aufruf respektiert die Sperre ebenfalls. Andere Farmwelten mit eigenem, eindeutigem Zustand können ihren Plan weiter abarbeiten. Die GUI zeigt „Reset bis zur Klärung gesperrt“. Der Spielerteleport folgt weiterhin dem Laufzeit-Lock.
+
+1. Mit `/farmwelt status <welt>` logische ID, Bukkit-Name, UUID, Startzeit und letzte bestätigte Phase festhalten. Bei unlesbarem Journal kann nur der betroffene Platz und der Lesefehler angezeigt werden. Im Log die erste Fehlermeldung zu dieser Welt sichern.
+2. Den Reset-Plan der betroffenen Welt für die Wartung deaktivieren. Vor Dateiarbeiten den Server vollständig stoppen und Weltdaten, Worlds-Metadaten, Config, Log, `reset-state.yml`, `reset-recovery.version` und alle drei `reset-recovery-*.journal` gemeinsam sichern. Die Kontrollen an einer isolierten Kopie vornehmen.
+3. Bei `WORLDS_PENDING` kann Worlds bereits entladen, gelöscht oder neu erstellt haben. Bei `WORLDS_RETURNED` hat Worlds eine neue Instanz geliefert. Ihre Validierung oder Initialisierung ist offen. Weltdaten, Dimension, Seed, Spielerfortschritt und Worlds-Log vergleichen. In beiden Fällen bleibt der Reset gesperrt, solange ein vollständiger Stand fehlt. Ein konsistentes Backup lässt sich in einer isolierten Kopie überprüfen. Eine Rücksicherung kann neueren Spielerfortschritt verwerfen und erfordert eine ausdrückliche Betreiberentscheidung.
+4. Bei `POST_RESET_DONE` sind Validierung und Initialisierung bestätigt. Weltidentität, Zeitstempel, Log und Versuch zusammen prüfen. Falls ausschließlich der Zeitplan fehlt, Schreibursache beheben und bei gestopptem Server im Abschnitt `worlds.<key>` des Zeitplans **genau** `attempt-id` aus `id`, `last-reset` aus `completed` und `next-reset` aus `next` übernehmen. Alle drei Werte als Strings in Anführungszeichen eintragen. Das Journal aufbewahren. Bei abweichenden Belegen zuerst deren Herkunft klären.
+5. Mit deaktiviertem Plan starten und Status, Welt und Log prüfen. Einen bereits überfälligen bestätigten Folgetermin vor dem Wiedereinschalten ausdrücklich bewerten. Bei weiterhin unklarem Stand bleibt der Plan deaktiviert. Es gibt keine automatische Wiederholung der Worlds- oder Post-Reset-Arbeiten.
+
+**Backup und Versionswechsel.** Zum konsistenten Sicherungssatz gehören Welt und beide Persistenzarten. Beim ersten Start dieser Version legt Farmwelt den gemeinsamen Versionsmarker und drei freie Journale an. Vorhandene gültige Zeitpläne behalten ihre Termine. Nach dem ersten erfolgreichen Reset enthält der betreffende Zeitplan zusätzlich die Versuchs-ID. Ein Journal bleibt bis zum nächsten beabsichtigten Reset erhalten. Einzeln fehlende Journale, unbekannte Versionen und widersprüchliche Belege erfordern eine Überprüfung. Eine ältere Plugin-Version kennt die Sperre nicht. Vor einem Downgrade alle Resets deaktivieren, offene Versuche klären und eine konsistente Sicherung erstellen. Ein Downgrade ist kein Wiederherstellungsweg.
 
 ## Endfarm-Sonderlogik
 
@@ -407,8 +420,8 @@ Typische Ursachen:
 - Reset-ID fehlt im Status: Nur `overworld`, `nether` und `end` sind Reset-IDs; `world`, `interval` und `post-reset` müssen valide sein.
 - Teleport funktioniert nicht: Sender, Befehl, BetterRTP-Installation und Zielweltnamen prüfen.
 - Monitor ist trotz `enabled: true` aus: Modus und `claim-protection.fail-mode` sowie GriefPrevention-Hook prüfen.
-- Reset bleibt `Überfällig`: `ResetResult` und Serverlog prüfen. Fehler verschieben den Termin nicht und können beim nächsten Tick erneut ausgelöst werden.
-- `STATE_SAVE_FAILED`: Welt und Post-Reset-Zustand sind möglicherweise bereits erneuert. Schreibrechte und Log prüfen, bevor ein weiterer Reset zugelassen wird; `reset-state.yml` nicht blind ersetzen oder löschen.
+- Bei `Überfällig` das Reset-Ergebnis und das Log prüfen. Bei `Recovery-Sperre` sind auch spätere Ticks gesperrt.
+- `STATE_SAVE_FAILED` führt zur Prüfung des Abschlussbelegs nach dem oben beschriebenen Recovery-Ablauf.
 
 ## Tests und Freigabe
 

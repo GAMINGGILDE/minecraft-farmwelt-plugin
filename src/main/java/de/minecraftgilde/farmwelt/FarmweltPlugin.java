@@ -71,6 +71,7 @@ public final class FarmweltPlugin extends JavaPlugin {
 
         resetService = new FarmworldResetService(
                 new YamlResetStateRepository(getDataFolder().toPath().resolve("reset-state.yml"), getLogger()),
+                getDataFolder().toPath(),
                 Clock.systemUTC(),
                 getLogger()
         );

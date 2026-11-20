@@ -4,6 +4,7 @@ public enum ResetStatus {
     SUCCESS,
     NOT_CONFIGURED,
     DISABLED,
+    NOT_DUE,
     ALREADY_RUNNING,
     INVALID_CONFIGURATION,
     WORLD_NOT_FOUND,
@@ -14,5 +15,6 @@ public enum ResetStatus {
     REGENERATE_FAILED,
     POST_RESET_FAILED,
     STATE_SAVE_FAILED,
+    RECOVERY_BLOCKED,
     INTERNAL_ERROR
 }

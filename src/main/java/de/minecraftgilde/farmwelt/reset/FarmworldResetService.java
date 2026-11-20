@@ -1,6 +1,7 @@
 package de.minecraftgilde.farmwelt.reset;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -23,19 +25,29 @@ import java.util.logging.Logger;
 public final class FarmworldResetService {
 
     private final ResetStateRepository stateRepository;
+    private final ResetRecoveryJournal journal;
+    private final Object scheduleWriter = new Object();
+    private boolean journalLoaded;
     private final Clock clock;
     private final Logger logger;
 
     private Map<String, FarmworldResetConfig> configurations = Map.of();
-    private Map<String, FarmworldResetState> states = Map.of();
+    private volatile Map<String, FarmworldResetState> states = Map.of();
 
-    public FarmworldResetService(ResetStateRepository stateRepository, Clock clock, Logger logger) {
+    public FarmworldResetService(ResetStateRepository stateRepository, Path dataDirectory, Clock clock, Logger logger) {
         this.stateRepository = Objects.requireNonNull(stateRepository, "stateRepository");
+        this.journal = new ResetRecoveryJournal(dataDirectory);
         this.clock = Objects.requireNonNull(clock, "clock");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
-    public synchronized boolean reload(Collection<FarmworldResetConfig> resetConfigurations) {
+    public boolean reload(Collection<FarmworldResetConfig> resetConfigurations) {
+        synchronized (scheduleWriter) {
+            return loadSchedules(resetConfigurations);
+        }
+    }
+
+    private boolean loadSchedules(Collection<FarmworldResetConfig> resetConfigurations) {
         Objects.requireNonNull(resetConfigurations, "resetConfigurations");
 
         Map<String, FarmworldResetConfig> loadedConfigurations = indexConfigurations(resetConfigurations);
@@ -47,6 +59,17 @@ public final class FarmworldResetService {
             return false;
         }
 
+        boolean firstLoad = !journalLoaded;
+        if (firstLoad) {
+            journal.load(loadedStates);
+            journalLoaded = true;
+        }
+        for (FarmworldResetConfig config : loadedConfigurations.values()) {
+            if (firstLoad || recoveryProblem(config).isEmpty()) {
+                journal.problem(config, loadedStates).ifPresent(reason ->
+                        logger.severe("Reset-Sperre für '" + config.farmworldKey() + "'. " + reason));
+            }
+        }
         boolean stateChanged = initializeMissingStates(loadedConfigurations, loadedStates);
         if (stateChanged) {
             try {
@@ -57,8 +80,10 @@ public final class FarmworldResetService {
             }
         }
 
-        configurations = Collections.unmodifiableMap(loadedConfigurations);
-        states = Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates));
+        synchronized (this) {
+            configurations = Collections.unmodifiableMap(loadedConfigurations);
+            states = Collections.unmodifiableMap(new LinkedHashMap<>(loadedStates));
+        }
         return true;
     }
 
@@ -81,15 +106,17 @@ public final class FarmworldResetService {
      * Persists a successful reset using the currently loaded configuration and the injected clock.
      * The public in-memory state is replaced only after the repository save completed successfully.
      */
-    public synchronized FarmworldResetState completeReset(String farmworldKey) throws IOException {
-        FarmworldResetConfig configuration = configurations.get(farmworldKey);
-        if (configuration == null) {
-            throw new IllegalArgumentException("Farmwelt '" + farmworldKey + "' ist nicht konfiguriert.");
+    public FarmworldResetState completeReset(String farmworldKey) throws IOException {
+        synchronized (scheduleWriter) {
+            FarmworldResetConfig configuration = configurations.get(farmworldKey);
+            if (configuration == null) {
+                throw new IllegalArgumentException("Farmwelt '" + farmworldKey + "' ist nicht konfiguriert.");
+            }
+            return completeReset(configuration);
         }
-        return completeReset(configuration);
     }
 
-    public synchronized FarmworldResetState completeReset(
+    public FarmworldResetState completeReset(
             FarmworldResetConfig configurationSnapshot
     ) throws IOException {
         return completeReset(configurationSnapshot, clock.instant());
@@ -99,10 +126,21 @@ public final class FarmworldResetService {
      * Completes a reset with the immutable configuration snapshot captured by the reset engine.
      * This makes a concurrent reload unable to change the interval of an already running reset.
      */
-    public synchronized FarmworldResetState completeReset(
+    public FarmworldResetState completeReset(
             FarmworldResetConfig configurationSnapshot,
             Instant completedAt
     ) throws IOException {
+        synchronized (scheduleWriter) {
+            if (journal.current(configurationSnapshot.farmworldType()) != null
+                    || recoveryProblem(configurationSnapshot).isPresent()) {
+                throw new IOException("Zum Abschluss dieser Farmwelt ist der Beleg des laufenden Versuchs erforderlich.");
+            }
+            return saveCompletion(configurationSnapshot, completedAt, Optional.empty());
+        }
+    }
+
+    private FarmworldResetState saveCompletion(FarmworldResetConfig configurationSnapshot, Instant completedAt,
+                                               Optional<UUID> attemptId) throws IOException {
         Objects.requireNonNull(configurationSnapshot, "configurationSnapshot");
         Objects.requireNonNull(completedAt, "completedAt");
         if (!configurationSnapshot.enabled()) {
@@ -120,7 +158,7 @@ public final class FarmworldResetService {
         FarmworldResetState completedState = new FarmworldResetState(
                 configurationSnapshot.farmworldKey(),
                 Optional.of(completedAt),
-                nextReset
+                nextReset, attemptId
         );
         Map<String, FarmworldResetState> candidateStates = new LinkedHashMap<>(states);
         candidateStates.put(configurationSnapshot.farmworldKey(), completedState);
@@ -130,6 +168,64 @@ public final class FarmworldResetService {
         stateRepository.save(immutableCandidate);
         states = immutableCandidate;
         return completedState;
+    }
+
+    public Optional<String> recoveryProblem(FarmworldResetConfig config) {
+        return journal.problem(config, states);
+    }
+
+    ResetAttempt newAttempt(FarmworldResetConfig config) {
+        return new ResetAttempt(UUID.randomUUID(), config.farmworldKey(), config.worldName(),
+                clock.instant(), ResetAttempt.Phase.WORLDS_PENDING, null, null);
+    }
+
+    @FunctionalInterface
+    interface HandoffRollback {
+        void restorePrevious() throws IOException;
+    }
+
+    HandoffRollback prepare(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
+        synchronized (journal) {
+            Optional<String> problem = recoveryProblem(config);
+            if (problem.isPresent()) {
+                throw new IOException(problem.orElseThrow());
+            }
+            FarmworldType type = config.farmworldType();
+            ResetAttempt previous = journal.current(type);
+            journal.replace(type, previous, attempt);
+            return () -> {
+                synchronized (journal) {
+                    journal.replace(type, attempt, previous);
+                }
+            };
+        }
+    }
+
+    ResetAttempt worldsReturned(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
+        ResetAttempt update = attempt.worldsReturned();
+        synchronized (journal) {
+            journal.replace(config.farmworldType(), attempt, update);
+        }
+        return update;
+    }
+
+    ResetAttempt postResetDone(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
+        Instant completed = clock.instant();
+        ResetAttempt update = attempt.postResetDone(completed, completed.plus(config.interval()));
+        synchronized (journal) {
+            journal.replace(config.farmworldType(), attempt, update);
+        }
+        return update;
+    }
+
+    FarmworldResetState completeReset(FarmworldResetConfig config, ResetAttempt attempt) throws IOException {
+        synchronized (scheduleWriter) {
+            if (attempt.phase() != ResetAttempt.Phase.POST_RESET_DONE
+                    || !attempt.equals(journal.current(config.farmworldType()))) {
+                throw new IOException("Abschlussbeleg passt nicht zum offenen Versuch.");
+            }
+            return saveCompletion(config, attempt.completed(), Optional.of(attempt.id()));
+        }
     }
 
     private Map<String, FarmworldResetConfig> indexConfigurations(
@@ -154,7 +250,8 @@ public final class FarmworldResetService {
         Instant now = clock.instant();
 
         for (FarmworldResetConfig configuration : resetConfigurations.values()) {
-            if (!configuration.enabled() || loadedStates.containsKey(configuration.farmworldKey())) {
+            if (!configuration.enabled() || loadedStates.containsKey(configuration.farmworldKey())
+                    || journal.problem(configuration, loadedStates).isPresent()) {
                 continue;
             }
 

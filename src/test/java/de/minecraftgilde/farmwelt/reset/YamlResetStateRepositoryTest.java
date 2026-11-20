@@ -86,6 +86,7 @@ class YamlResetStateRepositoryTest {
         Instant now = Instant.parse("2026-08-17T06:00:00Z");
         FarmworldResetService service = new FarmworldResetService(
                 repository,
+                temporaryDirectory,
                 Clock.fixed(now, ZoneOffset.UTC),
                 logger()
         );
@@ -117,6 +118,7 @@ class YamlResetStateRepositoryTest {
         Instant now = Instant.parse("2026-08-17T06:00:00Z");
         FarmworldResetService service = new FarmworldResetService(
                 repository,
+                temporaryDirectory,
                 Clock.fixed(now, ZoneOffset.UTC),
                 logger()
         );

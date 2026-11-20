@@ -99,14 +99,11 @@ public final class AutomaticResetScheduler {
         Objects.requireNonNull(now, "now");
         Map<String, ResetDueState> dueStates = new LinkedHashMap<>();
         for (FarmworldResetConfig configuration : resetService.getConfiguredWorlds()) {
-            dueStates.put(
-                    configuration.farmworldKey(),
-                    dueStateEvaluator.evaluate(
-                            configuration,
-                            resetService.getState(configuration.farmworldKey()),
-                            now
-                    )
-            );
+            String key = configuration.farmworldKey();
+            ResetDueState due = resetService.recoveryProblem(configuration).isPresent()
+                    ? ResetDueState.RECOVERY_BLOCKED
+                    : dueStateEvaluator.evaluate(configuration, resetService.getState(key), now);
+            dueStates.put(key, due);
         }
         return Collections.unmodifiableMap(dueStates);
     }
@@ -185,7 +182,7 @@ public final class AutomaticResetScheduler {
     CompletableFuture<ResetResult> startReset(String farmworldKey) {
         try {
             CompletableFuture<ResetResult> resetFuture = Objects.requireNonNull(
-                    resetExecutor.reset(farmworldKey),
+                    resetExecutor.resetIfDue(farmworldKey, clock.instant()),
                     "resetExecutor.reset(...)"
             );
             return resetFuture.whenComplete((result, failure) -> handleResult(
@@ -225,7 +222,7 @@ public final class AutomaticResetScheduler {
                     + "' erfolgreich abgeschlossen.");
             return;
         }
-        if (result.status() == ResetStatus.ALREADY_RUNNING) {
+        if (result.status() == ResetStatus.ALREADY_RUNNING || result.status() == ResetStatus.NOT_DUE) {
             return;
         }
 

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,8 +23,12 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ResetNotificationServiceTest {
+
+    @TempDir
+    Path dataDirectory;
 
     private static final Instant NOW = Instant.parse("2026-08-19T08:00:00Z");
     private static final Instant NEXT_RESET = Instant.parse("2026-09-01T12:00:00Z");
@@ -40,6 +45,7 @@ class ResetNotificationServiceTest {
         ));
         FarmworldResetService resetService = new FarmworldResetService(
                 repository,
+                dataDirectory,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 quietLogger()
         );
@@ -329,6 +335,7 @@ class ResetNotificationServiceTest {
             if (status == ResetStatus.SUCCESS) {
                 assertEquals(List.of("success Test-Farmwelt 01.09.2026 12:00"), messages);
             } else if (status == ResetStatus.NOT_CONFIGURED
+                    || status == ResetStatus.NOT_DUE
                     || status == ResetStatus.DISABLED
                     || status == ResetStatus.ALREADY_RUNNING) {
                 assertEquals(List.of(), messages);
@@ -564,6 +571,7 @@ class ResetNotificationServiceTest {
     private FarmworldResetService resetService(FixedResetStateRepository repository) {
         return new FarmworldResetService(
                 repository,
+                dataDirectory,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 quietLogger()
         );

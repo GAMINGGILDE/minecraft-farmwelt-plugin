@@ -7,6 +7,7 @@ import io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,8 +27,12 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class StartupResetCoordinatorTest {
+
+    @TempDir
+    Path dataDirectory;
 
     private static final Instant NOW = Instant.parse("2026-08-18T12:00:00Z");
 
@@ -400,6 +405,7 @@ class StartupResetCoordinatorTest {
     ) {
         FarmworldResetService resetService = new FarmworldResetService(
                 new FixedResetStateRepository(states),
+                dataDirectory,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 quietLogger()
         );
