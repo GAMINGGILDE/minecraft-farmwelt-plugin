@@ -100,30 +100,23 @@ public final class WorldsFarmworldLifecycleService
             }
         }
 
-        final CompletableFuture<World> regeneration;
         try {
-            regeneration = Objects.requireNonNull(
+            logger.info("Regeneration von '" + world.getName() + "' über Worlds mit zufälligem Seed gestartet.");
+            var regeneration = Objects.requireNonNull(
                     worldsAccess.regenerate(world, builder -> builder.seed(null)),
                     "WorldsAccess.regenerate(...) hat null geliefert."
             );
+            if (pendingReset == null) {
+                return regeneration;
+            }
+            PendingDataReset expectedReset = pendingReset;
+            return Objects.requireNonNull(regeneration.handle((regeneratedWorld, failure) ->
+                    finishDataReset(world, expectedReset, regeneratedWorld, failure)), "Worlds-Beobachter fehlt.");
         } catch (RuntimeException | LinkageError exception) {
             removePendingReset(world, pendingReset);
-            if (pendingReset != null) {
-                rollbackDataReset(world, pendingReset, exception);
-            }
-            return CompletableFuture.failedFuture(exception);
+            // Ohne verlässliche Rückkehr könnten Worlds-Dateioperationen noch laufen.
+            throw exception;
         }
-
-        if (pendingReset == null) {
-            return regeneration;
-        }
-        PendingDataReset expectedReset = pendingReset;
-        return regeneration.handle((regeneratedWorld, failure) -> finishDataReset(
-                world,
-                expectedReset,
-                regeneratedWorld,
-                failure
-        ));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -204,7 +197,9 @@ public final class WorldsFarmworldLifecycleService
         }
 
         if (failure != null) {
-            rollbackDataReset(originalWorld, pendingReset, failure);
+            if (!FarmworldLifecycleService.observationLost(failure)) {
+                rollbackDataReset(originalWorld, pendingReset, failure);
+            }
             throw asCompletionException(failure);
         }
 

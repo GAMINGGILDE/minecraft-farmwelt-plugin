@@ -96,6 +96,8 @@ farmworlds:
 
 Bei verzögerten Resets zeigt `/farmwelt status <welt>` Ziel, Versuch und letzte Pipeline-Phase. Nach zehn Minuten prüft die Startup-Nachholung weitere Welten. Eine weiterhin offene Worlds-Übergabe kann weitere Regenerationen zurückstellen.
 
+Bei „Worlds-Abschluss ungeklärt“ sperrt Farmwelt sofort weitere Regenerationen bis zur Klärung bei gestopptem Server. Ein bestätigter Worlds-Fehler sperrt über das Recovery-Journal nur das betroffene Ziel.
+
 Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle verfügbaren Konfigurationsbereiche und konservative Defaults. Eine kommentierte Schlüsselreferenz, Notifications, `reset-state.yml`, Scheduler, Reload, Ressourcenmonitor und Endfarm-Betrieb sind im [Admin Guide](docs/ADMIN_GUIDE.md) dokumentiert.
 
 ## Dokumentation

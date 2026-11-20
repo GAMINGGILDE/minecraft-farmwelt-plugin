@@ -81,6 +81,17 @@ Ein sehr alter Termin löst nur einen Catch-up-Versuch aus, nicht einen Reset pr
 
 FW-007 prüft verlorene Callbacks, Retirement, Rejections, offene externe Futures und Shutdown an Journalgrenzen mit steuerbaren JUnit-Doubles. Der Workflow-Test verwendet echte Journal- und Zeitplandateien. Im isolierten Smoke-Test bleiben genau ein erfolgreicher Worlds-Handoff, Instanz-, Seed-, Marker-, Post-Reset- und Belegprüfung je Lauf verbindlich. Ein absichtlich unterbrochener Worlds-Schreibvorgang liefert keinen zuverlässigen Nachweis für die Callback-Rennen. Spieler-Disconnects im Mehrspielerbetrieb und die Endfarm bleiben Gegenstand der manuellen Abnahme.
 
+Die FW-007-Regressionen in `ResetWorkflowIntegrationTest` zählen direkt am `WorldsAccess.regenerate`-Einstieg des Test-Doubles hinter dem produktiven Adapter. Die beiden realen Black-Box-Jobs prüfen die erfolgreiche Regeneration anhand von Start- und Rückkehrmeldung, Weltmarker und persistentem Beleg.
+
+| Fehlerpfad im Workflow-Test | Gezählte API-Aufrufe | Nachweis |
+| --- | ---: | --- |
+| Zweiter Thread stoppt die Engine vor der Übergabe | 0 | Journal bleibt beim Stop auf `WORLDS_PENDING`, Zeitplan unverändert. |
+| Zweiter Thread stoppt die Engine nach der verbindlichen Übernahme, noch vor dem Worlds-Aufruf im Adapter | 1 | Stop kehrt bei angehaltener Übergabe zurück. Das Original-Future bleibt offen. Späterer Erfolg löst keinen Post-Reset aus. |
+| Worlds meldet das Veto des Regenerate-Events im Original-Future | 2 insgesamt | Ein Aufruf für die gesperrte Overworld, ein erfolgreicher für den Nether. |
+| Original-Future gecancelt, eingepackte Cancellation, synchroner Wurf, fehlendes Future, abgelehnter Beobachteranschluss oder gemeldeter Timeout | 1 je Fall | Die vorbereitete Nether-Pipeline nimmt ihr eigenes Journal zurück. Force, Catch-up, Reload und periodischer Tick erzeugen keinen weiteren Aufruf. |
+
+Der Adaptertest prüft auf der intern freigegebenen Endfarm-Version außerdem die vorbereitete DragonBattle-Datei und die Sicherung nach Cancellation, synchronem Wurf und fehlendem Future. Der reguläre Fehlerpfad stellt die gesicherte Datei wieder her.
+
 ## Test D – Mehrere fällige Welten
 
 Overworld, Nether und End auf dem Testserver gleichzeitig auf `DUE` vorbereiten. Nach der Startup-Verzögerung muss die vollständige Pipeline in Konfigurationsreihenfolge laufen:

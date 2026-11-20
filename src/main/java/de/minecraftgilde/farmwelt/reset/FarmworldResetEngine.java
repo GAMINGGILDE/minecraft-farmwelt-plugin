@@ -210,7 +210,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         final boolean startup;
         volatile String phase = "Weltprüfung (Global)";
         volatile ResetAttempt attempt;
-        volatile boolean awaitingWorlds;
+        volatile WorldsHandoff worlds = WorldsHandoff.NOT_STARTED;
         volatile boolean teleportUnconfirmed;
         boolean warned;
 
@@ -218,6 +218,14 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
             this.startup = startup;
             this.worldName = worldName;
             this.started = started;
+        }
+    }
+
+    private enum WorldsHandoff {
+        NOT_STARTED, ACCEPTED, RETURNED, UNCONFIRMED;
+
+        boolean lacksCompletion() {
+            return this == ACCEPTED || this == UNCONFIRMED;
         }
     }
 
@@ -230,7 +238,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     private Optional<String> conflictingHandoff(boolean startup) {
         long now = nanoTime.getAsLong();
         return runningResets.values().stream()
-                .filter(r -> r.awaitingWorlds && (startup || r.startup || now - r.started >= OBSERVATION_INTERVAL.toNanos()))
+                .filter(r -> r.worlds == WorldsHandoff.UNCONFIRMED || (r.worlds == WorldsHandoff.ACCEPTED
+                        && (startup || r.startup || now - r.started >= OBSERVATION_INTERVAL.toNanos())))
                 .map(r -> "Worlds-Ergebnis für " + r.worldName + " offen. Weitere Übergaben zurückgestellt.")
                 .findFirst();
     }
@@ -258,7 +267,7 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                 long elapsed = now - r.started;
                 if (elapsed < OBSERVATION_INTERVAL.toNanos() || r.warned) continue;
                 r.warned = true;
-                logger.warning("Reset " + entry.getKey().key() + ": " + diagnosis(r) + (r.awaitingWorlds
+                logger.warning("Reset " + entry.getKey().key() + ": " + diagnosis(r) + (r.worlds.lacksCompletion()
                         ? " Weitere Worlds-Übergaben warten auf das Ergebnis." : ""));
             }
         }
@@ -270,7 +279,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
 
     private void release(FarmworldType type, Reservation owner) {
         synchronized (resetService) {
-            if (runningResets.get(type) == owner && !owner.teleportUnconfirmed) {
+            if (runningResets.get(type) == owner && !owner.teleportUnconfirmed
+                    && !owner.worlds.lacksCompletion()) {
                 runningResets.remove(type);
             }
         }
@@ -325,7 +335,6 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     reservation.phase = "Journal und letzte Leerprüfung (Async/Global)";
                     return prepareHandoff(context, attempt, reservation);
                 })
-                .thenCompose(context -> regenerateWorld(context, reservation))
                 .thenCompose(context -> checkpoint(() -> resetService.worldsReturned(resetConfig, attempt))
                         .thenCompose(confirmed -> initializeAndRecord(context, confirmed)))
                 .thenCompose(completed -> {
@@ -464,26 +473,19 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         });
     }
 
-    private CompletableFuture<PipelineContext> prepareHandoff(PipelineContext context, ResetAttempt attempt, Reservation reservation) {
+    private CompletableFuture<RegeneratedContext> prepareHandoff(PipelineContext context, ResetAttempt attempt, Reservation reservation) {
         FarmworldResetConfig config = context.resetConfig();
         return checkpoint(() -> resetService.prepare(config, attempt)).thenCompose(rollback ->
-                // Nur dieser Fehlerzweig liegt beweisbar vor dem Aufruf von regenerateWorld.
-                recheckHandoff(context).thenApply(checked -> {
-                    // Dieser kurze Übergang vergibt den Handoff genau einmal. Kein Monitor über Worlds oder I/O.
-                    synchronized (resetService) {
-                        requireActive();
-                        conflictingHandoff(reservation.startup).ifPresent(reason -> {
-                            throw new ResetPipelineException(ResetStatus.WORLDS_HANDOFF_DEFERRED, reason, null);
-                        });
-                        reservation.phase = "Worlds.regenerate";
-                        reservation.awaitingWorlds = true;
-                    }
-                    return checked;
-                }).exceptionallyCompose(failure ->
-                        checkpoint(() -> {
-                            rollback.restorePrevious();
-                            return context;
-                        }).thenCompose(ignored -> CompletableFuture.failedFuture(failure))));
+                recheckHandoff(context).thenCompose(checked -> regenerateWorld(checked, reservation))
+                        .exceptionallyCompose(failure -> {
+                            if (reservation.worlds != WorldsHandoff.NOT_STARTED) {
+                                return CompletableFuture.failedFuture(failure);
+                            }
+                            return checkpoint(() -> {
+                                rollback.restorePrevious();
+                                return context;
+                            }).thenCompose(ignored -> CompletableFuture.failedFuture(failure));
+                        }));
     }
 
     private CompletableFuture<PipelineContext> recheckHandoff(PipelineContext context) {
@@ -505,24 +507,26 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<RegeneratedContext> regenerateWorld(PipelineContext context, Reservation reservation) {
-        logger.info("Regeneration von '" + context.resetConfig().worldName()
-                + "' über Worlds mit zufälligem Seed gestartet.");
-
-        return mapOperationFailure(
-                // Worlds owns Folia/global scheduling for its complete lifecycle operation.
-                () -> lifecycleService.regenerate(
-                        context.originalWorld(),
-                        FarmworldRegenerationOptions.forReset(
-                                context.resetConfig(),
-                                context.options()
-                        )
-                ),
-                ResetStatus.REGENERATE_FAILED,
-                "Worlds konnte die Farmwelt nicht regenerieren."
-        ).whenComplete((world, error) -> {
-            reservation.awaitingWorlds = false;
-            reservation.phase = "Worlds-Rückkehr, Validierung und Post-Reset";
-        }).thenCompose(regeneratedWorld -> {
+        var options = FarmworldRegenerationOptions.forReset(context.resetConfig(), context.options());
+        synchronized (resetService) {
+            requireActive();
+            conflictingHandoff(reservation.startup).ifPresent(reason -> {
+                throw new ResetPipelineException(ResetStatus.WORLDS_HANDOFF_DEFERRED, reason, null);
+            });
+            // Wer vor stop() gewinnt, besitzt genau diesen Aufruf unwiderruflich.
+            reservation.phase = "Worlds.regenerate";
+            reservation.worlds = WorldsHandoff.ACCEPTED;
+        }
+        final CompletableFuture<World> observed;
+        try {
+            var worlds = Objects.requireNonNull(lifecycleService.regenerate(context.originalWorld(), options),
+                    "Worlds hat kein Future geliefert.");
+            observed = Objects.requireNonNull(worlds.handle((world, failure) ->
+                    observeWorldsResult(reservation, world, failure)), "Worlds-Beobachter fehlt.");
+        } catch (RuntimeException | LinkageError failure) {
+            return CompletableFuture.failedFuture(unconfirmedWorlds(reservation, failure));
+        }
+        return observed.thenCompose(regeneratedWorld -> {
             requireActive();
             if (regeneratedWorld == null) {
                 return failed(
@@ -548,6 +552,32 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     regeneratedWorld
             ));
         });
+    }
+
+    private World observeWorldsResult(Reservation reservation, World world, Throwable failure) {
+        if (FarmworldLifecycleService.observationLost(failure)) {
+            throw unconfirmedWorlds(reservation, unwrap(failure));
+        }
+        synchronized (resetService) {
+            if (reservation.worlds == WorldsHandoff.ACCEPTED) {
+                reservation.phase = "Worlds-Rückkehr, Validierung und Post-Reset";
+                reservation.worlds = WorldsHandoff.RETURNED;
+            }
+        }
+        if (failure != null) {
+            throw new ResetPipelineException(ResetStatus.REGENERATE_FAILED,
+                    "Worlds konnte die Farmwelt nicht regenerieren.", unwrap(failure));
+        }
+        return world;
+    }
+
+    private ResetPipelineException unconfirmedWorlds(Reservation reservation, Throwable cause) {
+        String message = "Worlds-Abschluss ungeklärt. Weitere Übergaben bis zum Serverneustart gesperrt.";
+        synchronized (resetService) {
+            reservation.phase = message;
+            reservation.worlds = WorldsHandoff.UNCONFIRMED;
+        }
+        return new ResetPipelineException(ResetStatus.REGENERATE_FAILED, message, cause);
     }
 
     private CompletableFuture<RegeneratedContext> applyPostReset(RegeneratedContext context) {
