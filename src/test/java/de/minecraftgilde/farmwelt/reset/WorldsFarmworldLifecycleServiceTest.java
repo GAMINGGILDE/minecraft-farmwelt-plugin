@@ -16,10 +16,12 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
@@ -27,6 +29,7 @@ import java.util.zip.GZIPInputStream;
 import net.kyori.adventure.key.Key;
 import net.thenextlvl.worlds.Level;
 import net.thenextlvl.worlds.WorldsAccess;
+import net.thenextlvl.worlds.WorldOperationException;
 import net.thenextlvl.worlds.event.WorldRegenerateEvent;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Server;
@@ -108,7 +111,7 @@ class WorldsFarmworldLifecycleServiceTest {
             throws Exception {
         Path fightData = createFightData(tempDir, "old fight");
         World original = world("endfarm", tempDir);
-        World regenerated = world("endfarm", tempDir.resolve("regenerated"));
+        World regenerated = world("endfarm", tempDir);
         AtomicReference<WorldsFarmworldLifecycleService> serviceReference = new AtomicReference<>();
         WorldsAccess worldsAccess = worldsAccess((world, customization) -> {
             publishRegenerationEvents(serviceReference.get(), world);
@@ -118,22 +121,19 @@ class WorldsFarmworldLifecycleServiceTest {
         WorldsFarmworldLifecycleService service = service(worldsAccess);
         serviceReference.set(service);
 
-        World result = service.regenerate(
-                original,
-                new FarmworldRegenerationOptions(SUPPRESSED)
-        ).join();
+        var cleanup = new AtomicReference<FarmworldLifecycleService.BackupCleanup>();
+        World result = service.regenerate(original, new FarmworldRegenerationOptions(SUPPRESSED),
+                UUID.randomUUID(), cleanup::set).join();
+        assertEquals(1, backups(fightData).size());
+        cleanup.get().run(result.getWorldFolder().toPath());
 
         assertSame(regenerated, result);
         assertPreparedFightData(fightData, SUPPRESSED);
-        try (Stream<Path> files = Files.list(fightData.getParent())) {
-            assertTrue(files.noneMatch(path ->
-                    path.getFileName().toString().contains(".farmwelt-reset-")
-            ));
-        }
+        assertTrue(backups(fightData).isEmpty());
     }
 
     @Test
-    void restoresDragonFightDataWhenWorldsRegenerationFails(@TempDir Path tempDir)
+    void terminalFailureWithoutUnloadVetoPreservesEvidence(@TempDir Path tempDir)
             throws Exception {
         Path fightData = createFightData(tempDir, "old fight");
         World original = world("endfarm", tempDir);
@@ -151,12 +151,12 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(SUPPRESSED)
+                        new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}
                 ).join()
         );
 
         assertSame(failure, exception.getCause());
-        assertEquals("old fight", Files.readString(fightData));
+        assertPreparedFightData(fightData, SUPPRESSED);
     }
 
     @Test
@@ -165,7 +165,7 @@ class WorldsFarmworldLifecycleServiceTest {
         Path data = createFightData(tempDir, "alter Kampf");
         World world = world("endfarm", tempDir);
         var service = service(worldsAccess((original, customize) -> external));
-        var result = service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED));
+        var result = service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {});
         publishRegenerationEvents(service, world);
         external.cancel(false);
         assertThrows(CompletionException.class, result::join);
@@ -186,16 +186,74 @@ class WorldsFarmworldLifecycleServiceTest {
         }));
         owner.set(service);
         Class<? extends RuntimeException> expected = throwsDuringCall ? IllegalStateException.class : NullPointerException.class;
-        assertThrows(expected, () -> service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED)));
+        assertThrows(expected, () -> service.regenerate(world, new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}));
         assertStagedWithBackup(data);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"timeout", "observer", "changedInstance", "secondUnload", "stopDuringStage", "wrongKey"})
+    void ambiguousOrStoppedLifecyclePreservesBothFiles(String scenario, @TempDir Path folder) throws Exception {
+        Path active = createFightData(folder, "alter Kampf");
+        World old = world("endfarm", folder);
+        var owner = new AtomicReference<WorldsFarmworldLifecycleService>();
+        var files = new DragonDataFiles() {
+            @Override void flush(java.nio.channels.FileChannel file) throws java.io.IOException {
+                if (scenario.equals("stopDuringStage")) owner.get().stop();
+                super.flush(file);
+            }
+        };
+        CompletableFuture<World> external = scenario.equals("observer") ? new CompletableFuture<>() {
+            @Override public <U> CompletableFuture<U> handle(BiFunction<? super World, Throwable, ? extends U> observer) {
+                super.handle(observer);
+                throw new IllegalStateException("Beobachteranschluss unterbrochen");
+            }
+        } : new CompletableFuture<>();
+        var unload = new WorldUnloadEvent(old);
+        var service = new WorldsFarmworldLifecycleService(server(), worldsAccess((original, customize) -> {
+            owner.get().resetEndDragonFightData(new WorldRegenerateEvent(original));
+            owner.get().prepareEndDragonFightData(unload);
+            return external;
+        }), new EndDragonFightDataStore(4790, files), new EndDragonFightCompatibility(() -> "26.1.2"),
+                new ResetWorkflowIntegrationTest.DirectScheduler(), quietLogger());
+        owner.set(service);
+        var options = new FarmworldRegenerationOptions(SUPPRESSED);
+        if (scenario.equals("observer")) {
+            assertThrows(IllegalStateException.class, () -> service.regenerate(old, options, UUID.randomUUID(), cleanup -> {}));
+            unload.setCancelled(true);
+            external.completeExceptionally(new WorldOperationException(WorldOperationException.Reason.UNLOAD_FAILED));
+        } else {
+            var result = service.regenerate(old, options, UUID.randomUUID(), cleanup -> {});
+            assertFalse(result.isDone());
+            assertStagedWithBackup(active);
+            if (scenario.equals("changedInstance")) {
+                loaded.remove("endfarm");
+                World replacement = world("endfarm", folder);
+                service.prepareEndDragonFightData(new WorldUnloadEvent(replacement));
+            }
+            if (scenario.equals("secondUnload")) {
+                var duplicate = new WorldUnloadEvent(old);
+                service.prepareEndDragonFightData(duplicate);
+                assertTrue(duplicate.isCancelled());
+            }
+            unload.setCancelled(true);
+            external.completeExceptionally(scenario.equals("timeout") ? new java.util.concurrent.TimeoutException()
+                    : new WorldOperationException(WorldOperationException.Reason.UNLOAD_FAILED)
+                            .key(scenario.equals("wrongKey") ? "worlds:andere" : old.getKey().asString()));
+            assertThrows(CompletionException.class, result::join);
+        }
+        assertStagedWithBackup(active);
     }
 
     private static void assertStagedWithBackup(Path data) throws Exception {
         assertPreparedFightData(data, SUPPRESSED);
-        try (var files = Files.list(data.getParent())) {
-            var backups = files.filter(path -> path.getFileName().toString().contains(".farmwelt-reset-")).toList();
-            assertEquals(1, backups.size());
-            assertEquals("alter Kampf", Files.readString(backups.getFirst()));
+        var backups = backups(data);
+        assertEquals(1, backups.size());
+        assertEquals("alter Kampf", Files.readString(backups.getFirst()));
+    }
+
+    private static List<Path> backups(Path data) throws java.io.IOException {
+        try (var paths = Files.walk(data.getParent())) {
+            return paths.filter(path -> path.toString().endsWith(".bak")).toList();
         }
     }
 
@@ -217,7 +275,7 @@ class WorldsFarmworldLifecycleServiceTest {
 
         World result = service.regenerate(
                 original,
-                new FarmworldRegenerationOptions(INITIAL_FIGHT)
+                new FarmworldRegenerationOptions(INITIAL_FIGHT), UUID.randomUUID(), cleanup -> {}
         ).join();
 
         assertSame(regenerated, result);
@@ -254,6 +312,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 worldsAccess,
                 new EndDragonFightDataStore(4790),
                 new EndDragonFightCompatibility(() -> "26.2"),
+                new ResetWorkflowIntegrationTest.DirectScheduler(),
                 quietLogger()
         );
 
@@ -261,7 +320,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         world("endfarm", tempDir),
-                        new FarmworldRegenerationOptions(SUPPRESSED)
+                        new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}
                 ).join()
         );
 
@@ -285,7 +344,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(SUPPRESSED)
+                        new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}
                 ).join()
         );
 
@@ -317,7 +376,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 CompletionException.class,
                 () -> service.regenerate(
                         original,
-                        new FarmworldRegenerationOptions(SUPPRESSED)
+                        new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}
                 ).join()
         );
 
@@ -341,7 +400,7 @@ class WorldsFarmworldLifecycleServiceTest {
         })));
 
         assertThrows(CompletionException.class, () -> service.get()
-                .regenerate(original, new FarmworldRegenerationOptions(SUPPRESSED)).join());
+                .regenerate(original, new FarmworldRegenerationOptions(SUPPRESSED), UUID.randomUUID(), cleanup -> {}).join());
         assertEquals("alter Kampf", Files.readString(data));
     }
 
@@ -456,6 +515,7 @@ class WorldsFarmworldLifecycleServiceTest {
                 worldsAccess,
                 new EndDragonFightDataStore(4790),
                 new EndDragonFightCompatibility(() -> "26.1.2"),
+                new ResetWorkflowIntegrationTest.DirectScheduler(),
                 quietLogger()
         );
     }

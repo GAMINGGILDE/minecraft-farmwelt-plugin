@@ -90,7 +90,11 @@ Die FW-007-Regressionen in `ResetWorkflowIntegrationTest` zählen direkt am `Wor
 | Worlds meldet das Veto des Regenerate-Events im Original-Future | 2 insgesamt | Ein Aufruf für die gesperrte Overworld, ein erfolgreicher für den Nether. |
 | Original-Future gecancelt, eingepackte Cancellation, synchroner Wurf, fehlendes Future, abgelehnter Beobachteranschluss oder gemeldeter Timeout | 1 je Fall | Die vorbereitete Nether-Pipeline nimmt ihr eigenes Journal zurück. Force, Catch-up, Reload und periodischer Tick erzeugen keinen weiteren Aufruf. |
 
-Der Adaptertest prüft auf der intern freigegebenen Endfarm-Version außerdem die vorbereitete DragonBattle-Datei und die Sicherung nach Cancellation, synchronem Wurf und fehlendem Future. Der reguläre Fehlerpfad stellt die gesicherte Datei wieder her.
+FW-009 prüft die DragonBattle-Dateien in isolierten JUnit-Verzeichnissen mit der intern freigegebenen Version 26.1.2. Die Workflow-Regression entfernt nach dem Staging die zum Journal gehörende Sicherung und meldet ein terminales Unload-Veto. Die vorbereitete Datei bleibt lesbar, `WORLDS_PENDING` sperrt auch nach Neustart und der Worlds-Aufrufzähler bleibt bei eins. Mit intaktem Dateipaar stellt derselbe bestätigte Veto-Pfad das Original wieder her. Allgemeine terminale Fehler, Cancellation, Timeout, synchrone Fehler, fehlendes Future, gescheiterter Beobachteranschluss und Instanzwechsel bewahren den Dateibestand. Weitere Fälle injizieren Schreib-, Flush-, Move-, Hash- und Cleanup-Fehler und simulieren Crash-Reste. Eine echte Stromunterbrechung wird dabei nicht simuliert.
+
+Die realen CI-Jobs für Overworld und Nether auf Folia 26.3 Build 26 und Worlds 4.5.1 verwenden weiterhin das unveränderte Isolations- und Log-Gate. Die positive reale Endfarm-Abnahme bleibt Phase 2.4 vorbehalten. Sie benötigt eine eigene Versionsprüfung sowie Portal-, Respawn- und Mehrspielertests.
+
+Auf der Basis `9fcfc41` schlugen vier neue Erwartungen fehl. Eine fehlende Sicherung kostete die aktive Datei, ein verändertes Backup wurde installiert, eine ältere Sicherung verhinderte kein weiteres Staging und ein generischer Worlds-Fehler löste einen Restore aus. Ein isolierter Aufruf des ursprünglichen Stage-Fehlerpfads mit inzwischen fremd belegtem Ziel ersetzte außerdem dessen Inhalt und verbrauchte Backup und Tempdatei. Der Fall `foreignTarget` prüft diese Situation heute über den normalen Stage-Einstieg.
 
 ## Test D – Mehrere fällige Welten
 

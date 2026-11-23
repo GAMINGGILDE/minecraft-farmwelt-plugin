@@ -1,16 +1,12 @@
 package de.minecraftgilde.farmwelt.reset;
 
+import static de.minecraftgilde.farmwelt.reset.DragonDataFiles.*;
+
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,150 +33,106 @@ final class EndDragonFightDataStore {
     private static final byte TAG_BYTE = 1;
     private static final byte TAG_INT = 3;
     private static final byte TAG_COMPOUND = 10;
+    // Zwischen Weltprüfung und Namenswechsel darf kein anderer Welthandoff liegen.
+    // Größere Rücknahmen bleiben zur Offline-Prüfung, damit dieser Abschnitt kurz bleibt.
+    private static final int MAX_VETO_RESTORE_BYTES = 4096;
     private static final Path FIGHT_DATA_RELATIVE_PATH =
             Path.of("data", "minecraft", "ender_dragon_fight.dat");
 
     private final int dataVersion;
+    private final DragonDataFiles files;
 
     EndDragonFightDataStore(int dataVersion) {
-        if (dataVersion < 0) {
-            throw new IllegalArgumentException("dataVersion darf nicht negativ sein.");
-        }
-        this.dataVersion = dataVersion;
+        this(dataVersion, new DragonDataFiles());
     }
 
-    StagedData stage(
-            Path worldFolder,
-            FarmworldRegenerationOptions.EndDragonFightDataMode mode
-    ) throws IOException {
-        Objects.requireNonNull(worldFolder, "worldFolder");
-        Objects.requireNonNull(mode, "mode");
+    EndDragonFightDataStore(int dataVersion, DragonDataFiles files) {
+        if (dataVersion < 0) throw new IllegalArgumentException("dataVersion darf nicht negativ sein.");
+        this.dataVersion = dataVersion;
+        this.files = Objects.requireNonNull(files);
+    }
+
+    StagedData stage(Path world, FarmworldRegenerationOptions.EndDragonFightDataMode mode, UUID id) throws IOException {
         if (mode == FarmworldRegenerationOptions.EndDragonFightDataMode.PRESERVE) {
             throw new IllegalArgumentException("PRESERVE darf keine Fight-Daten ersetzen.");
         }
-        Path normalizedWorldFolder = worldFolder.toAbsolutePath().normalize();
-        Path fightData = normalizedWorldFolder.resolve(FIGHT_DATA_RELATIVE_PATH).normalize();
-        if (!fightData.startsWith(normalizedWorldFolder)) {
-            throw new IOException("DragonBattle-Datei liegt außerhalb des Weltordners.");
+        for (Path part : world) {
+            if (part.toString().equals("..")) throw new IOException("Mehrdeutiger Weltordner: " + world);
         }
-
-        validateWorldFolder(normalizedWorldFolder);
-        prepareFightDataParent(normalizedWorldFolder, fightData.getParent());
-        validateExistingFightData(fightData);
-        Optional<Path> backup = backupExistingFightData(fightData);
-        Path temporary = fightData.resolveSibling(
-                fightData.getFileName() + ".farmwelt-new-" + UUID.randomUUID() + ".tmp"
-        );
-
+        Path folder = world.toAbsolutePath().normalize();
+        directory(folder);
+        Path active = folder.resolve(FIGHT_DATA_RELATIVE_PATH);
+        for (Path part : folder.relativize(active.getParent())) {
+            Path parent = folder;
+            folder = parent.resolve(part);
+            if (!present(folder)) {
+                Files.createDirectory(folder);
+                DurableResetFiles.syncDirectory(parent);
+            }
+            directory(folder);
+        }
+        try (var entries = Files.newDirectoryStream(folder, active.getFileName() + ".farmwelt-*")) {
+            var iterator = entries.iterator();
+            if (iterator.hasNext()) {
+                throw new IOException("Offene DragonBattle-Dateien; administrative Prüfung erforderlich: " + iterator.next());
+            }
+        }
+        Objects.requireNonNull(id);
+        Fingerprint original = present(active) ? files.fingerprint(active) : null;
+        if (original != null && active.getFileSystem().supportedFileAttributeViews().contains("unix")
+                && ((Number) Files.getAttribute(active, "unix:nlink", java.nio.file.LinkOption.NOFOLLOW_LINKS)).intValue() != 1) {
+            throw new IOException("DragonBattle-Original besitzt weitere Hardlinks: " + active);
+        }
+        var data = new StagedData(active, id, original);
+        if (active.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            var permissions = java.nio.file.attribute.PosixFilePermissions.fromString("rwx------");
+            Files.createDirectory(data.work, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(permissions));
+        } else {
+            Files.createDirectory(data.work);
+        }
         try {
-            writePreparedFightData(temporary, mode);
-            move(temporary, fightData);
-            return new StagedData(fightData, backup, sha256(fightData));
-        } catch (IOException | RuntimeException exception) {
-            rollbackFailedStage(fightData, backup, temporary, exception);
-            throw exception;
-        }
-    }
-
-    void commit(StagedData stagedData) throws IOException {
-        Objects.requireNonNull(stagedData, "stagedData");
-        if (stagedData.backup().isPresent()) {
-            Files.deleteIfExists(stagedData.backup().orElseThrow());
-        }
-    }
-
-    void rollback(StagedData stagedData) throws IOException {
-        Objects.requireNonNull(stagedData, "stagedData");
-        Path fightData = stagedData.fightData();
-        if (Files.exists(fightData, LinkOption.NOFOLLOW_LINKS)) {
-            if (!Files.isRegularFile(fightData, LinkOption.NOFOLLOW_LINKS)
-                    || !sha256(fightData).equals(stagedData.preparedSha256())) {
-                throw new IOException(
-                        "Vorbereitete DragonBattle-Datei wurde zwischenzeitlich verändert: "
-                                + fightData
-                );
+            data.directoryId = Identity.of(attributes(data.work));
+            DurableResetFiles.syncDirectory(folder);
+            byte[] bytes = preparedBytes(Objects.requireNonNull(mode));
+            files.createPrepared(data.temp, bytes);
+            data.prepared = files.fingerprint(data.temp);
+            if (!data.prepared.sha256().equals(HexFormat.of().formatHex(digest().digest(bytes)))) {
+                throw new IOException("Vorbereitete Daten weichen vom erzeugten NBT ab: " + data.temp);
             }
-            Files.delete(fightData);
-        }
-
-        if (stagedData.backup().isPresent()) {
-            Path backup = stagedData.backup().orElseThrow();
-            if (!Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IOException("Sicherung der DragonBattle-Datei fehlt: " + backup);
+            if (data.hadFightData()) {
+                files.link(data.backup, active);
+                data.verifyPair(data.backup, active, original);
+                DurableResetFiles.syncDirectory(data.work);
+                files.moveAside(active, data.saved);
+                data.verifyPair(data.backup, data.saved, original);
             }
-            if (Files.isSymbolicLink(backup)
-                    || !Files.isRegularFile(backup, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IOException(
-                        "Sicherung der DragonBattle-Datei ist keine regul\u00e4re Datei: " + backup
-                );
+            DurableResetFiles.syncDirectory(data.work);
+            files.link(active, data.temp);
+            data.verifyPair(active, data.temp, data.prepared);
+            DurableResetFiles.syncDirectory(folder);
+            return data;
+        } catch (IOException | RuntimeException failure) {
+            // Ein fehlgeschlagener Systemaufruf beweist weder Erfolg noch Wirkungslosigkeit.
+            try {
+                data.checkDirectory();
+                if (data.hadFightData() && !present(active) && present(data.saved)) {
+                    data.verifyPair(data.backup, data.saved, original);
+                    files.link(active, data.saved);
+                    DurableResetFiles.syncDirectory(folder);
+                }
+            } catch (IOException | RuntimeException recovery) {
+                failure.addSuppressed(recovery);
             }
-            move(backup, fightData);
+            failure.addSuppressed(new IOException(data.diagnosis()));
+            throw failure;
         }
     }
 
-    private void validateWorldFolder(Path worldFolder) throws IOException {
-        if (Files.isSymbolicLink(worldFolder)
-                || !Files.isDirectory(worldFolder, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException(
-                    "Weltordner muss ein regul\u00e4res Verzeichnis ohne symbolischen Link sein: "
-                            + worldFolder
-            );
-        }
-    }
-
-    private void prepareFightDataParent(Path worldFolder, Path fightDataParent)
-            throws IOException {
-        Path current = worldFolder;
-        for (Path segment : worldFolder.relativize(fightDataParent)) {
-            current = current.resolve(segment);
-            if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
-                Files.createDirectory(current);
-                continue;
-            }
-            if (Files.isSymbolicLink(current)
-                    || !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IOException(
-                        "DragonBattle-Verzeichnispfad darf keine symbolischen Links oder "
-                                + "Nicht-Verzeichnisse enthalten: " + current
-                );
-            }
-        }
-    }
-
-    private void validateExistingFightData(Path fightData) throws IOException {
-        if (!Files.exists(fightData, LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
-        if (Files.isSymbolicLink(fightData)) {
-            throw new IOException("DragonBattle-Datei darf kein symbolischer Link sein: " + fightData);
-        }
-        if (!Files.isRegularFile(fightData, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("DragonBattle-Pfad ist keine reguläre Datei: " + fightData);
-        }
-    }
-
-    private Optional<Path> backupExistingFightData(Path fightData) throws IOException {
-        if (!Files.exists(fightData, LinkOption.NOFOLLOW_LINKS)) {
-            return Optional.empty();
-        }
-        Path backup = fightData.resolveSibling(
-                fightData.getFileName() + ".farmwelt-reset-" + UUID.randomUUID() + ".bak"
-        );
-        move(fightData, backup);
-        return Optional.of(backup);
-    }
-
-    private void writePreparedFightData(
-            Path target,
-            FarmworldRegenerationOptions.EndDragonFightDataMode mode
-    ) throws IOException {
+    private byte[] preparedBytes(FarmworldRegenerationOptions.EndDragonFightDataMode mode) throws IOException {
         boolean initialFight = mode
                 == FarmworldRegenerationOptions.EndDragonFightDataMode.INITIAL_FIGHT;
-        try (OutputStream output = Files.newOutputStream(
-                target,
-                StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.WRITE
-        ); GZIPOutputStream gzip = new GZIPOutputStream(output);
+        var output = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(output);
                 DataOutputStream data = new DataOutputStream(gzip)) {
             data.writeByte(TAG_COMPOUND);
             data.writeUTF("");
@@ -198,6 +150,7 @@ final class EndDragonFightDataStore {
 
             data.writeByte(TAG_END);
         }
+        return output.toByteArray();
     }
 
     private void writeBoolean(DataOutputStream data, String name, boolean value)
@@ -207,64 +160,168 @@ final class EndDragonFightDataStore {
         data.writeByte(value ? 1 : 0);
     }
 
-    private void rollbackFailedStage(
-            Path fightData,
-            Optional<Path> backup,
-            Path temporary,
-            Throwable failure
-    ) {
-        try {
-            Files.deleteIfExists(temporary);
-            Files.deleteIfExists(fightData);
-            if (backup.isPresent()) {
-                move(backup.orElseThrow(), fightData);
+    void prepareRollback(StagedData data) throws IOException {
+        synchronized (data) {
+            data.claimRollback();
+            data.checkDirectory();
+            if (data.hadFightData() && data.original.stamp().size() > MAX_VETO_RESTORE_BYTES) {
+                throw new IOException("Original für die synchrone Abschlussprüfung zu groß: " + data.backup);
             }
-        } catch (IOException rollbackFailure) {
-            failure.addSuppressed(rollbackFailure);
+            if (data.hadFightData()) data.verifyOriginal();
+            data.verifyPair(data.active, data.temp, data.prepared);
+            data.finished = Finish.VERIFIED;
         }
     }
 
-    private String sha256(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var input = Files.newInputStream(file)) {
-                byte[] buffer = new byte[4096];
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    digest.update(buffer, 0, read);
+    // Identitätsprüfung und Namenswechsel gehören in dieselbe Global-Aufgabe wie die Weltprüfung.
+    void restoreVerified(StagedData data) throws IOException {
+        synchronized (data) {
+            if (data.finished != Finish.VERIFIED) throw new IOException("Rollback ohne gültige Dateiprüfung.");
+            data.finished = Finish.CLAIMED;
+            if (data.hadFightData()) data.verifyOriginal();
+            data.checkPair(data.active, data.temp, data.prepared);
+            // Der verschobene Eintrag bleibt bis zum erfolgreichen Restore als Beweis erhalten.
+            try {
+                files.moveAside(data.active, data.withdrawn);
+                data.verifyPair(data.withdrawn, data.temp, data.prepared);
+                if (data.hadFightData()) {
+                    data.verifyOriginal();
+                    files.link(data.active, data.backup);
+                    data.checkPair(data.active, data.saved, data.original);
                 }
+            } catch (IOException | RuntimeException failure) {
+                try {
+                    data.checkDirectory();
+                    if (!present(data.active) && present(data.withdrawn)) {
+                        // Auch ein während des Rename ausgetauschter Eintrag bleibt erhalten.
+                        if (attributes(data.withdrawn).isRegularFile()) files.link(data.active, data.withdrawn);
+                    }
+                } catch (IOException | RuntimeException recovery) {
+                    failure.addSuppressed(recovery);
+                }
+                throw failure;
             }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException(
-                    "SHA-256 ist in dieser Java-Laufzeit nicht verfügbar.",
-                    exception
-            );
+            data.finished = Finish.RESTORED;
         }
     }
 
-    private void move(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target);
+    void finishRollback(StagedData data) throws IOException {
+        synchronized (data) {
+            if (data.finished == Finish.ROLLBACK) return;
+            if (data.finished != Finish.RESTORED) throw new IOException("Dateiwiederherstellung ungeklärt.");
+            DurableResetFiles.syncDirectory(data.active.getParent());
+            data.finish(Finish.ROLLBACK);
         }
     }
 
-    record StagedData(
-            Path fightData,
-            Optional<Path> backup,
-            String preparedSha256
-    ) {
+    void commit(StagedData data, Path confirmedWorldFolder) throws IOException {
+        synchronized (data) {
+            if (data.finished == Finish.COMMIT) return;
+            if (data.finished != Finish.OPEN) throw new IOException("Dateiversuch bereits beansprucht: " + data.work);
+            data.finished = Finish.CLAIMED;
+            if (!data.active.equals(confirmedWorldFolder.toAbsolutePath().normalize().resolve(FIGHT_DATA_RELATIVE_PATH))) {
+                throw new IOException("Bestätigte neue Welt liegt in einem anderen Ordner. " + data.diagnosis());
+            }
+            data.verifyPair(data.active, data.temp, data.prepared);
+            data.finish(Finish.COMMIT);
+        }
+    }
 
-        StagedData {
-            Objects.requireNonNull(fightData, "fightData");
-            Objects.requireNonNull(backup, "backup");
-            Objects.requireNonNull(preparedSha256, "preparedSha256");
+    private enum Finish { OPEN, CLAIMED, VERIFIED, RESTORED, ROLLBACK, COMMIT }
+
+    final class StagedData {
+        private final Path active, work, backup, saved, temp, withdrawn;
+        private final Fingerprint original;
+        private Fingerprint prepared;
+        private Identity directoryId;
+        private Finish finished = Finish.OPEN;
+
+        private StagedData(Path active, UUID id, Fingerprint original) {
+            this.active = active;
+            this.original = original;
+            work = active.resolveSibling(active.getFileName() + ".farmwelt-stage");
+            backup = work.resolve(id + ".bak");
+            saved = work.resolve(id + ".original");
+            temp = work.resolve(id + ".tmp");
+            withdrawn = work.resolve(id + ".withdrawn");
         }
 
-        boolean hadFightData() {
-            return backup.isPresent();
+        boolean hadFightData() { return original != null; }
+        Optional<Path> backup() { return hadFightData() ? Optional.of(backup) : Optional.empty(); }
+
+        private void claimRollback() throws IOException {
+            if (finished != Finish.OPEN) throw new IOException("Dateiversuch bereits beansprucht: " + work);
+            finished = Finish.CLAIMED;
+        }
+
+        private void checkDirectory() throws IOException {
+            directory(work);
+            if (!Identity.of(attributes(work)).equals(directoryId)) throw new IOException("Arbeitsordner ersetzt: " + work);
+        }
+
+        private void verify(Path path, Fingerprint expected) throws IOException {
+            checkDirectory();
+            if (!present(path)) throw new IOException("DragonBattle-Datei fehlt: " + path);
+            if (!files.fingerprint(path, expected.stamp().size()).equals(expected)) {
+                throw new IOException("DragonBattle-Datei verändert: " + path);
+            }
+        }
+
+        private void verifyPair(Path candidate, Path witness, Fingerprint expected) throws IOException {
+            verify(candidate, expected);
+            checkPair(candidate, witness, expected);
+        }
+
+        private void checkPair(Path candidate, Path witness, Fingerprint expected) throws IOException {
+            checkDirectory();
+            var current = attributes(candidate);
+            if (!current.isRegularFile() || !Stamp.of(current).equals(expected.stamp())) {
+                throw new IOException("DragonBattle-Datei verändert: " + candidate);
+            }
+            if (!attributes(witness).isRegularFile() || !Files.isSameFile(candidate, witness)) {
+                throw new IOException("DragonBattle-Datei gehört nicht zum Versuch: " + candidate + " / " + witness);
+            }
+        }
+
+        private void verifyOriginal() throws IOException {
+            verifyPair(backup, saved, original);
+        }
+
+        private void finish(Finish operation) throws IOException {
+            finished = Finish.CLAIMED;
+            try {
+                checkDirectory();
+                if (hadFightData()) verifyOriginal();
+                verify(temp, prepared);
+                if (operation == Finish.ROLLBACK) {
+                    verifyPair(withdrawn, temp, prepared);
+                    files.delete(withdrawn);
+                }
+                files.delete(temp);
+                if (hadFightData()) {
+                    verifyOriginal();
+                    files.delete(saved);
+                    verify(backup, original);
+                    files.delete(backup);
+                }
+                files.delete(work);
+                DurableResetFiles.syncDirectory(active.getParent());
+                finished = operation;
+            } catch (IOException | RuntimeException failure) {
+                throw new IOException("Datei-" + operation + " bestätigt, Cleanup unvollständig. " + diagnosis(), failure);
+            }
+        }
+
+        String diagnosis() {
+            return "Aktiv=" + describe(active) + ", Original bei Beginn=" + hadFightData()
+                    + ", Sicherung=" + describe(backup) + ", Originalreferenz=" + describe(saved)
+                    + ", vorbereitet=" + describe(temp) + ", zurückgestellt=" + describe(withdrawn)
+                    + ". Keine automatische Wiederholung. Server stoppen und Sicherungssatz prüfen.";
+        }
+
+        private String describe(Path path) {
+            return path + (Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? " (vorhanden)"
+                    : Files.notExists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? " (fehlt)" : " (unbekannt)");
         }
     }
 }

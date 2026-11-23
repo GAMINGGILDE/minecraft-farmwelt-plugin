@@ -210,6 +210,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         final boolean startup;
         volatile String phase = "Weltprüfung (Global)";
         volatile ResetAttempt attempt;
+        volatile FarmworldLifecycleService.BackupCleanup backupCleanup;
+        volatile java.nio.file.Path validatedFolder;
         volatile WorldsHandoff worlds = WorldsHandoff.NOT_STARTED;
         volatile boolean teleportUnconfirmed;
         boolean warned;
@@ -336,10 +338,10 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                     return prepareHandoff(context, attempt, reservation);
                 })
                 .thenCompose(context -> checkpoint(() -> resetService.worldsReturned(resetConfig, attempt))
-                        .thenCompose(confirmed -> initializeAndRecord(context, confirmed)))
+                        .thenCompose(confirmed -> initializeAndRecord(context, confirmed, reservation)))
                 .thenCompose(completed -> {
                     reservation.phase = "Zeitplan speichern (Async)";
-                    return persistState(resetConfig, completed);
+                    return persistState(resetConfig, completed, reservation);
                 })
                 .thenApply(state -> new ResetResult(
                         resetConfig.farmworldKey(),
@@ -519,7 +521,8 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         }
         final CompletableFuture<World> observed;
         try {
-            var worlds = Objects.requireNonNull(lifecycleService.regenerate(context.originalWorld(), options),
+            var worlds = Objects.requireNonNull(lifecycleService.regenerate(context.originalWorld(), options,
+                            reservation.attempt.id(), cleanup -> reservation.backupCleanup = cleanup),
                     "Worlds hat kein Future geliefert.");
             observed = Objects.requireNonNull(worlds.handle((world, failure) ->
                     observeWorldsResult(reservation, world, failure)), "Worlds-Beobachter fehlt.");
@@ -609,13 +612,13 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
     }
 
     private CompletableFuture<RegeneratedContext> validateRegeneratedWorld(
-            RegeneratedContext context
+            RegeneratedContext context, Reservation reservation
     ) {
-        return mapOperationFailure(() -> scheduler.runGlobal(() -> inspectRegenerated(context)),
+        return mapOperationFailure(() -> scheduler.runGlobal(() -> inspectRegenerated(context, reservation)),
                 ResetStatus.REGENERATE_FAILED, "Die von Worlds regenerierte Bukkit-Welt konnte nicht geprüft werden.");
     }
 
-    private RegeneratedContext inspectRegenerated(RegeneratedContext context) {
+    private RegeneratedContext inspectRegenerated(RegeneratedContext context, Reservation reservation) {
         WorldInspection inspection = worldOperations.inspect(context.resetConfig());
         if (inspection == null) {
             throw new ResetPipelineException(
@@ -669,12 +672,14 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
         if (context.oldSeed() == newSeed) {
             logger.warning("Der zufällig erzeugte Seed entspricht dem vorherigen Seed.");
         }
-        logger.info("Neuer Weltordner: " + bukkitWorld.getWorldFolder().getAbsolutePath());
+        reservation.validatedFolder = bukkitWorld.getWorldFolder().toPath().toAbsolutePath().normalize();
+        logger.info("Neuer Weltordner: " + reservation.validatedFolder);
         return context;
     }
 
-    private CompletableFuture<ResetAttempt> initializeAndRecord(RegeneratedContext context, ResetAttempt confirmed) {
-        return validateRegeneratedWorld(context)
+    private CompletableFuture<ResetAttempt> initializeAndRecord(RegeneratedContext context, ResetAttempt confirmed,
+                                                                Reservation reservation) {
+        return validateRegeneratedWorld(context, reservation)
                 .thenCompose(this::applyPostReset)
                 .thenCompose(initialized -> checkpoint(() -> resetService.postResetDone(initialized.resetConfig(), confirmed)));
     }
@@ -687,11 +692,21 @@ public final class FarmworldResetEngine implements FarmworldResetExecutor {
                         : CompletableFuture.completedFuture(value));
     }
 
-    private CompletableFuture<FarmworldResetState> persistState(FarmworldResetConfig config, ResetAttempt attempt) {
+    private CompletableFuture<FarmworldResetState> persistState(FarmworldResetConfig config, ResetAttempt attempt,
+                                                                Reservation reservation) {
         return mapOperationFailure(
-                () -> scheduler.runAsync(
-                        () -> resetService.completeReset(config, attempt)
-                ),
+                () -> scheduler.runAsync(() -> {
+                    var state = resetService.completeReset(config, attempt);
+                    if (state != null && attempt.confirmedBy(state) && reservation.backupCleanup != null) {
+                        try {
+                            reservation.backupCleanup.run(reservation.validatedFolder);
+                        } catch (java.io.IOException | RuntimeException failure) {
+                            logger.log(Level.WARNING, "Reset bestätigt, DragonBattle-Cleanup offen. "
+                                    + attempt.diagnosis(), failure);
+                        }
+                    }
+                    return state;
+                }),
                 ResetStatus.STATE_SAVE_FAILED,
                 "Der Weltreset war erfolgreich, aber der Reset-State konnte nicht gespeichert werden."
         ).thenCompose(state -> {

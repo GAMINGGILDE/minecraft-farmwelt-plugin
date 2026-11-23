@@ -90,6 +90,8 @@ Die Endfarm enthält bewusst spezielle und versionssensitive Logik. Insbesondere
 
 Phase 2.2 lässt interne DragonBattle-Zugriffe ausschließlich auf 26.1.2 zu. Auf 26.3 müssen explizite Dragon-Policies und `--dragon` vor Evakuierung, Journal und Worlds scheitern. Für destruktive Tests gelten die Isolationsbedingungen aus `docs/testing/phase-2.2.md` (FW-004).
 
+FW-009 bindet die Dateivorbereitung an die FW-002-Versuchs-UUID. Vor einem Namenswechsel müssen Sicherung, Originalreferenz und vorbereitete Datei eindeutig sein. Der bestätigte Unload-Abbruch und dieselbe registrierte Altinstanz sind Voraussetzungen für den Lifecycle-Rollback. Das Backup-Cleanup gehört hinter den passenden Zeitplanbeleg. Bei Restdateien, verlorenem Future oder unklarer Generation alle Belege für die Offline-Prüfung erhalten. Start und Reload dürfen keine DragonBattle-Dateien reparieren.
+
 Für `dragon: false` gilt auf der intern freigegebenen Version:
 
 - Direkt nach dem Reset existiert kein Enderdrache und keine Bossbar.

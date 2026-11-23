@@ -98,6 +98,8 @@ Bei verzögerten Resets zeigt `/farmwelt status <welt>` Ziel, Versuch und letzte
 
 Bei „Worlds-Abschluss ungeklärt“ sperrt Farmwelt sofort weitere Regenerationen bis zur Klärung bei gestopptem Server. Ein bestätigter Worlds-Fehler sperrt über das Recovery-Journal nur das betroffene Ziel.
 
+Hinterlassene DragonBattle-Dateien einer Endfarm bleiben nach einem Abbruch erhalten. Vor einer manuellen Wiederherstellung müssen Versuch, Weltgeneration und Dateibestand zusammenpassen. [Wiederherstellung im Admin Guide](docs/ADMIN_GUIDE.md#dragonbattle-dateien-nach-einem-abbruch)
+
 Die ausgelieferte [`config.yml`](src/main/resources/config.yml) enthält alle verfügbaren Konfigurationsbereiche und konservative Defaults. Eine kommentierte Schlüsselreferenz, Notifications, `reset-state.yml`, Scheduler, Reload, Ressourcenmonitor und Endfarm-Betrieb sind im [Admin Guide](docs/ADMIN_GUIDE.md) dokumentiert.
 
 ## Dokumentation

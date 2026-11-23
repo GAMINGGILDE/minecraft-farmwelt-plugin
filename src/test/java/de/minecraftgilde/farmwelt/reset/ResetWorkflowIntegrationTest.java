@@ -43,6 +43,9 @@ import net.thenextlvl.worlds.WorldOperationException;
 import net.thenextlvl.worlds.WorldsAccess;
 import org.bukkit.Server;
 import org.bukkit.World;
+import org.bukkit.NamespacedKey;
+import org.bukkit.event.world.WorldUnloadEvent;
+import net.thenextlvl.worlds.event.WorldRegenerateEvent;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
@@ -1333,6 +1336,82 @@ class ResetWorkflowIntegrationTest {
         return disk;
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"missingBackup", "validVeto", "timeout", "success", "stateSaveFailure", "postResetFailure"})
+    void dragonFilesFollowTheJournalAttemptThroughCompletion(String scenario) throws Exception {
+        var configs = List.of(endConfig(THIRTY_DAYS));
+        diskWithDueStates("end");
+        var calls = new AtomicInteger();
+        var h = diskHarness(configs, calls);
+        var folder = Files.createDirectory(dataDirectory.resolve("farm"));
+        Path active = folder.resolve("data/minecraft/ender_dragon_fight.dat");
+        Files.createDirectories(active.getParent());
+        Files.writeString(active, "Original");
+        World old = world("test_end", FarmworldType.END, folder.toString(), 1L);
+        h.runtime.activeWorlds.put("end", old);
+        h.runtime.farmworldKeys.put(old, "end");
+        var returned = new CompletableFuture<World>();
+        h.runtime.nextWorldsCall = () -> returned;
+        var operation = h.engine.reset("END");
+        h.adapter.resetEndDragonFightData(new WorldRegenerateEvent(old));
+        var unload = new WorldUnloadEvent(old);
+        h.adapter.prepareEndDragonFightData(unload);
+        assertFalse(unload.isCancelled());
+        byte[] prepared = Files.readAllBytes(active);
+        Path journal = dataDirectory.resolve("reset-recovery-end.journal");
+        String id = Files.readAllLines(journal).stream().filter(line -> line.startsWith("id="))
+                .findFirst().orElseThrow().substring(3);
+        Path backup = active.resolveSibling(active.getFileName() + ".farmwelt-stage").resolve(id + ".bak");
+        assertEquals("Original", Files.readString(backup));
+        var veto = new WorldOperationException(WorldOperationException.Reason.UNLOAD_FAILED).key(old.getKey());
+        switch (scenario) {
+            case "missingBackup", "validVeto" -> {
+                if (scenario.equals("missingBackup")) Files.delete(backup);
+                unload.setCancelled(true);
+                returned.completeExceptionally(veto);
+            }
+            case "timeout" -> returned.completeExceptionally(new TimeoutException());
+            default -> {
+                if (scenario.equals("stateSaveFailure")) Files.createDirectory(dataDirectory.resolve("reset-state.yml.tmp"));
+                if (scenario.equals("postResetFailure")) {
+                    h.runtime.postResetResult = CompletableFuture.completedFuture(PostResetResult.failure("Fehler", null));
+                }
+                World next = world("test_end", FarmworldType.END, folder.toString(), 2L);
+                h.runtime.activeWorlds.put("end", next);
+                returned.complete(next);
+            }
+        }
+        if (scenario.equals("success")) {
+            assertEquals(ResetStatus.SUCCESS, operation.join().status());
+            assertEquals(id, h.resetService.getState("end").orElseThrow().attemptId().orElseThrow().toString());
+            assertFalse(Files.exists(backup.getParent()));
+            return;
+        }
+        assertFalse(operation.join().successful());
+        if (scenario.equals("validVeto")) {
+            assertEquals("Original", Files.readString(active));
+            assertFalse(Files.exists(backup.getParent()));
+        } else {
+            org.junit.jupiter.api.Assertions.assertArrayEquals(prepared, Files.readAllBytes(active));
+            if (scenario.equals("missingBackup")) {
+                assertTrue(veto.getSuppressed()[0].getMessage().contains("fehlt"));
+                assertFalse(Files.exists(backup));
+            } else {
+                assertEquals("Original", Files.readString(backup));
+            }
+        }
+        assertTrue(Files.readString(journal).contains(switch (scenario) {
+            case "stateSaveFailure" -> "POST_RESET_DONE";
+            case "postResetFailure" -> "WORLDS_RETURNED";
+            default -> "WORLDS_PENDING";
+        }));
+        var restart = diskHarness(configs, calls);
+        assertEquals(ResetStatus.RECOVERY_BLOCKED, restart.engine.reset("end").join().status());
+        restart.automaticScheduler.start();
+        restart.globalScheduler.tick();
+        assertEquals(1, calls.get());
+    }
+
     private WorkflowHarness diskHarness(List<FarmworldResetConfig> configs, AtomicInteger calls) {
         return new WorkflowHarness(configs, new YamlResetStateRepository(dataDirectory.resolve("reset-state.yml"),
                 quietLogger()), new MutableClock(NOW, ZoneOffset.UTC), calls);
@@ -1439,7 +1518,7 @@ class ResetWorkflowIntegrationTest {
             case NETHER -> World.Environment.NETHER;
             case END -> World.Environment.THE_END;
         };
-        File worldFolder = Path.of("server", "world", "workflow-tests", directory)
+        File worldFolder = Path.of("server", "world", "workflow-tests").resolve(directory)
                 .toAbsolutePath()
                 .toFile();
         return (World) Proxy.newProxyInstance(
@@ -1448,6 +1527,7 @@ class ResetWorkflowIntegrationTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getName" -> name;
                     case "getEnvironment" -> environment;
+                    case "getKey" -> new NamespacedKey("worlds", name);
                     case "getWorldFolder" -> worldFolder;
                     case "getSeed" -> seed;
                     case "toString" -> "FakeWorld[" + name + ", " + directory + "]";
@@ -1494,6 +1574,7 @@ class ResetWorkflowIntegrationTest {
         private final DirectScheduler scheduler = new DirectScheduler();
         private final FakeMinecraftRuntime runtime;
         private final FarmworldResetEngine engine;
+        private final WorldsFarmworldLifecycleService adapter;
         private final RecordingGlobalRegionScheduler globalScheduler;
         private final AutomaticResetScheduler automaticScheduler;
         private final StartupResetCoordinator startupCoordinator;
@@ -1532,10 +1613,11 @@ class ResetWorkflowIntegrationTest {
                     ZoneOffset.UTC,
                     logger
             );
+            this.adapter = worldsCalls == null ? null : countingWorldsAdapter(runtime, worldsCalls, scheduler, logger);
             this.engine = new FarmworldResetEngine(
                     resetService,
                     runtime,
-                    worldsCalls == null ? runtime : countingWorldsAdapter(runtime, worldsCalls, logger),
+                    adapter == null ? runtime : adapter,
                     runtime,
                     scheduler,
                     notificationService,
@@ -1563,7 +1645,7 @@ class ResetWorkflowIntegrationTest {
     }
 
     private static WorldsFarmworldLifecycleService countingWorldsAdapter(FakeMinecraftRuntime runtime, AtomicInteger calls,
-                                                                        Logger logger) {
+                                                                        FarmweltScheduler scheduler, Logger logger) {
         WorldsAccess access = (WorldsAccess) Proxy.newProxyInstance(WorldsAccess.class.getClassLoader(),
                 new Class<?>[]{WorldsAccess.class}, (proxy, method, args) -> {
                     if (!method.getName().equals("regenerate")) {
@@ -1573,9 +1655,14 @@ class ResetWorkflowIntegrationTest {
                     return runtime.regenerate((World) args[0], FarmworldRegenerationOptions.defaults());
                 });
         Server server = (Server) Proxy.newProxyInstance(Server.class.getClassLoader(), new Class<?>[]{Server.class},
-                (proxy, method, args) -> { throw new AssertionError(method.getName()); });
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getWorlds" -> List.of(world("world", FarmworldType.OVERWORLD, "main", 0L), runtime.activeWorlds.get("end"));
+                    case "getWorld" -> runtime.activeWorlds.values().stream()
+                            .filter(world -> world.getName().equals(args[0])).findFirst().orElse(null);
+                    default -> throw new AssertionError(method.getName());
+                });
         return new WorldsFarmworldLifecycleService(server, access, new EndDragonFightDataStore(4790),
-                new EndDragonFightCompatibility(() -> "26.1.2"), logger);
+                new EndDragonFightCompatibility(() -> "26.1.2"), scheduler, logger);
     }
 
     private record RegenerationCall(
@@ -1734,7 +1821,7 @@ class ResetWorkflowIntegrationTest {
     private record PlayerMessage(Player player, String message) {
     }
 
-    private static final class DirectScheduler implements FarmweltScheduler {
+    static final class DirectScheduler implements FarmweltScheduler {
         private Runnable afterAsyncWork = () -> {};
 
         @Override
