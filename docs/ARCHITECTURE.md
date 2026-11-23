@@ -261,6 +261,35 @@ Für `dragon: true` oder den einmaligen Command-Override `--dragon` wird ein fri
 
 Diese Logik darf bei Minecraft-/Folia-Upgrades nicht als gewöhnliches Entity-Cleanup behandelt werden. Datenlayout, reflektierte Felder und Methoden, Saved-Data-Staging, Portal, Kristall-Respawn, Bossbar und Drachenei benötigen eine bewusste Kompatibilitätsprüfung.
 
+### Datei- und Lifecycle-Zustände (FW-009)
+
+Die folgende Matrix unterscheidet den Inhalt am aktiven Pfad von den Originalbytes im Versuch. Ein erfolgreiches Unload-Event belegt nur die Auslieferung an den Listener. Weitere Listener können den Unload abbrechen. Worlds kann Fehler nach der Entladung intern protokollieren.
+
+| Übergang | Original am Ziel | Sicherung | Temporär | Vorbereitet am Ziel | Bukkit-Instanz / Worlds | Journal | Zeitplanbeleg dieses Versuchs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Vor Staging | falls vorhanden | – | – | – | alt, Übergabe begonnen | WORLDS_PENDING | – |
+| Vorbereitung | falls vorhanden | ggf. angelegt | neue NBT | – | alt, im Unload-Event | WORLDS_PENDING | – |
+| Original aus Ziel genommen | – | einzige Quelle der Originalbytes, ggf. mehrere Namen desselben Inodes | neue NBT | – | alt, vor Rückkehr des Events | WORLDS_PENDING | – |
+| Staging veröffentlicht | – | falls Original vorhanden | Referenz auf vorbereitete Datei | ja | Unload offen, Veto noch möglich | WORLDS_PENDING | – |
+| Fehler oder Beobachtung verloren | unbekannt | falls erhalten | falls erhalten | unbekannt | alt, ersetzt oder ungeklärt | WORLDS_PENDING | – |
+| Neue Instanz gemeldet | – | falls erhalten | falls erhalten | ggf. von Minecraft geändert | neue Instanz, Validierung offen | WORLDS_RETURNED | – |
+| Initialisiert | – | falls erhalten | falls erhalten | Daten der neuen Generation | neue Instanz validiert | POST_RESET_DONE | fehlt oder widersprüchlich |
+| Zeitplan gespeichert | – | Cleanup zulässig | Cleanup zulässig | Daten der neuen Generation | neue Instanz bestätigt | POST_RESET_DONE | passende UUID und Termine |
+
+Im Ausgangscode entfernte der Rollback die aktive Datei vor der Sicherungsprüfung. Der Fehlerpfad beim Staging löschte sogar beide Zielnamen ohne Eigentumsnachweis. Ein unterbrochener Move, ein belegter Zielname oder eine fehlende Sicherung konnten damit die letzte nutzbare Datei kosten. Auch das Cleanup nach bloßer Worlds-Rückkehr konnte die Sicherung vor der Prüfung der neuen Instanz verbrauchen.
+
+Der Versuch erhält einen exklusiven Arbeitsordner neben der aktiven Datei. Die Namen darin tragen die FW-002-UUID. Eine temporäre Datei wird vor dem Eingriff vollständig geschrieben und synchronisiert. Beim Austausch wird der bisherige Eintrag atomar auf einen freien Platz im Arbeitsordner verschoben und dort erneut geprüft. Ein Hardlink veröffentlicht die eigene Datei ausschließlich an einem freien Ziel. Die Rücknahme setzt eine belegte Herkunft, unveränderte Inhalte und einen bestätigten Abbruch vor der Entladung voraus. Unklare Rückgaben und fremde Einträge bleiben zur Untersuchung erhalten. Beim Neustart gibt es keinen dateinamengesteuerten Restore. Journal und Zeitplan behalten ihr Schema.
+
+Der exklusive Ordner `ender_dragon_fight.dat.farmwelt-stage` sperrt weitere Stagings auch bei ursprünglich fehlender Datei. Nach einem Stage-Fehler bleiben Teildateien zur Diagnose erhalten. Nur im noch laufenden Unload-Handler darf eine verifizierte Originalreferenz einen inzwischen freien Zielnamen wiederherstellen. Bereits belegte Namen bleiben erhalten. Zusätzliche Rücknahmefehler hängen an der ursprünglichen Exception.
+
+**Folia-Kontexte.** Worlds 4.5.1 wertet das Unload-Event vor dem Entfernen der Welt aus. Das Legacy-Staging muss vor der Rückkehr aus diesem Event fertig sein. Es schreibt eine kleine komprimierte NBT und begrenzt das Lesen bestehender Daten auf 1 MiB. Ein späteres Veto wird erst nach terminalem `UNLOAD_FAILED` ausgewertet. Die Hash-Vorprüfung läuft async. In der Global-Aufgabe werden dieselbe registrierte Altinstanz, das endgültige Veto, weitere Unloads, Dateipaare und die tatsächlich verschobenen Einträge geprüft. Nur dort darf der aktive Name zurückkehren. Für die letzte Inhaltsprüfung im globalen Kontext gilt ein Original-Limit von 4 KiB. Größere Originale bleiben mit Sicherung zur Offline-Prüfung erhalten. Verzeichnis-Flush und Cleanup nach der Rücknahme laufen async. Beim Stop verfallen wartende Scheduler-Aufgaben gemäß FW-007. [Folia-Unload in Worlds 4.5.1](https://github.com/TheNextLvl-net/worlds/blob/4.5.1/plugin/src/main/java/net/thenextlvl/worlds/view/FoliaLevelView.java)
+
+**Dateisystem.** Exklusive Ordnererstellung und Hardlinks im selben Dateisystem sichern freie Namen und die Identität der Einträge. Jeder Rename belegt einen freien Platz im versuchseigenen Ordner mit `ATOMIC_MOVE`. Ein nichtatomarer Fallback oder `REPLACE_EXISTING` würde die Erhaltung eines zwischenzeitlich belegten Ziels gefährden. Fehlende Unterstützung führt zum Abbruch. SHA-256, Dateiattribute, reale Pfade und `isSameFile` ergänzen sich. Auf Unix werden bereits vor dem Staging mehrfach verlinkte Originale abgelehnt. Der Windows-Provider stellt die Linkanzahl über diese API nicht bereit. Bestehende Dateien werden auf keiner Plattform zum Schreiben geöffnet.
+
+**Dauerhaftigkeit.** Die vorbereitete Datei wird mit `FileChannel.force(true)` synchronisiert. Für Verzeichniseinträge nutzt Farmwelt die bestehende Verzeichnissynchronisation. Der Windows-Provider unterstützt diese über NIO nicht. Mehrere Namen, Welt, Journal und Zeitplan lassen sich auf keiner Plattform als gemeinsame Transaktion speichern. Ein Prozessabbruch kann jeden Zwischenstand hinterlassen. Selbst ein erfolgreicher Flush ist nur so belastbar wie Dateisystem, Datenträger und Cache. Der Baum muss vom Server exklusiv verwaltet werden. Java NIO bietet plattformübergreifend keinen an einen erwarteten Inode gebundenen Rename oder Unlink gegen einen gleichzeitig schreibenden fremden Prozess.
+
+**Abschluss.** Das Reset-Ergebnis wird erst nach der vorhandenen FW-002-Persistenz bestätigt. Im selben Async-Task erhält ausschließlich der Eigentümer des passenden Belegs das Cleanup. Es prüft den global validierten Weltordner, die aktive Datei und die Identität der Versuchsdateien. Ein bereits gespeicherter Reset kann eine gesonderte Cleanup-Warnung haben. Ein fehlgeschlagener Cleanup-Versuch löst keine weitere automatische Löschung aus. Der nächste Stage erkennt die Reste. Bei Post-Reset- oder Speicherfehler erhält die Pipeline kein Cleanup-Recht.
+
 ## ConfigManager
 
 `ConfigManager` ist die zentrale Übersetzung von `config.yml` in laufzeitfreundliche Strukturen.

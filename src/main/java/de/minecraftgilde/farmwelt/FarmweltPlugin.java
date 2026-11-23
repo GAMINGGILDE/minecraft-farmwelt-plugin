@@ -58,6 +58,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        resetScheduler = new FoliaFarmweltScheduler(this);
 
         if (!initializeWorldsIntegration()) {
             return;
@@ -80,7 +81,6 @@ public final class FarmweltPlugin extends JavaPlugin {
         } catch (IOException | InvalidConfigurationException exception) {
             throw new IllegalStateException("Reset-Konfiguration konnte nicht gelesen werden.", exception);
         }
-        resetScheduler = new FoliaFarmweltScheduler(this);
         resetNotificationService = new ResetNotificationService(
                 resetService,
                 new ResetWarningTracker(),
@@ -163,6 +163,7 @@ public final class FarmweltPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (resetEngine != null) resetEngine.stop();
+        if (worldsLifecycleService != null) worldsLifecycleService.stop();
         if (startupResetCoordinator != null) {
             startupResetCoordinator.stop();
         }
@@ -201,7 +202,7 @@ public final class FarmweltPlugin extends JavaPlugin {
 
     private boolean initializeWorldsIntegration() {
         try {
-            worldsLifecycleService = WorldsFarmworldLifecycleService.connect(getLogger());
+            worldsLifecycleService = WorldsFarmworldLifecycleService.connect(getLogger(), resetScheduler);
             getServer().getPluginManager().registerEvents(worldsLifecycleService, this);
             getLogger().info("Worlds " + worldsLifecycleService.pluginVersion() + " erkannt.");
             getLogger().info("Worlds-Integration initialisiert. Reset-Lifecycle wird über Worlds ausgeführt.");
